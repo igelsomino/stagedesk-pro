@@ -168,6 +168,8 @@ const demoMedia = (): MediaAsset[] => [
 
 const demoScriptContent = (projectName: string) => `# ${projectName}
 
+> **AVVISO IMPORTANTE**: questo è un file di esempio e non è registrato sul dispositivo. Per lavorare con dati reali crea un nuovo progetto dall'apposito pulsante.
+
 ## ATTO I - SCENA XV
 
 ::regia{id="note-characters" type="characters" color="blue" title="Personaggi in scena" sceneId="${sceneId}" anchorId="note-characters"}
@@ -253,6 +255,52 @@ Colpo secco da usare come effetto sonoro manuale.
 ::
 `
 
+const blankScriptContent = (projectName: string) => `# ${projectName}
+
+## Atto 1
+
+### Scena 1
+
+**PERSONAGGIO 1**: Battuta 1
+`
+
+const emptyMedia = (): MediaAsset[] => [
+  {
+    id: crypto.randomUUID(),
+    name: 'suoni',
+    path: '/media/suoni',
+    kind: 'folder',
+    children: [],
+  },
+  {
+    id: crypto.randomUUID(),
+    name: 'musiche',
+    path: '/media/musiche',
+    kind: 'folder',
+    children: [],
+  },
+  {
+    id: crypto.randomUUID(),
+    name: 'immagini',
+    path: '/media/immagini',
+    kind: 'folder',
+    children: [],
+  },
+  {
+    id: crypto.randomUUID(),
+    name: 'video',
+    path: '/media/video',
+    kind: 'folder',
+    children: [],
+  },
+]
+
+const baseSettings = {
+  theme: 'dark' as const,
+  autosave: true,
+  fullscreenCueReplayPolicy: 'forward-only' as const,
+}
+
 export const defaultProject = (name = 'La locandiera'): Project => ({
   id: crypto.randomUUID(),
   name,
@@ -267,11 +315,7 @@ export const defaultProject = (name = 'La locandiera'): Project => ({
     { id: 'servitore', name: 'SERVITORE' },
   ],
   noteTypes,
-  settings: {
-    theme: 'dark',
-    autosave: true,
-    fullscreenCueReplayPolicy: 'forward-only',
-  },
+  settings: baseSettings,
   scripts: [
     {
       id: crypto.randomUUID(),
@@ -292,4 +336,39 @@ export const defaultProject = (name = 'La locandiera'): Project => ({
   media: demoMedia(),
   notes: demoNotes(),
   cues: demoCues(),
+})
+
+export const blankProject = (name = 'Nuovo progetto'): Project => ({
+  id: crypto.randomUUID(),
+  name,
+  rootPath: '/progetto',
+  author: '',
+  language: 'it',
+  actorsCount: 0,
+  estimatedDuration: '',
+  characters: [
+    { id: 'personaggio-1', name: 'PERSONAGGIO 1' },
+  ],
+  noteTypes,
+  settings: baseSettings,
+  scripts: [
+    {
+      id: crypto.randomUUID(),
+      name: 'copione',
+      path: '/copione',
+      kind: 'folder',
+      children: [
+        {
+          id: crypto.randomUUID(),
+          name: 'atto-1.md',
+          path: filePath,
+          kind: 'markdown',
+          content: blankScriptContent(name),
+        },
+      ],
+    },
+  ],
+  media: emptyMedia(),
+  notes: [],
+  cues: [],
 })

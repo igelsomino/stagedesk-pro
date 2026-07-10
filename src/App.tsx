@@ -1,5 +1,6 @@
 import type { Editor } from '@tiptap/core'
-import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
+import { DOMParser as ProseMirrorDOMParser, type Node as ProseMirrorNode } from '@tiptap/pm/model'
+import type { EditorView } from '@tiptap/pm/view'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -51,18 +52,19 @@ import {
   LogOut,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ChangeEvent, Dispatch, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MutableRefObject, SetStateAction } from 'react'
 import './App.css'
 import { appDocumentContent, fetchAppDocumentContent, getAppDocument, isAppDocumentPath } from './appDocs'
 import { useAuth } from './authContext'
 import type { DirectorNote, MediaAsset, MediaCue, NotePanelMode, NoteType, Project, ProjectTreeNode } from './domain'
-import { defaultProject } from './defaultProject'
+import { blankProject } from './defaultProject'
 import {
   cleanScriptMarkdown,
   cueLabel,
   findMarkdownNode,
   flattenMarkdownFiles,
+  hasMarkdownTable,
   markdownToHtml,
   parseScriptBlocks,
   serializeExtendedMarkdown,
@@ -81,6 +83,7 @@ const MEDIA_PATH_DND_PREFIX = 'stagedesk-media:'
 const CUE_ID_DND_PREFIX = 'stagedesk-cue:'
 const NOTE_ID_DND_PREFIX = 'stagedesk-note:'
 const INSTALLED_UPDATE_VERSION_KEY = 'stagedesk-installed-update-version'
+const STAGEDESK_SITE_URL = 'https://stagedesk-pro.aigconsulting.it'
 type EditorCueState = 'playing' | 'paused' | 'stopped'
 type EditorCueStateWindow = Window & {
   __STAGEDESK_EDITOR_CUE_STATE__?: { id: string; state: EditorCueState }
@@ -169,8 +172,11 @@ function App() {
     () => findTreeNode(project.media, selectedMediaPath),
     [project.media, selectedMediaPath],
   )
-  const activeMarkdown = activeAppDocument
+  const activeAppDocumentMarkdown = activeAppDocument
     ? appDocumentContent(activeAppDocument, installedUpdateVersion, remoteAppDocuments[activeAppDocument.path])
+    : ''
+  const activeMarkdown = activeAppDocument
+    ? activeAppDocumentMarkdown
     : drafts[activePath] ?? activeFile?.content ?? ''
   const activeCueRefIds = useMemo(
     () => uniqueValues([...markerRefIdsFromMarkdown(activeMarkdown, 'cue'), ...editorCueRefIds]),
@@ -534,7 +540,20 @@ function App() {
         class: 'script-editor',
         'aria-label': 'Editor WYSIWYG del copione',
       },
+      handlePaste(view, event) {
+        const markdown = event.clipboardData?.getData('text/plain') ?? ''
+        if (!markdown || !hasMarkdownTable(markdown)) return false
+
+        event.preventDefault()
+        insertMarkdownAtSelection(view, markdown)
+        return true
+      },
       handleKeyDown(view, event) {
+        if (event.key === 'Enter' && !event.shiftKey && convertMarkdownTableAroundSelection(view)) {
+          event.preventDefault()
+          return true
+        }
+
         if (event.key !== 'Backspace' && event.key !== 'Delete') return false
 
         const selection = view.state.selection
@@ -637,6 +656,37 @@ function App() {
   const editorEditingDisabled = !editor || Boolean(activeAppDocument)
   const activeDocumentTitle = activeFile?.name ?? activeAppDocument?.title
 
+  const draftsWithCurrentEditorContent = useCallback(() => {
+    const currentDrafts = { ...draftsRef.current }
+    if (editor && activeFilePathRef.current && !activeAppDocument) {
+      currentDrafts[activeFilePathRef.current] = editorJsonToMarkdown(editor.getJSON())
+    }
+    return currentDrafts
+  }, [activeAppDocument, editor])
+
+  const persistDraftsNow = useCallback(async () => {
+    const currentDrafts = draftsWithCurrentEditorContent()
+    if (Object.keys(currentDrafts).length === 0) return projectRef.current
+
+    const nextProject = applyDraftsToProject(projectRef.current, currentDrafts)
+    projectRef.current = nextProject
+    projectScriptsRef.current = nextProject.scripts
+    setProject(nextProject)
+    setDrafts({})
+    storage.save(nextProject)
+
+    if (desktopStorageReady) {
+      try {
+        const path = await storage.saveProjectFolder(nextProject)
+        if (path) setStorageStatus(`Cartella progetto salvata: ${compactPath(path)}`)
+      } catch (error) {
+        setStorageStatus(`Salvataggio progetto non riuscito: ${String(error)}`)
+      }
+    }
+
+    return nextProject
+  }, [desktopStorageReady, draftsWithCurrentEditorContent])
+
   const setCurrentBlockAsParagraph = () => {
     if (!editor) return
     const position = lastEditorSelectionRef.current
@@ -696,7 +746,7 @@ function App() {
     if (!editor) return
 
     if (activeAppDocument) {
-      editor.commands.setContent(markdownToHtml(activeMarkdown), { emitUpdate: false })
+      editor.commands.setContent(markdownToHtml(activeAppDocumentMarkdown), { emitUpdate: false })
       syncToolbarState(editor, setToolbarState)
       syncOutlineState(editor, setActiveOutline, setActiveOutlineId)
       syncBookmarkState(editor, setActiveBookmarks, setActiveBookmarkId)
@@ -723,7 +773,7 @@ function App() {
     syncOutlineState(editor, setActiveOutline, setActiveOutlineId)
     syncBookmarkState(editor, setActiveBookmarks, setActiveBookmarkId)
     syncEditorCueRefs(editor, setEditorCueRefIds)
-  }, [activeAppDocument, activeFilePath, activeMarkdown, editor, project.id])
+  }, [activeAppDocument, activeAppDocumentMarkdown, activeFilePath, editor, project.id])
 
   useEffect(() => {
     if (!editor || !activeFilePath) return
@@ -770,21 +820,7 @@ function App() {
     if (!project.settings.autosave) return
 
     const flushDrafts = () => {
-      const currentDrafts = draftsRef.current
-      if (Object.keys(currentDrafts).length === 0) return
-
-      const nextProject = applyDraftsToProject(projectRef.current, currentDrafts)
-      projectRef.current = nextProject
-      projectScriptsRef.current = nextProject.scripts
-      setProject(nextProject)
-      setDrafts({})
-      storage.save(nextProject)
-      if (!desktopStorageReady) return
-      storage.saveProjectFolder(nextProject)
-        .then((path) => {
-          if (path) setStorageStatus(`Cartella progetto salvata: ${compactPath(path)}`)
-        })
-        .catch((error) => setStorageStatus(`Salvataggio progetto non riuscito: ${String(error)}`))
+      void persistDraftsNow()
     }
 
     const flushWhenHidden = () => {
@@ -792,12 +828,16 @@ function App() {
     }
 
     window.addEventListener('blur', flushDrafts)
+    window.addEventListener('pagehide', flushDrafts)
+    window.addEventListener('beforeunload', flushDrafts)
     document.addEventListener('visibilitychange', flushWhenHidden)
     return () => {
       window.removeEventListener('blur', flushDrafts)
+      window.removeEventListener('pagehide', flushDrafts)
+      window.removeEventListener('beforeunload', flushDrafts)
       document.removeEventListener('visibilitychange', flushWhenHidden)
     }
-  }, [desktopStorageReady, project.settings.autosave])
+  }, [persistDraftsNow, project.settings.autosave])
 
   useEffect(() => {
     if (!project.settings.autosave) return
@@ -972,7 +1012,7 @@ function App() {
   }
 
   const createProjectWithName = (name: string) => {
-    const nextProject = defaultProject(name)
+    const nextProject = blankProject(name)
     storage.createProjectFolder(nextProject)
       .then((path) => {
         if (!path) {
@@ -1646,6 +1686,7 @@ function App() {
   const exportActiveFile = async (mode: 'complete' | 'clean') => {
     try {
       const markdown = buildActiveExtendedMarkdown() ?? ''
+      await persistDraftsNow()
       const baseName = stripMarkdownExtension(activeFile?.name ?? 'copione')
       const fileName = mode === 'clean' ? `${baseName}.pulito.pdf` : `${baseName}.completo.pdf`
       const title = mode === 'clean' ? `${baseName} - pulito` : `${baseName} - completo`
@@ -1659,6 +1700,7 @@ function App() {
 
   const openExportResult = async () => {
     if (!exportResult) return
+    await persistDraftsNow()
     if (exportResult.filePath && isTauriRuntime()) {
       try {
         const { invoke } = await import('@tauri-apps/api/core')
@@ -1668,7 +1710,7 @@ function App() {
       }
       return
     }
-    if (exportResult.objectUrl) window.open(exportResult.objectUrl, '_blank', 'noopener,noreferrer')
+    if (exportResult.objectUrl) openObjectUrlInNewTab(exportResult.objectUrl)
   }
 
   const submitScriptDialog = () => {
@@ -3071,6 +3113,49 @@ const linkFromClickTarget = (target: EventTarget | null) => {
   return link.href
 }
 
+const insertMarkdownAtSelection = (view: EditorView, markdown: string) => {
+  const container = document.createElement('div')
+  container.innerHTML = markdownToHtml(markdown)
+  const slice = ProseMirrorDOMParser.fromSchema(view.state.schema).parseSlice(container)
+  view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView())
+}
+
+const convertMarkdownTableAroundSelection = (view: EditorView) => {
+  const paragraphs: { node: ProseMirrorNode; position: number; text: string }[] = []
+
+  view.state.doc.descendants((node, position) => {
+    if (node.type.name === 'paragraph') {
+      paragraphs.push({ node, position, text: node.textContent.trim() })
+      return false
+    }
+    return true
+  })
+
+  const selectionFrom = view.state.selection.from
+  const currentIndex = paragraphs.findIndex(
+    ({ node, position }) => selectionFrom >= position && selectionFrom <= position + node.nodeSize,
+  )
+  if (currentIndex < 0 || !isPotentialMarkdownTableLine(paragraphs[currentIndex].text)) return false
+
+  let startIndex = currentIndex
+  let endIndex = currentIndex
+  while (startIndex > 0 && isPotentialMarkdownTableLine(paragraphs[startIndex - 1].text)) startIndex -= 1
+  while (endIndex < paragraphs.length - 1 && isPotentialMarkdownTableLine(paragraphs[endIndex + 1].text)) endIndex += 1
+
+  const markdown = paragraphs.slice(startIndex, endIndex + 1).map((paragraph) => paragraph.text).join('\n')
+  if (!hasMarkdownTable(markdown)) return false
+
+  const container = document.createElement('div')
+  container.innerHTML = markdownToHtml(markdown)
+  const slice = ProseMirrorDOMParser.fromSchema(view.state.schema).parseSlice(container)
+  const from = paragraphs[startIndex].position
+  const to = paragraphs[endIndex].position + paragraphs[endIndex].node.nodeSize
+  view.dispatch(view.state.tr.replaceRange(from, to, slice).scrollIntoView())
+  return true
+}
+
+const isPotentialMarkdownTableLine = (text: string) => text.includes('|') && text.trim().length > 0
+
 const openExternalLink = async (href: string) => {
   const url = normalizedExternalUrl(href)
   if (!url) throw new Error('collegamento non valido')
@@ -3082,6 +3167,16 @@ const openExternalLink = async (href: string) => {
   }
 
   window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+const openObjectUrlInNewTab = (url: string) => {
+  const link = document.createElement('a')
+  link.href = url
+  link.target = '_blank'
+  link.rel = 'noopener noreferrer'
+  document.body.append(link)
+  link.click()
+  link.remove()
 }
 
 const normalizedExternalUrl = (href: string) => {
@@ -4263,9 +4358,10 @@ const downloadPdf = async (name: string, markdown: string, title: string, mode: 
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
   const marginX = 56
   const marginTop = 58
-  const marginBottom = 54
+  const marginBottom = 76
   const maxWidth = doc.internal.pageSize.getWidth() - (marginX * 2)
   const pageBottom = doc.internal.pageSize.getHeight() - marginBottom
+  const generatedAt = new Date()
   let y = marginTop
 
   doc.setProperties({ title })
@@ -4328,6 +4424,8 @@ const downloadPdf = async (name: string, markdown: string, title: string, mode: 
     y += 4
   }
 
+  stampPdfPages(doc, marginX, generatedAt)
+
   const blob = doc.output('blob') as Blob
 
   if (isTauriRuntime()) {
@@ -4371,6 +4469,37 @@ const pdfHeadingStyle = (level: number) => {
   if (level === 3) return { size: 13, lineHeight: 18, after: 7, color: '#374151' }
   return { size: 11, lineHeight: 16, after: 5, color: '#4b5563' }
 }
+
+const stampPdfPages = (doc: JsPDF, marginX: number, generatedAt: Date) => {
+  const pageCount = doc.getNumberOfPages()
+  const pageWidth = doc.internal.pageSize.getWidth()
+  const pageHeight = doc.internal.pageSize.getHeight()
+  const stampY = pageHeight - 34
+  const stampText = `Generato il ${formatPdfGeneratedAt(generatedAt)} con StageDesk Pro`
+  const separator = ' - '
+
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+    doc.setPage(pageNumber)
+    doc.setDrawColor(226, 232, 240)
+    doc.line(marginX, stampY - 16, pageWidth - marginX, stampY - 16)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8.5)
+    doc.setTextColor('#64748b')
+    doc.text(stampText, marginX, stampY)
+    const separatorX = marginX + doc.getTextWidth(stampText)
+    doc.text(separator, separatorX, stampY)
+    const linkX = separatorX + doc.getTextWidth(separator)
+    doc.setTextColor('#2563eb')
+    doc.text(STAGEDESK_SITE_URL, linkX, stampY)
+    doc.link(linkX, stampY - 8, doc.getTextWidth(STAGEDESK_SITE_URL), 10, { url: STAGEDESK_SITE_URL })
+  }
+}
+
+const formatPdfGeneratedAt = (date: Date) =>
+  new Intl.DateTimeFormat('it-IT', {
+    dateStyle: 'short',
+    timeStyle: 'medium',
+  }).format(date)
 
 const drawPdfNoteBox = (
   doc: JsPDF,

@@ -107,6 +107,7 @@ export type ScriptBlock = {
     | 'media'
     | 'section'
     | 'table'
+    | 'quote'
   text?: string
   characterId?: string
   noteId?: string

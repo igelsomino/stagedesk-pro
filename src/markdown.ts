@@ -220,6 +220,17 @@ export const parseScriptBlocks = (markdown: string): ScriptBlock[] => {
       continue
     }
 
+    if (/^> ?/.test(text)) {
+      const quoteLines: string[] = []
+      while (index < lines.length && /^> ?/.test(stripBookmarkMarkers(lines[index].trim()))) {
+        quoteLines.push(stripBookmarkMarkers(lines[index].trim()).replace(/^> ?/, '').trim())
+        index += 1
+      }
+      index -= 1
+      blocks.push({ id: makeId('quote', index), type: 'quote', text: quoteLines.join('\n'), sceneId, position: position++ })
+      continue
+    }
+
     if (/^\[NOTA:/.test(text)) {
       blocks.push({ id: makeId('note', index), type: 'note', text, sceneId, position: position++ })
       continue
@@ -306,7 +317,15 @@ const makeId = (prefix: string, index: number) => `${prefix}-${index + 1}`
 const isMarkdownTableStart = (lines: string[], index: number) =>
   isMarkdownTableRow(lines[index]) && isMarkdownTableSeparator(lines[index + 1] ?? '')
 
-const isMarkdownTableRow = (line = '') => /^\s*\|.+\|\s*$/.test(line)
+export const hasMarkdownTable = (markdown: string) => {
+  const lines = markdown.split('\n')
+  return lines.some((_, index) => isMarkdownTableStart(lines, index))
+}
+
+const isMarkdownTableRow = (line = '') => {
+  const cells = splitMarkdownTableRow(line)
+  return cells.length > 1 && cells.some(Boolean)
+}
 
 const isMarkdownTableSeparator = (line = '') =>
   /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line)

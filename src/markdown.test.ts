@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DirectorNote, MediaCue } from './domain'
-import { cleanScriptMarkdown, markdownToHtml, parseScriptBlocks, serializeExtendedMarkdown } from './markdown'
+import { cleanScriptMarkdown, hasMarkdownTable, markdownToHtml, parseScriptBlocks, serializeExtendedMarkdown } from './markdown'
 
 const note = (patch: Partial<DirectorNote> = {}): DirectorNote => ({
   id: 'note-001',
@@ -88,6 +88,21 @@ describe('markdown chip rendering', () => {
     expect(html).toContain('<table>')
     expect(html).toContain('<th><p>Personaggio</p></th>')
     expect(html).toContain('<td><p>REGISTA</p></td>')
+  })
+
+  it('renders github markdown tables without leading and trailing pipes', () => {
+    const markdown = [
+      'Personaggio | Attore | Presenza',
+      '--- | --- | ---',
+      'REGISTA | Mario Rossi | In scena',
+      'ATTORE | Laura Bianchi | In scena',
+    ].join('\n')
+    const html = markdownToHtml(markdown)
+
+    expect(hasMarkdownTable(markdown)).toBe(true)
+    expect(html).toContain('<table>')
+    expect(html).toContain('<th><p>Personaggio</p></th>')
+    expect(html).toContain('<td><p>Laura Bianchi</p></td>')
   })
 
   it('renders markdown links as clickable anchors', () => {
@@ -204,5 +219,12 @@ describe('markdown serialization', () => {
       characterId: 'mirandolina',
       text: '**MIRANDOLINA**: A pranzo, che cosa comanda?',
     })
+  })
+
+  it('parses blockquotes as quote blocks outside fullscreen dialogue flow', () => {
+    const blocks = parseScriptBlocks('> Citazione non da proiettare\n**MIRANDOLINA**: Battuta')
+
+    expect(blocks.map((block) => block.type)).toEqual(['quote', 'dialogue'])
+    expect(blocks[0]).toMatchObject({ text: 'Citazione non da proiettare' })
   })
 })
