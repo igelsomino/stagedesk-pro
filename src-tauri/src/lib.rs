@@ -91,12 +91,14 @@ fn create_project_folder(
     let project_path = unique_project_path(&root, &project_name);
     fs::create_dir_all(&project_path).map_err(|error| error.to_string())?;
     write_project(&project_path, &project_json, Some(&app))?;
+    write_last_project_path(&app, &project_path)?;
     *state.path.lock().map_err(|error| error.to_string())? = Some(project_path.clone());
     Ok(project_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
 fn open_project_folder(
+    app: AppHandle,
     state: State<CurrentProject>,
     project_path: Option<String>,
 ) -> Result<ProjectOpenResult, String> {
@@ -104,11 +106,32 @@ fn open_project_folder(
         .map(PathBuf::from)
         .ok_or_else(|| "Percorso progetto mancante".to_string())?;
     let project = read_project(&path)?;
+    write_last_project_path(&app, &path)?;
     *state.path.lock().map_err(|error| error.to_string())? = Some(path.clone());
     Ok(ProjectOpenResult {
         project,
         path: path.to_string_lossy().to_string(),
     })
+}
+
+#[tauri::command]
+fn open_last_project_folder(
+    app: AppHandle,
+    state: State<CurrentProject>,
+) -> Result<Option<ProjectOpenResult>, String> {
+    let Some(path) = read_last_project_path(&app)? else {
+        return Ok(None);
+    };
+    if !path.join(PROJECT_FILE_NAME).exists() {
+        return Ok(None);
+    }
+
+    let project = read_project(&path)?;
+    *state.path.lock().map_err(|error| error.to_string())? = Some(path.clone());
+    Ok(Some(ProjectOpenResult {
+        project,
+        path: path.to_string_lossy().to_string(),
+    }))
 }
 
 #[tauri::command]
@@ -568,6 +591,36 @@ fn relative_project_path(path: &str) -> PathBuf {
         })
 }
 
+fn last_project_file_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(&app_dir).map_err(|error| error.to_string())?;
+    Ok(app_dir.join("last-project.txt"))
+}
+
+fn write_last_project_path(app: &AppHandle, path: &Path) -> Result<(), String> {
+    fs::write(
+        last_project_file_path(app)?,
+        path.to_string_lossy().as_bytes(),
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn read_last_project_path(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    let path_file = last_project_file_path(app)?;
+    if !path_file.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(path_file).map_err(|error| error.to_string())?;
+    let path = content.trim();
+    if path.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(PathBuf::from(path)))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
@@ -591,6 +644,7 @@ pub fn run() {
             list_project_folders,
             create_project_folder,
             open_project_folder,
+            open_last_project_folder,
             save_project_folder,
             load_project_json,
             save_project_json,

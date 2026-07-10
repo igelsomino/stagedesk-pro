@@ -11,6 +11,7 @@ import {
   BookOpen,
   Bookmark,
   Bold,
+  AlertTriangle,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -85,15 +86,29 @@ const CUE_ID_DND_PREFIX = 'stagedesk-cue:'
 const NOTE_ID_DND_PREFIX = 'stagedesk-note:'
 const INSTALLED_UPDATE_VERSION_KEY = 'stagedesk-installed-update-version'
 const STAGEDESK_SITE_URL = 'https://stagedesk-pro.aigconsulting.it'
+const STAGEDESK_DRAG_STATE_KEY = '__STAGEDESK_DRAG_PAYLOAD__'
 type EditorCueState = 'playing' | 'paused' | 'stopped'
 type EditorCueStateWindow = Window & {
   __STAGEDESK_EDITOR_CUE_STATE__?: { id: string; state: EditorCueState }
+}
+type StagedeskDragPayload = { type: string; value: string; startedAt: number }
+type StagedeskDragWindow = Window & {
+  __STAGEDESK_DRAG_PAYLOAD__?: StagedeskDragPayload
 }
 type ExportResult = {
   fileName: string
   location: string
   objectUrl?: string
   filePath?: string
+}
+type ScriptValidationIssue = {
+  id: string
+  line: number
+  lineText: string
+  type: string
+  message: string
+  highlight: string
+  severity: 'error' | 'warning'
 }
 const tableExtensions = TableKit.configure({
   table: {
@@ -140,8 +155,11 @@ function App() {
   const [installedUpdateVersion, setInstalledUpdateVersion] = useState('')
   const [remoteAppDocuments, setRemoteAppDocuments] = useState<Record<string, string>>({})
   const [desktopStorageReady, setDesktopStorageReady] = useState(false)
+  const [startupProjectReady, setStartupProjectReady] = useState(false)
+  const [scriptValidationIssues, setScriptValidationIssues] = useState<ScriptValidationIssue[]>([])
   const updateCheckStartedRef = useRef(false)
   const updateInstallInProgressRef = useRef(false)
+  const startupProjectLoadedRef = useRef(false)
   const toastTimeoutRef = useRef<number | undefined>(undefined)
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const [scriptDialog, setScriptDialog] = useState<ScriptActionDialog | undefined>()
@@ -236,11 +254,11 @@ function App() {
   }, [])
 
   const saveProjectFolderQueued = useCallback((nextProject: Project) => {
-    if (!desktopStorageReady) return Promise.resolve<string | undefined>(undefined)
+    if (!desktopStorageReady || !startupProjectReady) return Promise.resolve<string | undefined>(undefined)
     const saveTask = saveQueueRef.current.then(() => storage.saveProjectFolder(nextProject))
     saveQueueRef.current = saveTask.catch(() => undefined)
     return saveTask
-  }, [desktopStorageReady])
+  }, [desktopStorageReady, startupProjectReady])
 
   useEffect(() => {
     chipInspectorRef.current = { notes: fileNotes, cues: fileCues }
@@ -288,6 +306,10 @@ function App() {
   useEffect(() => {
     draftsRef.current = drafts
   }, [drafts])
+
+  useEffect(() => {
+    setScriptValidationIssues([])
+  }, [activePath, project.id])
 
   useEffect(() => {
     const updateNoteFromEditor = (event: Event) => {
@@ -504,7 +526,7 @@ function App() {
       try {
         const path = await storage.projectFolderPath()
         if (!cancelled) {
-          setStorageStatus(path ? `Cartella progetto: ${compactPath(path)}` : 'Nessuna cartella progetto aperta')
+          setStorageStatus(path ? `Cartella progetto: ${compactPath(path)}` : 'Apertura ultimo progetto...')
         }
       } catch (error) {
         if (!cancelled) setStorageStatus(`Storage progetto non disponibile: ${String(error)}`)
@@ -595,6 +617,7 @@ function App() {
 
           event.preventDefault()
           if (!moveEditorNode(view, match, dropPosition)) return true
+          clearGlobalDragPayload()
           setSelectedNoteId(note.id)
           showStatus(`Nota spostata: ${note.title}`)
           return true
@@ -608,6 +631,7 @@ function App() {
           if (!moveCueChip(view, cue.id, dropPosition)) {
             cueDropActionsRef.current.insertExistingCue(cue, dropPosition)
           }
+          clearGlobalDragPayload()
           setSelectedCueId(cue.id)
           showStatus(`Cue spostato: ${cue.title || cue.src}`)
           return true
@@ -619,6 +643,7 @@ function App() {
           if (!asset || asset.kind === 'folder') return false
           event.preventDefault()
           cueDropActionsRef.current.createCueFromAsset(asset, dropPosition)
+          clearGlobalDragPayload()
           return true
         }
 
@@ -715,6 +740,12 @@ function App() {
     if (!editor || item.position === undefined) return
     setActiveBookmarkId(item.id)
     editor.chain().focus().setNodeSelection(item.position).scrollIntoView().run()
+  }
+
+  const focusValidationIssue = (issue: ScriptValidationIssue) => {
+    if (!editor) return
+    const position = editorPositionForValidationIssue(editor, issue)
+    editor.chain().focus(position).setTextSelection(position).scrollIntoView().run()
   }
 
   useEffect(() => {
@@ -951,6 +982,21 @@ function App() {
       .catch((error) => setStorageStatus(`Salvataggio progetto non riuscito: ${String(error)}`))
   }
 
+  const startFullscreenWithValidation = () => {
+    if (!editor || activeAppDocument) return
+    const markdown = editorJsonToMarkdown(editor.getJSON())
+    const issues = validateScriptForFullscreen(markdown, projectRef.current)
+    setScriptValidationIssues(issues)
+
+    if (issues.length > 0) {
+      showStatus(`${issues.length} anomalie rilevate: correggi il copione prima del fullscreen`, 8000)
+      return
+    }
+
+    setFullscreenIndex(fullscreenIndexAtEditorPosition(editor, performanceBlocks))
+    setFullscreen(true)
+  }
+
   const activateProject = (nextProject: typeof project) => {
     nextProject = normalizeProject(nextProject)
     const nextPath = flattenMarkdownFiles(nextProject.scripts)[0]?.path ?? ''
@@ -968,6 +1014,33 @@ function App() {
     setFullscreenIndex(0)
     setExecutedCueIds([])
   }
+
+  useEffect(() => {
+    if (!desktopStorageReady || startupProjectLoadedRef.current) return
+    startupProjectLoadedRef.current = true
+    let cancelled = false
+
+    storage.openLastProjectFolder()
+      .then((opened) => {
+        if (cancelled) return
+        if (opened?.project && isProject(opened.project)) {
+          activateProject(opened.project)
+          setStorageStatus(`Ultimo progetto aperto: ${compactPath(opened.path)}`)
+          return
+        }
+        setStorageStatus('Nessuna cartella progetto aperta')
+      })
+      .catch((error) => {
+        if (!cancelled) setStorageStatus(`Apertura ultimo progetto non riuscita: ${String(error)}`)
+      })
+      .finally(() => {
+        if (!cancelled) setStartupProjectReady(true)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [desktopStorageReady])
 
   const scriptPathHasUnsavedChanges = (path: string) =>
     markdownFiles.some((file) => isPathInside(file.path, path) && file.dirty) ||
@@ -1862,10 +1935,8 @@ function App() {
             className="topbar-icon-button primary"
             title="Fullscreen"
             aria-label="Fullscreen"
-            onClick={() => {
-              setFullscreenIndex(fullscreenIndexAtEditorPosition(editor, performanceBlocks))
-              setFullscreen(true)
-            }}
+            onClick={startFullscreenWithValidation}
+            disabled={editorEditingDisabled}
           >
             <Play size={16} />
           </button>
@@ -2072,6 +2143,7 @@ function App() {
                   event.currentTarget.classList.remove('drop-target')
                   if (!sourcePath) return
                   event.preventDefault()
+                  clearGlobalDragPayload()
                   void moveMediaNode(sourcePath, '/media')
                 }}
               >
@@ -2411,6 +2483,32 @@ function App() {
           <div className="editor-scroll-area">
             <EditorContent editor={editor} />
           </div>
+          {scriptValidationIssues.length > 0 ? (
+            <section className="script-debugger" aria-label="Controllo copione">
+              <div className="script-debugger-header">
+                <AlertTriangle size={16} />
+                <strong>Controllo copione</strong>
+                <span>{scriptValidationIssues.length} anomalie</span>
+              </div>
+              <div className="script-debugger-list">
+                {scriptValidationIssues.map((issue) => (
+                  <button
+                    type="button"
+                    key={issue.id}
+                    className={`script-debugger-item ${issue.severity}`}
+                    onClick={() => focusValidationIssue(issue)}
+                  >
+                    <span className="script-debugger-line">Riga {issue.line}</span>
+                    <span className="script-debugger-type">{issue.type}</span>
+                    <span className="script-debugger-message">{issue.message}</span>
+                    <span className="script-debugger-source">
+                      <HighlightedIssueLine line={issue.lineText} highlight={issue.highlight} />
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
           <audio ref={editorAudioRef} className="sr-only" />
         </section>
 
@@ -2437,6 +2535,7 @@ function App() {
                   event.dataTransfer.effectAllowed = 'move'
                   writeDragPayload(event.dataTransfer, CUE_ID_DND_TYPE, CUE_ID_DND_PREFIX, cue.id)
                 }}
+                onDragEnd={clearGlobalDragPayload}
                 onClick={() => selectCueFromInspector(cue)}
               >
                 <span className="note-dot blue" />
@@ -2708,6 +2807,19 @@ function ProjectPickerModal({
   )
 }
 
+function HighlightedIssueLine({ line, highlight }: { line: string; highlight: string }) {
+  if (!highlight) return <>{line || 'Riga vuota'}</>
+  const index = line.toLowerCase().indexOf(highlight.toLowerCase())
+  if (index < 0) return <>{line}</>
+  return (
+    <>
+      {line.slice(0, index)}
+      <mark>{line.slice(index, index + highlight.length)}</mark>
+      {line.slice(index + highlight.length)}
+    </>
+  )
+}
+
 function DocumentOutlineTree({
   items,
   activeItemId,
@@ -2873,6 +2985,7 @@ function MediaExplorerTree({
                 event.dataTransfer.effectAllowed = 'copyMove'
                 writeDragPayload(event.dataTransfer, MEDIA_PATH_DND_TYPE, MEDIA_PATH_DND_PREFIX, asset.path)
               }}
+              onDragEnd={clearGlobalDragPayload}
               onDragOver={(event: ReactDragEvent<HTMLDivElement>) => {
                 if (!isFolder) return
                 if (!hasDragPayload(event.dataTransfer, MEDIA_PATH_DND_TYPE)) return
@@ -2891,6 +3004,7 @@ function MediaExplorerTree({
                 event.stopPropagation()
                 event.currentTarget.classList.remove('drop-target')
                 if (sourcePath === asset.path || parentPath(sourcePath) === asset.path) return
+                clearGlobalDragPayload()
                 onMove(sourcePath, asset.path)
               }}
               onClick={() => {
@@ -3442,16 +3556,39 @@ const readDragPayload = (dataTransfer: DataTransfer, type: string, prefix: strin
   if (direct) return direct
 
   const text = dataTransfer.getData('text/plain')
-  return text.startsWith(prefix) ? text.slice(prefix.length) : ''
+  if (text.startsWith(prefix)) return text.slice(prefix.length)
+
+  const fallback = readGlobalDragPayload(type)
+  return fallback ?? ''
 }
 
 const writeDragPayload = (dataTransfer: DataTransfer, type: string, prefix: string, value: string) => {
-  dataTransfer.setData(type, value)
   dataTransfer.setData('text/plain', `${prefix}${value}`)
+  dataTransfer.setData(type, value)
+  writeGlobalDragPayload(type, value)
 }
 
 const hasDragPayload = (dataTransfer: DataTransfer, type: string) =>
-  Array.from(dataTransfer.types).some((item) => item.toLowerCase() === type.toLowerCase() || item === 'text/plain')
+  Array.from(dataTransfer.types).some((item) => item.toLowerCase() === type.toLowerCase() || item === 'text/plain') ||
+  Boolean(readGlobalDragPayload(type))
+
+const writeGlobalDragPayload = (type: string, value: string) => {
+  ;(window as StagedeskDragWindow)[STAGEDESK_DRAG_STATE_KEY] = { type, value, startedAt: Date.now() }
+}
+
+const readGlobalDragPayload = (type: string) => {
+  const payload = (window as StagedeskDragWindow)[STAGEDESK_DRAG_STATE_KEY]
+  if (!payload || payload.type !== type) return undefined
+  if (Date.now() - payload.startedAt > 12000) {
+    clearGlobalDragPayload()
+    return undefined
+  }
+  return payload.value
+}
+
+const clearGlobalDragPayload = () => {
+  delete (window as StagedeskDragWindow)[STAGEDESK_DRAG_STATE_KEY]
+}
 
 const arraysEqual = (left: string[], right: string[]) =>
   left.length === right.length && left.every((value, index) => value === right[index])
@@ -3499,6 +3636,231 @@ const fullscreenIndexAtEditorPosition = (editor: Editor | null, performanceBlock
   })
   return currentIndex
 }
+
+const validateScriptForFullscreen = (markdown: string, project: Project): ScriptValidationIssue[] => {
+  const issues: ScriptValidationIssue[] = []
+  const lines = markdown.split('\n')
+  const knownCharacters = project.characters.map((character) => character.name).filter(Boolean)
+  const seenCharacters: string[] = []
+  let h1Count = 0
+  let inDirective = false
+  let currentSection = ''
+
+  const addIssue = (
+    lineIndex: number,
+    type: string,
+    message: string,
+    highlight: string,
+    severity: ScriptValidationIssue['severity'] = 'error',
+  ) => {
+    issues.push({
+      id: `${lineIndex + 1}-${type}-${issues.length}`,
+      line: lineIndex + 1,
+      lineText: lines[lineIndex] ?? '',
+      type,
+      message,
+      highlight,
+      severity,
+    })
+  }
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index] ?? ''
+    const line = rawLine.trim()
+
+    if (!line) continue
+    if (/^::(regia|media)\{/.test(line)) {
+      inDirective = true
+      continue
+    }
+    if (inDirective) {
+      if (line === '::') inDirective = false
+      continue
+    }
+    if (isMarkdownTableLine(lines, index)) continue
+    if (/^\[NOTA:/.test(line) || /^\[CUE[:\s]/.test(line) || /^\[BOOKMARK:/.test(line)) continue
+    if (/^> ?/.test(line)) continue
+    if (/^-{3,}$/.test(line)) continue
+
+    const heading = line.match(/^(#{1,6})\s+(.+?)\s*#*$/)
+    if (heading) {
+      const level = heading[1].length
+      const title = heading[2].trim()
+      if (level === 1) {
+        currentSection = ''
+        h1Count += 1
+        if (h1Count > 1) {
+          addIssue(index, 'Struttura', 'È presente più di un titolo H1 nel file.', heading[1])
+        }
+      } else if (level === 2) {
+        currentSection = ''
+        if (!/^atto\b/i.test(title)) {
+          addIssue(index, 'Struttura', 'Un titolo H2 deve indicare un atto, ad esempio "## Atto 1".', title)
+        }
+      } else if (level === 3) {
+        currentSection = normalizeSectionTitle(title)
+        if (!/^(scena|personaggi|sinossi)\b/i.test(title)) {
+          addIssue(index, 'Struttura', 'Un titolo H3 deve indicare una scena, la sinossi o la sezione personaggi.', title)
+        }
+        if (/^personaggi\b/i.test(title) && !nextContentStartsTable(lines, index + 1)) {
+          addIssue(index, 'Personaggi', 'La sezione Personaggi dovrebbe essere seguita da una tabella.', title, 'warning')
+        }
+      } else if (level > 3) {
+        addIssue(index, 'Struttura', 'In modalità spettacolo sono previsti H1, H2 e H3: evita livelli inferiori.', heading[1])
+      }
+      continue
+    }
+
+    const dialogue = line.match(/^\*\*([^*:\n]+)\*\*:\s+(.+)$/)
+    if (dialogue) {
+      const character = dialogue[1].trim()
+      const spoken = dialogue[2].trim()
+      if (!spoken) {
+        addIssue(index, 'Battuta', 'La battuta è vuota dopo il nome del personaggio.', rawLine.replace(spoken, '').trim())
+      }
+      const expectedName = closestKnownCharacter(character, [...knownCharacters, ...seenCharacters])
+      if (expectedName && normalizeCharacterName(expectedName) !== normalizeCharacterName(character)) {
+        addIssue(index, 'Personaggio', `Nome personaggio sospetto: forse intendevi "${expectedName}".`, character, 'warning')
+      }
+      if (!seenCharacters.some((name) => normalizeCharacterName(name) === normalizeCharacterName(character))) {
+        seenCharacters.push(character)
+      }
+      continue
+    }
+
+    if (/^\*\*[^*]+\*\*\s+:/.test(line)) {
+      addIssue(index, 'Tipografia', 'Rimuovi lo spazio prima dei due punti: usa "**PERSONAGGIO**: Battuta".', ':')
+      continue
+    }
+    if (/^\*\*[^*]+\*\*:\S/.test(line)) {
+      addIssue(index, 'Tipografia', 'Aggiungi uno spazio dopo i due punti: usa "**PERSONAGGIO**: Battuta".', ':')
+      continue
+    }
+    if (/^\*\*[^*]+:\*\*/.test(line)) {
+      addIssue(index, 'Tipografia', 'I due punti devono stare fuori dal grassetto: "**PERSONAGGIO**: Battuta".', ':**')
+      continue
+    }
+    if (/^[A-ZÀ-Ý0-9 '._-]{2,}\s*:/.test(line)) {
+      addIssue(index, 'Battuta', 'Il nome del personaggio deve essere in grassetto: "**PERSONAGGIO**: Battuta".', line.split(':')[0])
+      continue
+    }
+    if (/^[A-ZÀ-Ý0-9 '._-]{2,}$/.test(line)) {
+      addIssue(index, 'Battuta', 'Evita il nome personaggio su riga separata: usa "**PERSONAGGIO**: Battuta".', line)
+      continue
+    }
+    if (/^[-*]\s+/.test(line) || /^\d+\.\s+/.test(line)) {
+      if (currentSection === 'sinossi') continue
+      addIssue(index, 'Paragrafo', 'Lista non collegata a una nota o a una tabella personaggi.', line.slice(0, 2), 'warning')
+      continue
+    }
+    if (currentSection === 'sinossi') continue
+
+    addIssue(index, 'Paragrafo', 'Paragrafo scollegato: usa una battuta, una nota, una citazione, un cue o una sezione strutturata.', line)
+  }
+
+  if (h1Count === 0 && lines.some((line) => line.trim())) {
+    issues.unshift({
+      id: 'missing-h1',
+      line: 1,
+      lineText: lines[0] ?? '',
+      type: 'Struttura',
+      message: 'Manca un titolo H1 per il copione.',
+      highlight: lines[0] ?? '',
+      severity: 'error',
+    })
+  }
+
+  return issues
+}
+
+const isMarkdownTableLine = (lines: string[], index: number) => {
+  const line = lines[index] ?? ''
+  if (!/^\s*\|/.test(line)) return false
+  if (/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line)) return true
+  return /^\s*\|/.test(lines[index + 1] ?? '') || /^\s*\|/.test(lines[index - 1] ?? '')
+}
+
+const nextContentStartsTable = (lines: string[], startIndex: number) => {
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const line = lines[index]?.trim() ?? ''
+    if (!line) continue
+    return /^\|/.test(line)
+  }
+  return false
+}
+
+const closestKnownCharacter = (character: string, candidates: string[]) => {
+  const normalized = normalizeCharacterName(character)
+  if (!normalized) return undefined
+  let best: { name: string; distance: number } | undefined
+  for (const candidate of candidates) {
+    const candidateNormalized = normalizeCharacterName(candidate)
+    if (!candidateNormalized || candidateNormalized === normalized) continue
+    const distance = levenshteinDistance(normalized, candidateNormalized)
+    const limit = normalized.length <= 6 ? 1 : 2
+    if (distance <= limit && (!best || distance < best.distance)) {
+      best = { name: candidate, distance }
+    }
+  }
+  return best?.name
+}
+
+const normalizeCharacterName = (name: string) =>
+  name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/gi, '')
+    .toLowerCase()
+
+const normalizeSectionTitle = (title: string) =>
+  title
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+
+const levenshteinDistance = (left: string, right: string) => {
+  const rows = Array.from({ length: left.length + 1 }, (_, index) => [index])
+  for (let column = 1; column <= right.length; column += 1) rows[0][column] = column
+  for (let row = 1; row <= left.length; row += 1) {
+    for (let column = 1; column <= right.length; column += 1) {
+      const cost = left[row - 1] === right[column - 1] ? 0 : 1
+      rows[row][column] = Math.min(
+        rows[row - 1][column] + 1,
+        rows[row][column - 1] + 1,
+        rows[row - 1][column - 1] + cost,
+      )
+    }
+  }
+  return rows[left.length][right.length]
+}
+
+const editorPositionForValidationIssue = (editor: Editor, issue: ScriptValidationIssue) => {
+  const targetText = validationSearchText(issue.lineText)
+  let fallbackPosition = 1
+  let blockIndex = 0
+  const targetIndex = Math.max(0, issue.line - 1)
+
+  editor.state.doc.descendants((node, position) => {
+    if (!node.isBlock) return
+    const text = validationSearchText(node.textContent ?? '')
+    if (targetText && text === targetText) {
+      fallbackPosition = position + 1
+      return false
+    }
+    if (blockIndex <= targetIndex) fallbackPosition = position + 1
+    blockIndex += 1
+  })
+
+  return fallbackPosition
+}
+
+const validationSearchText = (value: string) =>
+  value
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^\*\*([^*]+)\*\*:\s*/, '$1: ')
+    .replace(/^> ?/, '')
+    .trim()
 
 const syncEditorSceneState = (editor: Editor, setActiveSceneId: Dispatch<SetStateAction<string>>) => {
   const sceneId = editorSceneIdAtPosition(editor.state.doc, editor.state.selection.from)

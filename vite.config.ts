@@ -46,6 +46,16 @@ const projectStorageApi = (): Plugin => ({
           return
         }
 
+        if (req.method === 'GET' && url.pathname === '/open-last') {
+          if (!currentProjectPath) {
+            sendJson(res, null)
+            return
+          }
+          const project = await readProject(currentProjectPath)
+          sendJson(res, { project, path: currentProjectPath })
+          return
+        }
+
         if (req.method === 'GET' && url.pathname === '/projects') {
           const entries = await listProjectFolders()
           sendJson(res, entries)

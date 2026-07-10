@@ -1,5 +1,16 @@
 # Novità
 
+## Versione 1.0.4
+
+> Patch dedicata a stabilità progetto, drag&drop macOS e controllo copione.
+
+- All'avvio l'app desktop riapre automaticamente l'ultimo progetto aperto.
+- Il progetto di esempio non viene più salvato accidentalmente sulla cartella progetto durante refresh o riavvii.
+- Migliorata la compatibilità del drag&drop su macOS per cue, note e file nella struttura multimediale.
+- Il pulsante fullscreen esegue un controllo tipografico e formale prima di avviare la modalità spettacolo.
+- Gli errori del copione vengono mostrati in un riquadro sotto l'editor con riga, tipo di anomalia e frammento evidenziato.
+- Cliccando un'anomalia il cursore viene portato nel punto corrispondente dell'editor.
+
 ## Versione 1.0.3
 
 > Patch dedicata a media, drag&drop e coerenza del salvataggio.

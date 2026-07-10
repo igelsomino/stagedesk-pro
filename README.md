@@ -43,9 +43,11 @@ Implementato:
 12. cue audio, musica, immagine e video;
 13. controlli inline per cue audio/musica;
 14. inspector laterale dedicato ai cue;
-15. modalità schermo intero con step battuta/cue;
-16. export PDF completo e pulito;
-17. aggiornamenti automatici tramite GitHub Releases.
+15. riapertura automatica dell'ultimo progetto nella versione desktop;
+16. validazione tipografica e formale prima della modalità schermo intero;
+17. modalità schermo intero con step battuta/cue;
+18. export PDF completo e pulito;
+19. aggiornamenti automatici tramite GitHub Releases.
 
 ## Sviluppo
 
@@ -101,6 +103,20 @@ Il metadata updater viene pubblicato come `latest.json` nella release corrente.
 I media importati dall'utente vengono copiati nella cartella del progetto tramite il layer storage. Le operazioni di rinomina, spostamento ed eliminazione aggiornano il filesystem e il modello dati; l'eliminazione rimuove anche i cue collegati dai documenti Markdown.
 
 I salvataggi automatici verso la cartella progetto sono serializzati per evitare scritture concorrenti fuori ordine.
+
+La versione desktop registra il percorso dell'ultimo progetto aperto nel data directory dell'app e lo riapre al successivo avvio. L'autosave verso cartella progetto resta sospeso finché il controllo iniziale dell'ultimo progetto non è concluso, evitando che il progetto dimostrativo venga scritto accidentalmente sulla cartella di lavoro.
+
+## Controllo copione
+
+Prima di entrare in modalità schermo intero l'app esegue controlli tipografici e formali sul file attivo:
+
+1. formato battute `**PERSONAGGIO**: Battuta`;
+2. struttura H2 per atti e H3 per scene, sinossi e personaggi;
+3. nomi personaggio potenzialmente incoerenti;
+4. battute senza personaggio;
+5. paragrafi non collegati a note, citazioni, cue o sezioni strutturate.
+
+Le anomalie vengono mostrate in un pannello sotto l'editor. Ogni item conserva la riga sorgente, il tipo di errore e un frammento evidenziato; il click sull'item sposta il cursore nel punto corrispondente.
 
 ## Documenti applicativi
 

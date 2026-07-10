@@ -7,6 +7,7 @@ type CuePlaybackState = {
 
 type CuePlaybackWindow = Window & {
   __STAGEDESK_EDITOR_CUE_STATE__?: CuePlaybackState
+  __STAGEDESK_DRAG_PAYLOAD__?: { type: string; value: string; startedAt: number }
 }
 
 export const ScriptChip = Node.create({
@@ -143,17 +144,31 @@ export const ScriptChip = Node.create({
         if (!refId || !event.dataTransfer) return
 
         if (kind === 'cue') {
-          event.dataTransfer.setData('application/x-stagedesk-cue-id', refId)
           event.dataTransfer.setData('text/plain', `stagedesk-cue:${refId}`)
+          event.dataTransfer.setData('application/x-stagedesk-cue-id', refId)
+          ;(window as CuePlaybackWindow).__STAGEDESK_DRAG_PAYLOAD__ = {
+            type: 'application/x-stagedesk-cue-id',
+            value: refId,
+            startedAt: Date.now(),
+          }
           event.dataTransfer.effectAllowed = 'move'
           return
         }
 
         if (kind === 'note') {
-          event.dataTransfer.setData('application/x-stagedesk-note-id', refId)
           event.dataTransfer.setData('text/plain', `stagedesk-note:${refId}`)
+          event.dataTransfer.setData('application/x-stagedesk-note-id', refId)
+          ;(window as CuePlaybackWindow).__STAGEDESK_DRAG_PAYLOAD__ = {
+            type: 'application/x-stagedesk-note-id',
+            value: refId,
+            startedAt: Date.now(),
+          }
           event.dataTransfer.effectAllowed = 'move'
         }
+      })
+
+      dom.addEventListener('dragend', () => {
+        delete (window as CuePlaybackWindow).__STAGEDESK_DRAG_PAYLOAD__
       })
 
       window.addEventListener('script-cue-state', onCueState)

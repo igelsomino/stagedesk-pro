@@ -22,6 +22,7 @@ export type ProjectStorage = {
   listProjectFolders(): Promise<ProjectEntry[]>
   createProjectFolder(project: Project): Promise<string | undefined>
   openProjectFolder(path?: string): Promise<ProjectOpenResult | undefined>
+  openLastProjectFolder(): Promise<ProjectOpenResult | undefined>
   saveProjectFolder(project: Project): Promise<string | undefined>
   writeMediaAsset(targetPath: string, file: File): Promise<void>
   moveMediaAsset(sourcePath: string, targetPath: string): Promise<void>
@@ -104,6 +105,17 @@ export const browserProjectStorage: ProjectStorage = {
     browserProjectDirectory = directory
     const project = await readBrowserProject(directory)
     return { project, path: directory.name }
+  },
+  async openLastProjectFolder() {
+    if (isTauriRuntime()) {
+      const result = await invokeIfDesktop<ProjectOpenResult | null>('open_last_project_folder')
+      return result ?? undefined
+    }
+    if (isLocalDevRuntime()) {
+      return fetchProjectStorage<ProjectOpenResult | undefined>('/open-last').then((result) => result ?? undefined)
+    }
+
+    return undefined
   },
   async saveProjectFolder(project) {
     if (isTauriRuntime()) {

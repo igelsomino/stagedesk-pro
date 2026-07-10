@@ -9,6 +9,10 @@ type ScriptNoteAttrs = {
   collapsed: boolean
 }
 
+type ScriptNoteWindow = Window & {
+  __STAGEDESK_DRAG_PAYLOAD__?: { type: string; value: string; startedAt: number }
+}
+
 const noteTypes = [
   { id: 'movement', label: 'Movimento', color: 'green' },
   { id: 'position', label: 'Posizione', color: 'blue' },
@@ -231,9 +235,18 @@ export const ScriptNote = TiptapNode.create({
           event.preventDefault()
           return
         }
-        event.dataTransfer?.setData('application/x-stagedesk-note-id', String(currentNode.attrs.refId ?? ''))
-        event.dataTransfer?.setData('text/plain', `stagedesk-note:${String(currentNode.attrs.refId ?? '')}`)
+        const refId = String(currentNode.attrs.refId ?? '')
+        event.dataTransfer?.setData('text/plain', `stagedesk-note:${refId}`)
+        event.dataTransfer?.setData('application/x-stagedesk-note-id', refId)
+        ;(window as ScriptNoteWindow).__STAGEDESK_DRAG_PAYLOAD__ = {
+          type: 'application/x-stagedesk-note-id',
+          value: refId,
+          startedAt: Date.now(),
+        }
         if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+      })
+      dom.addEventListener('dragend', () => {
+        delete (window as ScriptNoteWindow).__STAGEDESK_DRAG_PAYLOAD__
       })
       document.addEventListener('pointerdown', closeTypeMenuOnOutsideClick)
       contentTextarea.addEventListener('input', () => {

@@ -17,6 +17,8 @@ Usa il pulsante Nuovo per creare un progetto. L'app chiede il nome e prepara un 
 
 Usa Apri progetti per rientrare in un progetto già creato. Il salvataggio è automatico.
 
+Nella versione desktop l'app riapre automaticamente l'ultimo progetto usato. Se non trova un progetto precedente, mostra il file di esempio iniziale.
+
 ## Area di lavoro
 
 La schermata principale è divisa in tre zone:
@@ -60,6 +62,17 @@ I bookmark servono a segnare punti importanti del copione. Li puoi inserire dall
 ## Modalità schermo intero
 
 La modalità schermo intero presenta battute e cue come step autonomi. I cue con autoplay partono automaticamente quando raggiungi lo step.
+
+Prima di entrare in schermo intero StageDesk Pro controlla il copione. Se trova anomalie tipografiche o formali, mostra un riquadro sotto l'editor con la lista degli errori. Ogni riga indica il punto del documento, il tipo di problema e il frammento interessato. Clicca una riga per spostare il cursore nel punto da correggere.
+
+Il controllo verifica, tra le altre cose:
+
+- formato battute, ad esempio `**MIRANDOLINA**: Battuta`;
+- titoli H2 per gli atti;
+- titoli H3 per scene, sinossi e personaggi;
+- nomi personaggio potenzialmente incoerenti;
+- battute senza personaggio;
+- paragrafi non collegati a note, citazioni, cue o sezioni strutturate.
 
 | Tasto | Azione |
 | --- | --- |

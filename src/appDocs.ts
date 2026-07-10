@@ -17,11 +17,12 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 - Accedi con il tuo account e completa il profilo.
 - Crea o apri un progetto.
+- Nella versione desktop viene riaperto automaticamente l'ultimo progetto usato.
 - Scrivi il copione nell'editor centrale.
 - Organizza copioni, media e bookmark dalla colonna Struttura.
 - Inserisci note di regia e cue multimediali direttamente nel testo.
 - I media importati vengono salvati nella cartella progetto e restano collegati ai cue.
-- Usa la modalità schermo intero per seguire battute e cue durante l'esecuzione.
+- Usa la modalità schermo intero per seguire battute e cue durante l'esecuzione; prima dell'avvio l'app segnala eventuali anomalie tipografiche o formali.
 - Esporta il file attivo in PDF completo o pulito.
 - Gli aggiornamenti desktop vengono scaricati e installati automaticamente quando disponibili.
 
@@ -35,6 +36,15 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 `)
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
+
+## Versione 1.0.4
+
+> Patch dedicata a stabilità progetto, drag&drop macOS e controllo copione.
+
+- All'avvio l'app desktop riapre automaticamente l'ultimo progetto aperto.
+- Migliorata la compatibilità del drag&drop su macOS.
+- Il fullscreen controlla formato battute, struttura atti/scene/personaggi e paragrafi scollegati prima dell'avvio.
+- Le anomalie vengono mostrate in un riquadro sotto l'editor e sono cliccabili.
 
 ## Versione 1.0.3
 
