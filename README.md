@@ -92,7 +92,9 @@ Procedura operativa completa: `docs/RELEASE.md`.
 
 ## Aggiornamenti
 
-L'app desktop controlla gli aggiornamenti da GitHub Releases. Il metadata updater viene pubblicato come `latest.json` nella release corrente.
+L'app desktop controlla gli aggiornamenti da GitHub Releases. Se è disponibile una nuova versione, scarica e installa automaticamente l'aggiornamento, salva le modifiche correnti e riavvia l'app.
+
+Il metadata updater viene pubblicato come `latest.json` nella release corrente.
 
 ## Documenti applicativi
 

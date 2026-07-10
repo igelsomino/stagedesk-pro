@@ -22,6 +22,7 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 - Inserisci note di regia e cue multimediali direttamente nel testo.
 - Usa la modalità schermo intero per seguire battute e cue durante l'esecuzione.
 - Esporta il file attivo in PDF completo o pulito.
+- Gli aggiornamenti desktop vengono scaricati e installati automaticamente quando disponibili.
 
 ## Link utili
 
@@ -33,6 +34,14 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 `)
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
+
+## Versione 1.0.2
+
+> Aggiornamento dedicato all'installazione automatica delle nuove versioni.
+
+- Quando l'app desktop rileva una nuova versione, scarica e installa automaticamente l'aggiornamento.
+- Il comando Aggiornamenti avvia direttamente download, installazione e riavvio.
+- Prima del riavvio vengono salvate le modifiche correnti al progetto.
 
 ## Versione 1.0.0
 

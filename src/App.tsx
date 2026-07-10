@@ -140,6 +140,7 @@ function App() {
   const [remoteAppDocuments, setRemoteAppDocuments] = useState<Record<string, string>>({})
   const [desktopStorageReady, setDesktopStorageReady] = useState(false)
   const updateCheckStartedRef = useRef(false)
+  const updateInstallInProgressRef = useRef(false)
   const toastTimeoutRef = useRef<number | undefined>(undefined)
   const [scriptDialog, setScriptDialog] = useState<ScriptActionDialog | undefined>()
   const [noteMenuOpen, setNoteMenuOpen] = useState(false)
@@ -222,7 +223,7 @@ function App() {
   )
   const chipInspectorRef = useRef({ notes: fileNotes, cues: fileCues })
 
-  const showStatus = (message: string, duration = 3600) => {
+  const showStatus = useCallback((message: string, duration = 3600) => {
     setStorageStatus(message)
     setToastMessage(message)
     setExportResult(undefined)
@@ -230,7 +231,7 @@ function App() {
     if (duration > 0) {
       toastTimeoutRef.current = window.setTimeout(() => setToastMessage(''), duration)
     }
-  }
+  }, [])
 
   useEffect(() => {
     chipInspectorRef.current = { notes: fileNotes, cues: fileCues }
@@ -244,7 +245,7 @@ function App() {
     setOpenTabs((current) => (current.includes('app://version-history') ? current : [...current, 'app://version-history']))
     setActivePath('app://version-history')
     showStatus(`Aggiornamento installato: StageDesk Pro ${installedVersion}`)
-  }, [])
+  }, [showStatus])
 
   useEffect(() => {
     if (!activeAppDocument) return
@@ -264,7 +265,7 @@ function App() {
     return () => {
       active = false
     }
-  }, [activeAppDocument])
+  }, [activeAppDocument, showStatus])
 
   useEffect(() => () => {
     if (exportResult?.objectUrl) URL.revokeObjectURL(exportResult.objectUrl)
@@ -868,9 +869,13 @@ function App() {
     return () => window.clearTimeout(timeout)
   }, [drafts, project.settings.autosave])
 
-  const checkForAppUpdates = async (silent = false) => {
+  const checkForAppUpdates = useCallback(async (silent = false) => {
     if (!isTauriRuntime()) {
       if (!silent) showStatus('Aggiornamenti disponibili solo nella versione desktop')
+      return
+    }
+    if (updateInstallInProgressRef.current) {
+      if (!silent) showStatus('Aggiornamento già in corso...', 0)
       return
     }
 
@@ -890,15 +895,11 @@ function App() {
       }
 
       updateVersion = update.version
-      const install = confirm(
-        `È disponibile StageDesk Pro ${update.version}.\n\n${update.body || 'Installare ora l’aggiornamento?'}`,
-      )
-      if (!install) {
-        showStatus(`Aggiornamento ${update.version} disponibile`)
-        return
-      }
-
+      updateInstallInProgressRef.current = true
       installStarted = true
+      showStatus(`Aggiornamento ${update.version} disponibile. Preparazione installazione...`, 0)
+      await persistDraftsNow()
+
       let downloaded = 0
       let contentLength = 0
       await update.download((event) => {
@@ -927,8 +928,10 @@ function App() {
       } else if (!silent) {
         showStatus(`Controllo aggiornamenti non riuscito: ${message}`)
       }
+    } finally {
+      if (installStarted) updateInstallInProgressRef.current = false
     }
-  }
+  }, [persistDraftsNow, showStatus])
 
   useEffect(() => {
     if (updateCheckStartedRef.current || !isTauriRuntime()) return
@@ -937,7 +940,7 @@ function App() {
       void checkForAppUpdates(true)
     }, 1200)
     return () => window.clearTimeout(timeout)
-  }, [])
+  }, [checkForAppUpdates])
 
   const persistProject = (nextProject: typeof project) => {
     setProject(nextProject)

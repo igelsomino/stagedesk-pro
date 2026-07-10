@@ -13,7 +13,7 @@ Link utili:
 
 ## Creare o aprire un progetto
 
-Usa il pulsante Nuovo per creare un progetto. L'app chiede il nome e prepara un esempio completo con copione, note, cue e media dimostrativi.
+Usa il pulsante Nuovo per creare un progetto. L'app chiede il nome e prepara un copione iniziale minimale con titolo, Atto 1, Scena 1 e una prima battuta modificabile.
 
 Usa Apri progetti per rientrare in un progetto già creato. Il salvataggio è automatico.
 
@@ -82,6 +82,8 @@ Alla fine dell'export l'app mostra dove è stato salvato il file e, quando possi
 ## Aggiornamenti e supporto
 
 Dal menu con tre puntini verticali puoi aprire Novità, Aiuto, Aggiornamenti ed Esci.
+
+Quando è disponibile una nuova versione, l'app desktop scarica e installa automaticamente l'aggiornamento. Al termine dell'installazione StageDesk Pro viene riavviato e apre Novità con la versione installata in evidenza.
 
 Collegamenti progetto:
 

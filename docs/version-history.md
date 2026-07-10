@@ -1,5 +1,23 @@
 # Novità
 
+## Versione 1.0.2
+
+> Aggiornamento dedicato all'installazione automatica delle nuove versioni.
+
+- Quando l'app desktop rileva una nuova versione, scarica e installa automaticamente l'aggiornamento.
+- Il comando Aggiornamenti nel menu applicazione avvia direttamente download, installazione e riavvio, senza richiesta di conferma.
+- Prima del riavvio vengono salvate le modifiche correnti al progetto.
+- Se un aggiornamento è già in corso, il comando Aggiornamenti mostra lo stato senza avviare un secondo processo.
+
+## Versione 1.0.1
+
+> Aggiornamento dedicato al progetto iniziale, ai nuovi progetti e alle tabelle Markdown.
+
+- Il progetto dimostrativo di primo avvio mostra un avviso che chiarisce che il file è un esempio non registrato sul dispositivo.
+- I nuovi progetti partono da un copione minimale e non replicano il contenuto dimostrativo.
+- Le tabelle Markdown incollate o digitate nell'editor vengono convertite in tabelle editabili.
+- Migliorata la persistenza delle modifiche prima dell'apertura dei PDF esportati.
+
 ## Versione 1.0.0
 
 > Prima versione stabile di StageDesk Pro.
