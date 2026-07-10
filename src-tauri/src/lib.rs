@@ -1,0 +1,548 @@
+use base64::{engine::general_purpose, Engine as _};
+use serde::Serialize;
+use serde_json::Value;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::Mutex,
+    time::UNIX_EPOCH,
+};
+use tauri::{AppHandle, Manager, State};
+
+const PROJECT_FILE_NAME: &str = "project.json";
+
+#[derive(Default)]
+struct CurrentProject {
+    path: Mutex<Option<PathBuf>>,
+}
+
+#[derive(Serialize)]
+struct ProjectEntry {
+    name: String,
+    path: String,
+    #[serde(rename = "updatedAt")]
+    updated_at: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ProjectOpenResult {
+    project: Value,
+    path: String,
+}
+
+#[tauri::command]
+fn app_ready() -> &'static str {
+    "studio-copione-ready"
+}
+
+#[tauri::command]
+fn current_project_folder_path(state: State<CurrentProject>) -> Result<Option<String>, String> {
+    Ok(state
+        .path
+        .lock()
+        .map_err(|error| error.to_string())?
+        .as_ref()
+        .map(|path| path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+fn list_project_folders(app: AppHandle) -> Result<Vec<ProjectEntry>, String> {
+    let root = projects_root_path(&app)?;
+    let mut entries = Vec::new();
+
+    for entry in fs::read_dir(root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if !path.is_dir() || !path.join(PROJECT_FILE_NAME).exists() {
+            continue;
+        }
+
+        let modified = path
+            .join(PROJECT_FILE_NAME)
+            .metadata()
+            .ok()
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs().to_string());
+
+        entries.push(ProjectEntry {
+            name: path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| "progetto".to_string()),
+            path: path.to_string_lossy().to_string(),
+            updated_at: modified,
+        });
+    }
+
+    entries.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    Ok(entries)
+}
+
+#[tauri::command]
+fn create_project_folder(
+    app: AppHandle,
+    state: State<CurrentProject>,
+    project_name: String,
+    project_json: String,
+) -> Result<String, String> {
+    let root = projects_root_path(&app)?;
+    let project_path = unique_project_path(&root, &project_name);
+    fs::create_dir_all(&project_path).map_err(|error| error.to_string())?;
+    write_project(&project_path, &project_json, Some(&app))?;
+    *state.path.lock().map_err(|error| error.to_string())? = Some(project_path.clone());
+    Ok(project_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn open_project_folder(
+    state: State<CurrentProject>,
+    project_path: Option<String>,
+) -> Result<ProjectOpenResult, String> {
+    let path = project_path
+        .map(PathBuf::from)
+        .ok_or_else(|| "Percorso progetto mancante".to_string())?;
+    let project = read_project(&path)?;
+    *state.path.lock().map_err(|error| error.to_string())? = Some(path.clone());
+    Ok(ProjectOpenResult {
+        project,
+        path: path.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+fn save_project_folder(
+    app: AppHandle,
+    state: State<CurrentProject>,
+    project_json: String,
+) -> Result<String, String> {
+    let path = state
+        .path
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone()
+        .ok_or_else(|| "Nessuna cartella progetto aperta".to_string())?;
+    write_project(&path, &project_json, Some(&app))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn load_project_json(state: State<CurrentProject>) -> Result<Option<String>, String> {
+    let Some(path) = state
+        .path
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone()
+    else {
+        return Ok(None);
+    };
+    let project = read_project(&path)?;
+    serde_json::to_string_pretty(&project)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_project_json(
+    app: AppHandle,
+    state: State<CurrentProject>,
+    project_json: String,
+) -> Result<String, String> {
+    save_project_folder(app, state, project_json)
+}
+
+#[tauri::command]
+fn move_media_asset(
+    state: State<CurrentProject>,
+    source_path: String,
+    target_path: String,
+) -> Result<(), String> {
+    let path = state
+        .path
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone()
+        .ok_or_else(|| "Nessuna cartella progetto aperta".to_string())?;
+    let source_file = path.join(relative_project_path(&source_path));
+    let target_file = path.join(relative_project_path(&target_path));
+
+    if !source_file.exists() {
+        return Ok(());
+    }
+    if target_file.exists() {
+        return Err(
+            "Esiste già un file media con lo stesso nome nella cartella destinazione".to_string(),
+        );
+    }
+    if let Some(parent) = target_file.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::rename(source_file, target_file).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn desktop_project_path(state: State<CurrentProject>) -> Result<String, String> {
+    current_project_folder_path(state)?
+        .ok_or_else(|| "Nessuna cartella progetto aperta".to_string())
+}
+
+#[tauri::command]
+fn save_pdf_to_downloads(
+    app: AppHandle,
+    file_name: String,
+    data_base64: String,
+) -> Result<String, String> {
+    let downloads = app
+        .path()
+        .download_dir()
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(&downloads).map_err(|error| error.to_string())?;
+    let safe_name = safe_file_name(&file_name, "export.pdf");
+    let path = unique_file_path(&downloads, &safe_name);
+    let bytes = general_purpose::STANDARD
+        .decode(data_base64)
+        .map_err(|error| error.to_string())?;
+    fs::write(&path, bytes).map_err(|error| error.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+    let status = if cfg!(target_os = "macos") {
+        Command::new("open").arg(path).status()
+    } else if cfg!(target_os = "windows") {
+        Command::new("cmd")
+            .args(["/C", "start", "", &path])
+            .status()
+    } else {
+        Command::new("xdg-open").arg(path).status()
+    }
+    .map_err(|error| error.to_string())?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Apertura file non riuscita".to_string())
+    }
+}
+
+fn projects_root_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("projects");
+    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    Ok(root)
+}
+
+fn unique_project_path(root: &Path, name: &str) -> PathBuf {
+    let safe_name = safe_folder_name(name);
+    let mut path = root.join(&safe_name);
+    let mut index = 2;
+    while path.exists() {
+        path = root.join(format!("{safe_name}-{index}"));
+        index += 1;
+    }
+    path
+}
+
+fn safe_folder_name(name: &str) -> String {
+    let mut output = String::new();
+    for character in name.trim().to_lowercase().chars() {
+        if character.is_ascii_alphanumeric()
+            || character == '.'
+            || character == '_'
+            || character == '-'
+        {
+            output.push(character);
+        } else if !output.ends_with('-') {
+            output.push('-');
+        }
+    }
+    let output = output.trim_matches('-').to_string();
+    if output.is_empty() {
+        "progetto".to_string()
+    } else {
+        output
+    }
+}
+
+fn safe_file_name(name: &str, fallback: &str) -> String {
+    let mut output = String::new();
+    for character in name.trim().chars() {
+        if character.is_ascii_alphanumeric()
+            || character == '.'
+            || character == '_'
+            || character == '-'
+        {
+            output.push(character);
+        } else if !output.ends_with('-') {
+            output.push('-');
+        }
+    }
+    let output = output.trim_matches('-').to_string();
+    if output.is_empty() {
+        fallback.to_string()
+    } else {
+        output
+    }
+}
+
+fn unique_file_path(directory: &Path, file_name: &str) -> PathBuf {
+    let path = directory.join(file_name);
+    if !path.exists() {
+        return path;
+    }
+
+    let file_path = Path::new(file_name);
+    let stem = file_path
+        .file_stem()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| "export".to_string());
+    let extension = file_path
+        .extension()
+        .map(|value| value.to_string_lossy().to_string());
+
+    for index in 1.. {
+        let next_name = match &extension {
+            Some(extension) => format!("{stem}-{index}.{extension}"),
+            None => format!("{stem}-{index}"),
+        };
+        let next_path = directory.join(next_name);
+        if !next_path.exists() {
+            return next_path;
+        }
+    }
+
+    unreachable!()
+}
+
+fn read_project(project_path: &Path) -> Result<Value, String> {
+    let project_path = fs::canonicalize(project_path).map_err(|error| error.to_string())?;
+    let raw = fs::read_to_string(project_path.join(PROJECT_FILE_NAME))
+        .map_err(|error| error.to_string())?;
+    let mut project = serde_json::from_str::<Value>(&raw).map_err(|error| error.to_string())?;
+    hydrate_script_files(&project_path, &mut project)?;
+    Ok(project)
+}
+
+fn write_project(
+    project_path: &Path,
+    project_json: &str,
+    app: Option<&AppHandle>,
+) -> Result<(), String> {
+    let mut project =
+        serde_json::from_str::<Value>(project_json).map_err(|error| error.to_string())?;
+    if let Some(object) = project.as_object_mut() {
+        object.insert(
+            "rootPath".to_string(),
+            Value::String(project_path.to_string_lossy().to_string()),
+        );
+    }
+
+    fs::create_dir_all(project_path).map_err(|error| error.to_string())?;
+    let project_json = serde_json::to_string_pretty(&project).map_err(|error| error.to_string())?;
+    fs::write(project_path.join(PROJECT_FILE_NAME), project_json)
+        .map_err(|error| error.to_string())?;
+    write_script_files(project_path, project.get("scripts"))?;
+    write_media_folders(project_path, project.get("media"), app)?;
+    Ok(())
+}
+
+fn hydrate_script_files(project_path: &Path, project: &mut Value) -> Result<(), String> {
+    let Some(scripts) = project.get_mut("scripts").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    hydrate_script_nodes(project_path, scripts)
+}
+
+fn hydrate_script_nodes(project_path: &Path, nodes: &mut [Value]) -> Result<(), String> {
+    for node in nodes {
+        let kind = node.get("kind").and_then(Value::as_str).unwrap_or_default();
+        if kind == "markdown" {
+            if let Some(path) = node.get("path").and_then(Value::as_str) {
+                let file_path = project_path.join(relative_project_path(path));
+                if file_path.exists() {
+                    let content =
+                        fs::read_to_string(file_path).map_err(|error| error.to_string())?;
+                    if let Some(object) = node.as_object_mut() {
+                        object.insert("content".to_string(), Value::String(content));
+                    }
+                }
+            }
+            continue;
+        }
+
+        if let Some(children) = node.get_mut("children").and_then(Value::as_array_mut) {
+            hydrate_script_nodes(project_path, children)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn write_script_files(project_path: &Path, scripts: Option<&Value>) -> Result<(), String> {
+    let Some(nodes) = scripts.and_then(Value::as_array) else {
+        return Ok(());
+    };
+    write_script_nodes(project_path, nodes)
+}
+
+fn write_script_nodes(project_path: &Path, nodes: &[Value]) -> Result<(), String> {
+    for node in nodes {
+        let kind = node.get("kind").and_then(Value::as_str).unwrap_or_default();
+        let path = node.get("path").and_then(Value::as_str).unwrap_or_default();
+        let file_path = project_path.join(relative_project_path(path));
+
+        if kind == "folder" {
+            fs::create_dir_all(&file_path).map_err(|error| error.to_string())?;
+            if let Some(children) = node.get("children").and_then(Value::as_array) {
+                write_script_nodes(project_path, children)?;
+            }
+            continue;
+        }
+
+        if kind == "markdown" {
+            if let Some(parent) = file_path.parent() {
+                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            let content = node
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            fs::write(file_path, content).map_err(|error| error.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
+fn write_media_folders(
+    project_path: &Path,
+    media: Option<&Value>,
+    app: Option<&AppHandle>,
+) -> Result<(), String> {
+    let Some(nodes) = media.and_then(Value::as_array) else {
+        return Ok(());
+    };
+    write_media_nodes(project_path, nodes, app)
+}
+
+fn write_media_nodes(
+    project_path: &Path,
+    nodes: &[Value],
+    app: Option<&AppHandle>,
+) -> Result<(), String> {
+    for node in nodes {
+        let kind = node.get("kind").and_then(Value::as_str).unwrap_or_default();
+        let path = node.get("path").and_then(Value::as_str).unwrap_or_default();
+        let file_path = project_path.join(relative_project_path(path));
+
+        if kind == "folder" {
+            fs::create_dir_all(&file_path).map_err(|error| error.to_string())?;
+            if let Some(children) = node.get("children").and_then(Value::as_array) {
+                write_media_nodes(project_path, children, app)?;
+            }
+            continue;
+        }
+
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+
+        let should_write_source = match fs::metadata(&file_path) {
+            Ok(metadata) => metadata.len() == 0,
+            Err(_) => true,
+        };
+
+        if should_write_source {
+            if let Some(source_path) = node.get("sourcePath").and_then(Value::as_str) {
+                let source_file = bundled_media_source(source_path, app)?;
+                fs::copy(source_file, &file_path).map_err(|error| error.to_string())?;
+            } else if !file_path.exists() {
+                fs::write(&file_path, []).map_err(|error| error.to_string())?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn bundled_media_source(source_path: &str, app: Option<&AppHandle>) -> Result<PathBuf, String> {
+    let relative_path = relative_project_path(source_path);
+    let without_sample_media = relative_path.strip_prefix("sample-media").ok().map(PathBuf::from);
+    let mut candidates = Vec::new();
+
+    if let Some(app) = app {
+        if let Ok(resource_dir) = app.path().resource_dir() {
+            candidates.push(resource_dir.join(&relative_path));
+            candidates.push(resource_dir.join("public").join(&relative_path));
+            candidates.push(resource_dir.join("_up_").join("public").join(&relative_path));
+            if let Some(path) = &without_sample_media {
+                candidates.push(resource_dir.join(path));
+                candidates.push(resource_dir.join("sample-media").join(path));
+            }
+        }
+    }
+
+    if let Ok(current_dir) = std::env::current_dir() {
+        candidates.push(current_dir.join("../public").join(&relative_path));
+        candidates.push(current_dir.join("public").join(&relative_path));
+    }
+
+    let attempted = candidates
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    candidates.into_iter().find(|path| path.exists()).ok_or_else(|| {
+        format!("Media di esempio non disponibile: {source_path}. Percorsi verificati: {attempted}")
+    })
+}
+
+fn relative_project_path(path: &str) -> PathBuf {
+    path.split('/')
+        .filter(|part| !part.is_empty())
+        .fold(PathBuf::new(), |mut output, part| {
+            output.push(part);
+            output
+        })
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|_app, argv, _cwd| {
+            println!("StageDesk Pro received a second instance request: {argv:?}");
+        }));
+    }
+
+    builder
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(CurrentProject::default())
+        .invoke_handler(tauri::generate_handler![
+            app_ready,
+            current_project_folder_path,
+            list_project_folders,
+            create_project_folder,
+            open_project_folder,
+            save_project_folder,
+            load_project_json,
+            save_project_json,
+            move_media_asset,
+            save_pdf_to_downloads,
+            open_path,
+            desktop_project_path
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

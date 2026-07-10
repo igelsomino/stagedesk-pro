@@ -1,0 +1,48 @@
+{
+  "name": "studio-copione",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "test": "vitest run",
+    "preview": "vite preview",
+    "version:sync": "node scripts/sync-version.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.1",
+    "@tauri-apps/api": "^2.9.0",
+    "@tauri-apps/plugin-deep-link": "^2.4.9",
+    "@tauri-apps/plugin-opener": "^2.5.4",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
+    "@tiptap/core": "3.27.3",
+    "@tiptap/extension-link": "^3.27.3",
+    "@tiptap/extension-table": "3.27.3",
+    "@tiptap/extension-table-cell": "3.27.3",
+    "@tiptap/extension-table-header": "3.27.3",
+    "@tiptap/extension-table-row": "3.27.3",
+    "@tiptap/react": "3.27.3",
+    "@tiptap/starter-kit": "3.27.3",
+    "jspdf": "^4.2.1",
+    "lucide-react": "^0.562.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.2",
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "oxlint": "^1.71.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1",
+    "vitest": "^4.1.9"
+  }
+}

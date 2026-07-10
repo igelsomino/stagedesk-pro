@@ -1,0 +1,26 @@
+[package]
+name = "studio-copione"
+version = "1.0.0"
+description = "Applicazione desktop per copioni teatrali"
+authors = ["StageDesk Pro"]
+edition = "2021"
+
+[lib]
+name = "studio_copione_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri-plugin-process = "2"
+base64 = "0.22"
+tauri-plugin-deep-link = "2.4.9"
+tauri-plugin-opener = "2.5.4"
+tauri-plugin-single-instance = { version = "2.4.2", features = ["deep-link"] }
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"

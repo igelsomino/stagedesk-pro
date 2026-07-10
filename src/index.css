@@ -1,0 +1,15 @@
+html {
+  height: 100%;
+  overflow: hidden;
+  background: #151515;
+}
+
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+#root {
+  height: 100vh;
+  overflow: hidden;
+}
