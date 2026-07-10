@@ -118,6 +118,7 @@ export const ScriptNote = TiptapNode.create({
       collapseButton.append(collapseIcon)
       titleInput.className = 'script-note-title'
       titleInput.type = 'text'
+      titleInput.draggable = true
       typeDropdown.className = 'script-note-type'
       typeButton.type = 'button'
       typeButton.className = 'script-note-type-trigger'
@@ -226,7 +227,7 @@ export const ScriptNote = TiptapNode.create({
       })
       dom.addEventListener('dragstart', (event) => {
         const target = event.target as HTMLElement | null
-        if (target?.closest('button, input, textarea, .script-note-type-menu')) {
+        if (target?.closest('button, textarea, .script-note-type-menu')) {
           event.preventDefault()
           return
         }

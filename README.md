@@ -96,6 +96,12 @@ L'app desktop controlla gli aggiornamenti da GitHub Releases. Se è disponibile 
 
 Il metadata updater viene pubblicato come `latest.json` nella release corrente.
 
+## Media e salvataggio
+
+I media importati dall'utente vengono copiati nella cartella del progetto tramite il layer storage. Le operazioni di rinomina, spostamento ed eliminazione aggiornano il filesystem e il modello dati; l'eliminazione rimuove anche i cue collegati dai documenti Markdown.
+
+I salvataggi automatici verso la cartella progetto sono serializzati per evitare scritture concorrenti fuori ordine.
+
 ## Documenti applicativi
 
 I documenti visualizzati dal menu utente sono Markdown nel repository:

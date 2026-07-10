@@ -23,7 +23,9 @@ export type ProjectStorage = {
   createProjectFolder(project: Project): Promise<string | undefined>
   openProjectFolder(path?: string): Promise<ProjectOpenResult | undefined>
   saveProjectFolder(project: Project): Promise<string | undefined>
+  writeMediaAsset(targetPath: string, file: File): Promise<void>
   moveMediaAsset(sourcePath: string, targetPath: string): Promise<void>
+  deleteMediaAsset(targetPath: string): Promise<void>
 }
 
 let browserProjectDirectory: FileSystemDirectoryHandle | undefined
@@ -124,6 +126,28 @@ export const browserProjectStorage: ProjectStorage = {
     await writeBrowserProject(browserProjectDirectory, { ...project, rootPath: browserProjectDirectory.name })
     return browserProjectDirectory.name
   },
+  async writeMediaAsset(targetPath, file) {
+    if (isTauriRuntime()) {
+      await invokeIfDesktop('write_media_asset', {
+        targetPath,
+        dataBase64: await fileToBase64(file),
+      })
+      return
+    }
+    if (isLocalDevRuntime()) {
+      await fetchProjectStorage('/write-media', {
+        method: 'POST',
+        body: {
+          targetPath,
+          dataBase64: await fileToBase64(file),
+        },
+      })
+      return
+    }
+
+    if (!browserProjectDirectory) return
+    await writeBrowserBinaryFile(browserProjectDirectory, pathParts(targetPath), file)
+  },
   async moveMediaAsset(sourcePath, targetPath) {
     if (isTauriRuntime()) {
       await invokeIfDesktop('move_media_asset', { sourcePath, targetPath })
@@ -139,6 +163,22 @@ export const browserProjectStorage: ProjectStorage = {
 
     if (!browserProjectDirectory) return
     await moveBrowserFile(browserProjectDirectory, pathParts(sourcePath), pathParts(targetPath))
+  },
+  async deleteMediaAsset(targetPath) {
+    if (isTauriRuntime()) {
+      await invokeIfDesktop('delete_media_asset', { targetPath })
+      return
+    }
+    if (isLocalDevRuntime()) {
+      await fetchProjectStorage('/delete-media', {
+        method: 'POST',
+        body: { targetPath },
+      })
+      return
+    }
+
+    if (!browserProjectDirectory) return
+    await removeBrowserEntry(browserProjectDirectory, pathParts(targetPath))
   },
 }
 
@@ -243,6 +283,16 @@ const writeTextFile = async (root: FileSystemDirectoryHandle, parts: string[], c
   await writable.close()
 }
 
+const writeBrowserBinaryFile = async (root: FileSystemDirectoryHandle, parts: string[], file: File) => {
+  const fileName = parts.at(-1)
+  if (!fileName) return
+  const directory = await ensureBrowserDirectory(root, parts.slice(0, -1))
+  const fileHandle = await directory.getFileHandle(fileName, { create: true })
+  const writable = await fileHandle.createWritable()
+  await writable.write(file)
+  await writable.close()
+}
+
 const moveBrowserFile = async (root: FileSystemDirectoryHandle, sourceParts: string[], targetParts: string[]) => {
   const sourceName = sourceParts.at(-1)
   const targetName = targetParts.at(-1)
@@ -256,6 +306,13 @@ const moveBrowserFile = async (root: FileSystemDirectoryHandle, sourceParts: str
   await writable.write(await sourceFile.getFile())
   await writable.close()
   await sourceDirectory.removeEntry(sourceName)
+}
+
+const removeBrowserEntry = async (root: FileSystemDirectoryHandle, parts: string[]) => {
+  const entryName = parts.at(-1)
+  if (!entryName) return
+  const directory = await ensureBrowserDirectory(root, parts.slice(0, -1))
+  await directory.removeEntry(entryName, { recursive: true })
 }
 
 const ensureBrowserMediaFile = async (root: FileSystemDirectoryHandle, asset: MediaAsset) => {
@@ -296,6 +353,17 @@ const ensureBrowserDirectory = async (root: FileSystemDirectoryHandle, parts: st
 }
 
 const pathParts = (path: string) => path.split('/').filter(Boolean)
+
+const fileToBase64 = async (file: File) => {
+  const buffer = await file.arrayBuffer()
+  const bytes = new Uint8Array(buffer)
+  const chunkSize = 0x8000
+  let binary = ''
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
+  }
+  return window.btoa(binary)
+}
 
 const safeFolderName = (name: string) =>
   name

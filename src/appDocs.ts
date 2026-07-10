@@ -20,6 +20,7 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 - Scrivi il copione nell'editor centrale.
 - Organizza copioni, media e bookmark dalla colonna Struttura.
 - Inserisci note di regia e cue multimediali direttamente nel testo.
+- I media importati vengono salvati nella cartella progetto e restano collegati ai cue.
 - Usa la modalità schermo intero per seguire battute e cue durante l'esecuzione.
 - Esporta il file attivo in PDF completo o pulito.
 - Gli aggiornamenti desktop vengono scaricati e installati automaticamente quando disponibili.
@@ -34,6 +35,15 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 `)
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
+
+## Versione 1.0.3
+
+> Patch dedicata a media, drag&drop e salvataggio.
+
+- I file multimediali importati vengono salvati nella cartella progetto.
+- Rinomina, spostamento ed eliminazione media aggiornano i cue collegati.
+- Migliorato il drag&drop di cue, note e file media.
+- Serializzati i salvataggi automatici verso la cartella progetto.
 
 ## Versione 1.0.2
 

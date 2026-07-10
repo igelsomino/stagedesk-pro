@@ -49,7 +49,9 @@ I cue audio e musicali hanno controlli nel chip: play/pausa, stop quando il cue 
 
 La raccolta media è organizzata in suoni, musiche, immagini e video. Puoi importare file, creare cartelle, rinominare elementi e spostare media tra cartelle.
 
-Le cartelle principali della raccolta media sono protette dall'eliminazione.
+I file importati vengono copiati nella cartella del progetto. Quando sposti, rinomini o elimini un media, i cue collegati vengono aggiornati o rimossi dal documento.
+
+Le cartelle principali della raccolta media sono protette da rinomina ed eliminazione.
 
 ## Bookmark
 

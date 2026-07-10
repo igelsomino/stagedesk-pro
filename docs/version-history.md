@@ -1,5 +1,16 @@
 # Novità
 
+## Versione 1.0.3
+
+> Patch dedicata a media, drag&drop e coerenza del salvataggio.
+
+- I file multimediali importati vengono salvati fisicamente nella cartella del progetto.
+- La rinomina, lo spostamento e l'eliminazione dei media aggiornano anche i cue collegati.
+- L'eliminazione di un media rimuove i cue collegati anche dal documento, evitando chip orfani.
+- Migliorato il drag&drop di cue, note e file nella struttura multimediale.
+- Le cartelle root della raccolta media restano protette anche dalla rinomina.
+- I salvataggi automatici verso la cartella progetto vengono serializzati per ridurre il rischio di scritture fuori ordine.
+
 ## Versione 1.0.2
 
 > Aggiornamento dedicato all'installazione automatica delle nuove versioni.

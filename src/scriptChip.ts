@@ -131,6 +131,31 @@ export const ScriptChip = Node.create({
         window.dispatchEvent(new CustomEvent('script-cue-stop', { detail: { id: currentNode.attrs.refId } }))
       })
 
+      dom.addEventListener('dragstart', (event) => {
+        const target = event.target as HTMLElement | null
+        if (target?.closest('button')) {
+          event.preventDefault()
+          return
+        }
+
+        const kind = String(currentNode.attrs.kind ?? '')
+        const refId = String(currentNode.attrs.refId ?? '')
+        if (!refId || !event.dataTransfer) return
+
+        if (kind === 'cue') {
+          event.dataTransfer.setData('application/x-stagedesk-cue-id', refId)
+          event.dataTransfer.setData('text/plain', `stagedesk-cue:${refId}`)
+          event.dataTransfer.effectAllowed = 'move'
+          return
+        }
+
+        if (kind === 'note') {
+          event.dataTransfer.setData('application/x-stagedesk-note-id', refId)
+          event.dataTransfer.setData('text/plain', `stagedesk-note:${refId}`)
+          event.dataTransfer.effectAllowed = 'move'
+        }
+      })
+
       window.addEventListener('script-cue-state', onCueState)
       render()
 

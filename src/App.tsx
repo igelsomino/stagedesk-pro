@@ -1,5 +1,6 @@
 import type { Editor } from '@tiptap/core'
 import { DOMParser as ProseMirrorDOMParser, type Node as ProseMirrorNode } from '@tiptap/pm/model'
+import { insertPoint } from '@tiptap/pm/transform'
 import type { EditorView } from '@tiptap/pm/view'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -142,6 +143,7 @@ function App() {
   const updateCheckStartedRef = useRef(false)
   const updateInstallInProgressRef = useRef(false)
   const toastTimeoutRef = useRef<number | undefined>(undefined)
+  const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const [scriptDialog, setScriptDialog] = useState<ScriptActionDialog | undefined>()
   const [noteMenuOpen, setNoteMenuOpen] = useState(false)
   const [noteMenuPosition, setNoteMenuPosition] = useState<{ top: number; left: number } | undefined>()
@@ -232,6 +234,13 @@ function App() {
       toastTimeoutRef.current = window.setTimeout(() => setToastMessage(''), duration)
     }
   }, [])
+
+  const saveProjectFolderQueued = useCallback((nextProject: Project) => {
+    if (!desktopStorageReady) return Promise.resolve<string | undefined>(undefined)
+    const saveTask = saveQueueRef.current.then(() => storage.saveProjectFolder(nextProject))
+    saveQueueRef.current = saveTask.catch(() => undefined)
+    return saveTask
+  }, [desktopStorageReady])
 
   useEffect(() => {
     chipInspectorRef.current = { notes: fileNotes, cues: fileCues }
@@ -585,11 +594,7 @@ function App() {
           if (dropPosition >= match.position && dropPosition <= match.position + match.nodeSize) return true
 
           event.preventDefault()
-          const insertPosition = match.position < dropPosition ? dropPosition - match.nodeSize : dropPosition
-          const transaction = view.state.tr
-            .delete(match.position, match.position + match.nodeSize)
-            .insert(Math.max(0, insertPosition), match.node)
-          view.dispatch(transaction.scrollIntoView())
+          if (!moveEditorNode(view, match, dropPosition)) return true
           setSelectedNoteId(note.id)
           showStatus(`Nota spostata: ${note.title}`)
           return true
@@ -600,7 +605,9 @@ function App() {
           const cue = projectRef.current.cues.find((item) => item.id === cueId && item.filePath === activeFilePathRef.current)
           if (!cue) return false
           event.preventDefault()
-          cueDropActionsRef.current.insertExistingCue(cue, dropPosition)
+          if (!moveCueChip(view, cue.id, dropPosition)) {
+            cueDropActionsRef.current.insertExistingCue(cue, dropPosition)
+          }
           setSelectedCueId(cue.id)
           showStatus(`Cue spostato: ${cue.title || cue.src}`)
           return true
@@ -676,17 +683,15 @@ function App() {
     setDrafts({})
     storage.save(nextProject)
 
-    if (desktopStorageReady) {
-      try {
-        const path = await storage.saveProjectFolder(nextProject)
-        if (path) setStorageStatus(`Cartella progetto salvata: ${compactPath(path)}`)
-      } catch (error) {
-        setStorageStatus(`Salvataggio progetto non riuscito: ${String(error)}`)
-      }
+    try {
+      const path = await saveProjectFolderQueued(nextProject)
+      if (path) setStorageStatus(`Cartella progetto salvata: ${compactPath(path)}`)
+    } catch (error) {
+      setStorageStatus(`Salvataggio progetto non riuscito: ${String(error)}`)
     }
 
     return nextProject
-  }, [desktopStorageReady, draftsWithCurrentEditorContent])
+  }, [draftsWithCurrentEditorContent, saveProjectFolderQueued])
 
   const setCurrentBlockAsParagraph = () => {
     if (!editor) return
@@ -809,13 +814,7 @@ function App() {
     if (!project.settings.autosave) return
     const projectToSave = applyDraftsToProject(project, drafts)
     storage.save(projectToSave)
-    if (!desktopStorageReady) return
-    storage.saveProjectFolder(projectToSave)
-      .then((path) => {
-        if (path) setStorageStatus(`Cartella progetto salvata: ${compactPath(path)}`)
-      })
-      .catch((error) => setStorageStatus(`Salvataggio progetto non riuscito: ${String(error)}`))
-  }, [desktopStorageReady, drafts, project])
+  }, [drafts, project])
 
   useEffect(() => {
     if (!project.settings.autosave) return
@@ -849,7 +848,7 @@ function App() {
       setProject((current) => {
         const nextProject = applyDraftsToProject(current, Object.fromEntries(entries))
         storage.save(nextProject)
-        storage.saveProjectFolder(nextProject)
+        saveProjectFolderQueued(nextProject)
           .then((path) => {
             if (path) setStorageStatus(`Cartella progetto salvata: ${compactPath(path)}`)
           })
@@ -867,7 +866,7 @@ function App() {
     }, 700)
 
     return () => window.clearTimeout(timeout)
-  }, [drafts, project.settings.autosave])
+  }, [drafts, project.settings.autosave, saveProjectFolderQueued])
 
   const checkForAppUpdates = useCallback(async (silent = false) => {
     if (!isTauriRuntime()) {
@@ -945,8 +944,7 @@ function App() {
   const persistProject = (nextProject: typeof project) => {
     setProject(nextProject)
     storage.save(nextProject)
-    if (!desktopStorageReady) return
-    storage.saveProjectFolder(nextProject)
+    saveProjectFolderQueued(nextProject)
       .then((path) => {
         if (path) setStorageStatus(`Cartella progetto salvata: ${compactPath(path)}`)
       })
@@ -1282,7 +1280,7 @@ function App() {
   }
 
   const renameSelectedMediaNode = () => {
-    if (!selectedMediaNode) return
+    if (!selectedMediaNode || isProtectedMediaRoot(selectedMediaNode)) return
     setScriptDialog({
       kind: 'rename-media',
       title: 'Rinomina media',
@@ -1298,6 +1296,7 @@ function App() {
     if (!nodeToRename) return
 
     const nextPath = childPath(parentPath(nodeToRename.path) || '/media', name)
+    if (nodeToRename.path === nextPath) return
     const media = updateTreeNode(project.media, nodeToRename.path, (node) => renameTreeNode(node, name, nextPath))
     const cues = project.cues.map((cue) => {
       if (!isPathInside(cue.src, nodeToRename.path)) return cue
@@ -1309,8 +1308,20 @@ function App() {
         updatedAt: new Date().toISOString(),
       }
     })
-    persistProject({ ...project, media, cues })
-    setSelectedMediaPath(nextPath)
+    const persistRename = () => {
+      persistProject({ ...project, media, cues })
+      setSelectedMediaPath(nextPath)
+      showStatus(`Media rinominato: ${name}`)
+    }
+
+    if (hasProjectStorageRoot(project.rootPath)) {
+      storage.moveMediaAsset(nodeToRename.path, nextPath)
+        .then(persistRename)
+        .catch((error) => setStorageStatus(`Rinomina media non riuscita: ${String(error)}`))
+      return
+    }
+
+    persistRename()
   }
 
   const deleteSelectedMediaNode = () => {
@@ -1329,13 +1340,31 @@ function App() {
     const nodeToDelete = findTreeNode(project.media, targetPath)
     if (!nodeToDelete || isProtectedMediaRoot(nodeToDelete)) return
 
-    const media = removeTreeNode(project.media, nodeToDelete.path)
-    const cues = project.cues.filter((cue) => !isPathInside(cue.src, nodeToDelete.path))
-    persistProject({ ...project, media, cues })
-    setSelectedMediaPath(parentPath(nodeToDelete.path) || '/media')
-    if (selectedCueId && !cues.some((cue) => cue.id === selectedCueId)) {
-      setSelectedCueId(cues[0]?.id ?? '')
+    const applyDelete = () => {
+      const currentProject = applyDraftsToProject(project, draftsWithCurrentEditorContent())
+      const removedCueIds = currentProject.cues
+        .filter((cue) => isPathInside(cue.src, nodeToDelete.path))
+        .map((cue) => cue.id)
+      const media = removeTreeNode(currentProject.media, nodeToDelete.path)
+      const cues = currentProject.cues.filter((cue) => !removedCueIds.includes(cue.id))
+      const scripts = removeCueReferencesFromScripts(currentProject.scripts, removedCueIds)
+      removeCueReferencesFromEditor(removedCueIds)
+      persistProject({ ...currentProject, media, cues, scripts })
+      setSelectedMediaPath(parentPath(nodeToDelete.path) || '/media')
+      if (selectedCueId && !cues.some((cue) => cue.id === selectedCueId)) {
+        setSelectedCueId(cues[0]?.id ?? '')
+      }
+      showStatus(`Media eliminato: ${nodeToDelete.name}`)
     }
+
+    if (hasProjectStorageRoot(project.rootPath)) {
+      storage.deleteMediaAsset(nodeToDelete.path)
+        .then(applyDelete)
+        .catch((error) => setStorageStatus(`Eliminazione media non riuscita: ${String(error)}`))
+      return
+    }
+
+    applyDelete()
   }
 
   const moveMediaNode = async (sourcePath: string, targetFolderPath: string) => {
@@ -1562,6 +1591,29 @@ function App() {
     editor.view.dispatch(editor.state.tr.delete(target.position, target.position + target.nodeSize))
   }
 
+  const removeCueReferencesFromEditor = (cueIds: string[]) => {
+    if (!editor || cueIds.length === 0) return
+    const idSet = new Set(cueIds)
+    const matches: ScriptNodeMatch[] = []
+    editor.state.doc.descendants((node, position) => {
+      if (node.type.name !== 'scriptChip' || node.attrs.kind !== 'cue' || !idSet.has(String(node.attrs.refId ?? ''))) {
+        return
+      }
+      const match: ScriptChipMatch = { position, nodeSize: node.nodeSize, attrs: node.attrs, node }
+      matches.push(standaloneBlockAroundInlineNode(editor.state.doc, match) ?? match)
+    })
+    if (matches.length === 0) return
+
+    const transaction = matches
+      .filter((match, index, items) => items.findIndex((item) => item.position === match.position) === index)
+      .sort((left, right) => right.position - left.position)
+      .reduce(
+        (currentTransaction, match) => currentTransaction.delete(match.position, match.position + match.nodeSize),
+        editor.state.tr,
+      )
+    editor.view.dispatch(transaction.scrollIntoView())
+  }
+
   const stopEditorCueIfActive = (cueId: string) => {
     if (editorPlayingCueRef.current?.id !== cueId) return
     const cue = project.cues.find((item) => item.id === cueId)
@@ -1594,45 +1646,69 @@ function App() {
       selectedMediaPath === '/media' || selectedMediaNode?.kind === 'folder'
         ? selectedMediaPath
         : parentPath(selectedMediaPath) || '/media'
-    const assets: MediaAsset[] = files.map((file) => ({
-      id: crypto.randomUUID(),
-      name: file.name,
-      path: childPath(folderPath, file.name),
-      kind: mediaKind(file.type, file.name),
-      size: file.size,
-      objectUrl: URL.createObjectURL(file),
+    const assetsWithFiles = files.map((file) => ({
+      file,
+      asset: {
+        id: crypto.randomUUID(),
+        name: file.name,
+        path: childPath(folderPath, file.name),
+        kind: mediaKind(file.type, file.name),
+        size: file.size,
+        objectUrl: hasProjectStorageRoot(project.rootPath) ? undefined : URL.createObjectURL(file),
+      } satisfies MediaAsset,
     }))
-    persistProject({ ...project, media: insertTreeChildren(project.media, folderPath, assets) })
-    if (assets[0]) setSelectedMediaPath(assets[0].path)
-    expandPath(folderPath)
+
+    void Promise.all(
+      assetsWithFiles.map(({ asset, file }) =>
+        hasProjectStorageRoot(project.rootPath)
+          ? storage.writeMediaAsset(asset.path, file).then(() => asset)
+          : Promise.resolve(asset),
+      ),
+    )
+      .then((assets) => {
+        persistProject({ ...project, media: insertTreeChildren(project.media, folderPath, assets) })
+        if (assets[0]) setSelectedMediaPath(assets[0].path)
+        expandPath(folderPath)
+        showStatus(`${assets.length} media importati`)
+      })
+      .catch((error) => setStorageStatus(`Import media non riuscito: ${String(error)}`))
     event.target.value = ''
   }
 
   const insertCueChip = (cue: MediaCue, position?: number, removeExisting = false) => {
     if (!editor) return
-    let insertPosition = position
 
     if (removeExisting) {
       const existing = chipMatchByRef(editor.state.doc, 'cue', cue.id)
       if (existing) {
-        const transaction = editor.state.tr.delete(existing.position, existing.position + existing.nodeSize)
+        const movable = standaloneBlockAroundInlineNode(editor.state.doc, existing) ?? existing
+        const transaction = editor.state.tr.delete(movable.position, movable.position + movable.nodeSize)
         editor.view.dispatch(transaction)
-        if (insertPosition !== undefined && existing.position < insertPosition) {
-          insertPosition = Math.max(0, insertPosition - existing.nodeSize)
+        if (position !== undefined && movable.position < position) {
+          position = Math.max(0, position - movable.nodeSize)
         }
       }
     }
 
-    const content = {
-      type: 'paragraph',
-      content: [{ type: 'scriptChip', attrs: { kind: 'cue', label: cueChipLabel(cue), refId: cue.id, color: cue.type } }],
-    }
-    const chain = editor.chain().focus()
-    if (insertPosition !== undefined) {
-      chain.insertContentAt(insertPosition, content).run()
+    const chipNode = editor.schema.nodes.scriptChip.create({
+      kind: 'cue',
+      label: cueChipLabel(cue),
+      refId: cue.id,
+      color: cue.type,
+    })
+    const contentNode = editor.schema.nodes.paragraph.create(null, [chipNode])
+
+    if (position !== undefined) {
+      const safePosition = insertionPositionForNode(editor.state.doc, position, contentNode)
+      if (safePosition === undefined) return
+      editor.view.dispatch(editor.state.tr.insert(safePosition, contentNode).scrollIntoView())
+      editor.commands.focus(safePosition + 1)
       return
     }
-    chain.insertContent(content).run()
+    editor.chain().focus().insertContent({
+      type: 'paragraph',
+      content: [{ type: 'scriptChip', attrs: { kind: 'cue', label: cueChipLabel(cue), refId: cue.id, color: cue.type } }],
+    }).run()
   }
 
   const insertCue = (asset?: MediaAsset, position?: number) => {
@@ -1965,7 +2041,14 @@ function App() {
                   <input type="file" multiple accept="audio/*,image/*,video/*" onChange={importMedia} />
                 </label>
                 <button type="button" title="Nuova cartella media" onClick={createMediaFolder}><FolderPlus size={16} /></button>
-                <button type="button" title="Rinomina selezione" onClick={renameSelectedMediaNode}><Pencil size={16} /></button>
+                <button
+                  type="button"
+                  title={selectedMediaIsProtectedRoot ? 'Le cartelle root della raccolta non possono essere rinominate' : 'Rinomina selezione'}
+                  onClick={renameSelectedMediaNode}
+                  disabled={!selectedMediaNode || selectedMediaIsProtectedRoot}
+                >
+                  <Pencil size={16} />
+                </button>
                 <button
                   type="button"
                   title={selectedMediaIsProtectedRoot ? 'Le cartelle root della raccolta non possono essere eliminate' : 'Elimina media selezionato'}
@@ -2807,6 +2890,7 @@ function MediaExplorerTree({
                 event.preventDefault()
                 event.stopPropagation()
                 event.currentTarget.classList.remove('drop-target')
+                if (sourcePath === asset.path || parentPath(sourcePath) === asset.path) return
                 onMove(sourcePath, asset.path)
               }}
               onClick={() => {
@@ -2979,6 +3063,32 @@ const removeTreeNode = <T extends TreeItem<T>>(nodes: T[], path: string): T[] =>
       ...node,
       children: node.children ? removeTreeNode(node.children, path) : undefined,
     }))
+
+const removeCueReferencesFromScripts = (nodes: ProjectTreeNode[], cueIds: string[]): ProjectTreeNode[] => {
+  if (cueIds.length === 0) return nodes
+  return nodes.map((node) => {
+    if (node.kind === 'markdown') {
+      const content = node.content ?? ''
+      const nextContent = removeCueMarkersFromMarkdown(content, cueIds)
+      return nextContent === content ? node : { ...node, content: nextContent, dirty: true }
+    }
+    return {
+      ...node,
+      children: node.children ? removeCueReferencesFromScripts(node.children, cueIds) : undefined,
+    }
+  })
+}
+
+const removeCueMarkersFromMarkdown = (markdown: string, cueIds: string[]) =>
+  cueIds.reduce((content, cueId) => {
+    const escapedId = escapeRegExp(cueId)
+    return content
+      .replace(new RegExp(`::media\\{[^}]*id="${escapedId}"[^}]*\\}[\\s\\S]*?::\\n?`, 'g'), '')
+      .replace(new RegExp(`^\\[CUE[\\s:][^\\]]+\\]\\s+\\{#${escapedId}(?:\\s+[^}]*)?\\}\\s*\\n?`, 'gm'), '')
+      .replace(/\n{3,}/g, '\n\n')
+  }, markdown)
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 const clearDirtyPath = (nodes: ProjectTreeNode[], pathToClear: string): ProjectTreeNode[] =>
   nodes.map((node) => ({
@@ -3242,11 +3352,10 @@ type ScriptChipMatch = {
   position: number
   nodeSize: number
   attrs: Record<string, unknown>
-}
-
-type ScriptNodeMatch = ScriptChipMatch & {
   node: ProseMirrorNode
 }
+
+type ScriptNodeMatch = ScriptChipMatch
 
 const editorOutlineItems = (doc: ProseMirrorDocNode): OutlineItem[] => {
   const items: OutlineItem[] = []
@@ -3630,7 +3739,7 @@ const chipMatchByRef = (doc: ProseMirrorDocNode, kind: string, refId: string): S
   let match: ScriptChipMatch | undefined
   doc.descendants((node, pos) => {
     if (match || node.type.name !== 'scriptChip' || node.attrs.kind !== kind || node.attrs.refId !== refId) return
-    match = { position: pos, nodeSize: node.nodeSize, attrs: node.attrs }
+    match = { position: pos, nodeSize: node.nodeSize, attrs: node.attrs, node }
   })
   return match
 }
@@ -3660,12 +3769,71 @@ const chipMatchByIndex = (doc: ProseMirrorDocNode, kind: string, index: number):
   doc.descendants((node, pos) => {
     if (match || node.type.name !== 'scriptChip' || node.attrs.kind !== kind) return
     if (currentIndex === index) {
-      match = { position: pos, nodeSize: node.nodeSize, attrs: node.attrs }
+      match = { position: pos, nodeSize: node.nodeSize, attrs: node.attrs, node }
       return
     }
     currentIndex += 1
   })
   return match
+}
+
+const insertionPositionForNode = (doc: ProseMirrorNode, position: number, node: ProseMirrorNode) => {
+  const boundedPosition = Math.max(0, Math.min(position, doc.content.size))
+  const directPosition = insertPoint(doc, boundedPosition, node.type)
+  if (directPosition !== null && directPosition !== undefined) return directPosition
+
+  const resolvedPosition = doc.resolve(boundedPosition)
+  for (let depth = resolvedPosition.depth; depth >= 0; depth -= 1) {
+    const afterPosition = depth > 0 ? resolvedPosition.after(depth) : doc.content.size
+    const afterInsertPosition = insertPoint(doc, Math.min(afterPosition, doc.content.size), node.type)
+    if (afterInsertPosition !== null && afterInsertPosition !== undefined) return afterInsertPosition
+
+    const beforePosition = depth > 0 ? resolvedPosition.before(depth) : 0
+    const beforeInsertPosition = insertPoint(doc, Math.max(0, beforePosition), node.type)
+    if (beforeInsertPosition !== null && beforeInsertPosition !== undefined) return beforeInsertPosition
+  }
+
+  return undefined
+}
+
+const standaloneBlockAroundInlineNode = (doc: ProseMirrorNode, match: ScriptChipMatch): ScriptNodeMatch | undefined => {
+  const resolvedPosition = doc.resolve(match.position)
+  for (let depth = resolvedPosition.depth; depth > 0; depth -= 1) {
+    const node = resolvedPosition.node(depth)
+    if (!node.isBlock) continue
+    if (node.childCount === 1 && node.firstChild === match.node) {
+      return {
+        position: resolvedPosition.before(depth),
+        nodeSize: node.nodeSize,
+        attrs: node.attrs,
+        node,
+      }
+    }
+    return undefined
+  }
+
+  return undefined
+}
+
+const moveEditorNode = (view: EditorView, match: ScriptNodeMatch, dropPosition: number) => {
+  const insertPosition = insertionPositionForNode(view.state.doc, dropPosition, match.node)
+  if (insertPosition === undefined) return false
+  if (insertPosition >= match.position && insertPosition <= match.position + match.nodeSize) return true
+
+  const transaction = view.state.tr.delete(match.position, match.position + match.nodeSize)
+  const mappedPosition = transaction.mapping.map(insertPosition, match.position < insertPosition ? -1 : 1)
+  const safePosition = insertionPositionForNode(transaction.doc, mappedPosition, match.node)
+  if (safePosition === undefined) return false
+
+  view.dispatch(transaction.insert(safePosition, match.node).scrollIntoView())
+  return true
+}
+
+const moveCueChip = (view: EditorView, cueId: string, dropPosition: number) => {
+  const match = chipMatchByRef(view.state.doc, 'cue', cueId)
+  if (!match) return false
+  const movable = standaloneBlockAroundInlineNode(view.state.doc, match) ?? match
+  return moveEditorNode(view, movable, dropPosition)
 }
 
 const chipPositionByIndex = (doc: ProseMirrorDocNode, kind: string, index: number) => {

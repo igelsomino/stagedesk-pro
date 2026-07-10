@@ -97,6 +97,26 @@ const projectStorageApi = (): Plugin => ({
           return
         }
 
+        if (req.method === 'POST' && url.pathname === '/write-media') {
+          const body = await readJsonBody(req)
+          if (!currentProjectPath) throw new Error('Nessuna cartella progetto aperta')
+          await writeProjectMediaFile(
+            currentProjectPath,
+            String(body.targetPath ?? ''),
+            String(body.dataBase64 ?? ''),
+          )
+          sendJson(res, { ok: true })
+          return
+        }
+
+        if (req.method === 'POST' && url.pathname === '/delete-media') {
+          const body = await readJsonBody(req)
+          if (!currentProjectPath) throw new Error('Nessuna cartella progetto aperta')
+          await deleteProjectMediaFile(currentProjectPath, String(body.targetPath ?? ''))
+          sendJson(res, { ok: true })
+          return
+        }
+
         res.statusCode = 404
         res.end('Not found')
       } catch (error) {
@@ -277,6 +297,17 @@ const moveProjectMediaFile = async (root: string, sourcePath: string, targetPath
     const code = (error as NodeJS.ErrnoException).code
     if (code !== 'ENOENT') throw error
   }
+}
+
+const writeProjectMediaFile = async (root: string, targetPath: string, dataBase64: string) => {
+  const targetFile = safeNodePath(root, targetPath)
+  await fs.mkdir(path.dirname(targetFile), { recursive: true })
+  await fs.writeFile(targetFile, Buffer.from(dataBase64, 'base64'))
+}
+
+const deleteProjectMediaFile = async (root: string, targetPath: string) => {
+  const target = safeNodePath(root, targetPath)
+  await fs.rm(target, { recursive: true, force: true })
 }
 
 const safeNodePath = (root: string, nodePath: string) => {

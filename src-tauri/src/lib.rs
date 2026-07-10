@@ -153,6 +153,29 @@ fn save_project_json(
 }
 
 #[tauri::command]
+fn write_media_asset(
+    state: State<CurrentProject>,
+    target_path: String,
+    data_base64: String,
+) -> Result<(), String> {
+    let path = state
+        .path
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone()
+        .ok_or_else(|| "Nessuna cartella progetto aperta".to_string())?;
+    let target_file = path.join(relative_project_path(&target_path));
+
+    if let Some(parent) = target_file.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let bytes = general_purpose::STANDARD
+        .decode(data_base64)
+        .map_err(|error| error.to_string())?;
+    fs::write(target_file, bytes).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn move_media_asset(
     state: State<CurrentProject>,
     source_path: String,
@@ -179,6 +202,26 @@ fn move_media_asset(
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     fs::rename(source_file, target_file).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn delete_media_asset(state: State<CurrentProject>, target_path: String) -> Result<(), String> {
+    let path = state
+        .path
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone()
+        .ok_or_else(|| "Nessuna cartella progetto aperta".to_string())?;
+    let target = path.join(relative_project_path(&target_path));
+
+    if !target.exists() {
+        return Ok(());
+    }
+    if target.is_dir() {
+        fs::remove_dir_all(target).map_err(|error| error.to_string())
+    } else {
+        fs::remove_file(target).map_err(|error| error.to_string())
+    }
 }
 
 #[tauri::command]
@@ -472,14 +515,22 @@ fn write_media_nodes(
 
 fn bundled_media_source(source_path: &str, app: Option<&AppHandle>) -> Result<PathBuf, String> {
     let relative_path = relative_project_path(source_path);
-    let without_sample_media = relative_path.strip_prefix("sample-media").ok().map(PathBuf::from);
+    let without_sample_media = relative_path
+        .strip_prefix("sample-media")
+        .ok()
+        .map(PathBuf::from);
     let mut candidates = Vec::new();
 
     if let Some(app) = app {
         if let Ok(resource_dir) = app.path().resource_dir() {
             candidates.push(resource_dir.join(&relative_path));
             candidates.push(resource_dir.join("public").join(&relative_path));
-            candidates.push(resource_dir.join("_up_").join("public").join(&relative_path));
+            candidates.push(
+                resource_dir
+                    .join("_up_")
+                    .join("public")
+                    .join(&relative_path),
+            );
             if let Some(path) = &without_sample_media {
                 candidates.push(resource_dir.join(path));
                 candidates.push(resource_dir.join("sample-media").join(path));
@@ -498,9 +549,14 @@ fn bundled_media_source(source_path: &str, app: Option<&AppHandle>) -> Result<Pa
         .collect::<Vec<_>>()
         .join(", ");
 
-    candidates.into_iter().find(|path| path.exists()).ok_or_else(|| {
-        format!("Media di esempio non disponibile: {source_path}. Percorsi verificati: {attempted}")
-    })
+    candidates
+        .into_iter()
+        .find(|path| path.exists())
+        .ok_or_else(|| {
+            format!(
+                "Media di esempio non disponibile: {source_path}. Percorsi verificati: {attempted}"
+            )
+        })
 }
 
 fn relative_project_path(path: &str) -> PathBuf {
@@ -538,7 +594,9 @@ pub fn run() {
             save_project_folder,
             load_project_json,
             save_project_json,
+            write_media_asset,
             move_media_asset,
+            delete_media_asset,
             save_pdf_to_downloads,
             open_path,
             desktop_project_path
