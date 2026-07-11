@@ -11,10 +11,10 @@
   --text-normal: #dadada;
   --text-muted: #9b9b9b;
   --text-faint: #777777;
-  --text-accent: #a88bfa;
-  --text-accent-hover: #c4b5fd;
-  --interactive-accent: #7c5cff;
-  --interactive-accent-soft: rgba(124, 92, 255, 0.18);
+  --text-accent: #e95420;
+  --text-accent-hover: #ff8c42;
+  --interactive-accent: #e95420;
+  --interactive-accent-soft: rgba(233, 84, 32, 0.18);
   --danger: #ff7b7b;
   --radius-s: 4px;
   --radius-m: 6px;
@@ -91,7 +91,7 @@ button.primary {
 }
 
 button.primary:hover {
-  background: #8d73ff;
+  background: #f27524;
 }
 
 .sr-only {
@@ -475,6 +475,11 @@ h1 {
 .topbar-icon-button {
   width: 32px;
   padding: 0;
+}
+
+.fullscreen-launch-button svg {
+  fill: currentColor;
+  stroke-width: 0;
 }
 
 .workspace {
@@ -1834,9 +1839,9 @@ body.stagedesk-pointer-dragging * {
 }
 
 .script-editor span[data-chip='note'] {
-  border-color: rgba(168, 139, 250, 0.32);
-  background: linear-gradient(180deg, rgba(168, 139, 250, 0.18), rgba(124, 92, 255, 0.1));
-  color: #e2d9ff;
+  border-color: rgba(233, 84, 32, 0.34);
+  background: linear-gradient(180deg, rgba(233, 84, 32, 0.18), rgba(233, 84, 32, 0.08));
+  color: #ffd4bf;
 }
 
 .script-editor span[data-chip='note'][data-chip-color='green'] {
@@ -2192,6 +2197,46 @@ body.stagedesk-pointer-dragging * {
   min-height: 34px;
 }
 
+.preview-player {
+  display: grid;
+  gap: 8px;
+}
+
+.preview-player.compact {
+  margin-top: 2px;
+}
+
+.preview-player-controls {
+  display: grid;
+  grid-template-columns: 30px 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: 4px 6px;
+  background: var(--background-tertiary);
+}
+
+.preview-player-controls button {
+  width: 28px;
+  min-height: 26px;
+  padding: 0;
+}
+
+.preview-status {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 0.74rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-status.playing {
+  color: var(--text-accent-hover);
+}
+
 .media-preview.visual {
   display: block;
   max-height: 180px;
@@ -2505,9 +2550,9 @@ button.danger:hover {
 }
 
 .cue-strip span.current-cue {
-  border-color: rgba(168, 139, 250, 0.55);
-  background: rgba(124, 92, 255, 0.22);
-  color: #dfd7ff;
+  border-color: rgba(233, 84, 32, 0.62);
+  background: rgba(233, 84, 32, 0.2);
+  color: #ffd4bf;
 }
 
 .fullscreen-media-status {
@@ -2515,6 +2560,57 @@ button.danger:hover {
   color: var(--text-muted) !important;
   font-size: 0.92rem !important;
   line-height: 1.35 !important;
+}
+
+.fullscreen-shortcuts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 18;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: min(560px, calc(100vw - 32px));
+  opacity: 0.38;
+  transition: opacity 140ms ease;
+}
+
+.fullscreen-shortcuts:hover,
+.fullscreen-shortcuts:focus-within {
+  opacity: 0.92;
+}
+
+.fullscreen-shortcuts button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(16, 16, 16, 0.66);
+  color: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(8px);
+  font-size: 0.72rem;
+}
+
+.fullscreen-shortcuts button:hover {
+  border-color: rgba(233, 84, 32, 0.62);
+  background: rgba(233, 84, 32, 0.18);
+  color: #ffffff;
+}
+
+.fullscreen-shortcuts kbd {
+  min-width: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 5px;
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.68rem;
+  font-weight: 800;
 }
 
 progress {

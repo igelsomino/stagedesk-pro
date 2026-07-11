@@ -37,6 +37,27 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.11
+
+> Aggiornamento dedicato a anteprime media, fullscreen e identità visiva.
+
+- Le anteprime audio e video nella struttura media e nella colonna proprietà cue usano controlli applicativi coerenti con editor e fullscreen.
+- Nell'app desktop le anteprime audio e musicali usano il player nativo.
+- Entrando in modalità tutto schermo vengono interrotti cue in esecuzione nell'editor e anteprime media.
+- I cue previsti in modalità tutto schermo vengono rieseguiti quando lo step lo richiede.
+- Riallineati gli shortcut della modalità tutto schermo con la riproduzione multimediale e aggiunti comandi ghost cliccabili.
+- Resa più robusta la pausa dei chip audio nell'editor.
+- Aggiornata l'icona dell'applicazione e sostituito l'accento viola con l'arancione Ubuntu.
+- Il pulsante di avvio fullscreen usa ora un'icona play piena.
+
+## Versione 1.0.10
+
+> Patch dedicata alla riproduzione dei cue audio su Linux.
+
+- Aggiunto un player audio nativo per l'app desktop, usato per cue sonori e musicali in editor e modalità tutto schermo.
+- La riproduzione audio su Linux non dipende più dal solo WebView/GStreamer.
+- Sincronizzati play, pausa, ripresa e stop dei cue audio tra chip nell'editor, modalità tutto schermo e player nativo.
+
 ## Versione 1.0.8
 
 > Patch dedicata a drag&drop note e avvio cue audio su Linux.

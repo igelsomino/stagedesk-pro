@@ -1,5 +1,18 @@
 # Novità
 
+## Versione 1.0.11
+
+> Aggiornamento dedicato a anteprime media, fullscreen e identità visiva.
+
+- Le anteprime audio e video nella struttura media e nella colonna proprietà cue usano controlli applicativi coerenti con editor e fullscreen.
+- Nell'app desktop le anteprime audio e musicali usano il player nativo, riducendo i problemi di riproduzione su Linux.
+- Entrando in modalità tutto schermo vengono interrotti cue in esecuzione nell'editor e anteprime media.
+- I cue previsti in modalità tutto schermo vengono rieseguiti quando lo step lo richiede, anche se erano già stati eseguiti nell'editor o in uno step precedente.
+- Riallineati gli shortcut della modalità tutto schermo con la riproduzione multimediale e aggiunti comandi ghost cliccabili in basso a destra.
+- Resa più robusta la pausa dei chip audio nell'editor.
+- Aggiornata l'icona dell'applicazione e sostituito l'accento viola con l'arancione Ubuntu.
+- Il pulsante di avvio fullscreen usa ora un'icona play piena.
+
 ## Versione 1.0.10
 
 > Patch dedicata alla riproduzione dei cue audio su Linux.

@@ -40,6 +40,7 @@ import {
   PanelLeft,
   PanelRight,
   Pencil,
+  Pause,
   Play,
   Quote,
   Redo2,
@@ -47,6 +48,7 @@ import {
   Grid2X2X,
   PanelTopClose,
   Search,
+  Square,
   Trash2,
   Type,
   Undo2,
@@ -61,7 +63,6 @@ import type {
   ChangeEvent,
   Dispatch,
   DragEvent as ReactDragEvent,
-  KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   MutableRefObject,
   PointerEvent as ReactPointerEvent,
@@ -101,6 +102,8 @@ const STAGEDESK_DRAG_STATE_KEY = '__STAGEDESK_DRAG_PAYLOAD__'
 const POINTER_DRAGGING_CLASS = 'stagedesk-pointer-dragging'
 const POINTER_EDITOR_TARGET_CLASS = 'stagedesk-pointer-editor-target'
 const POINTER_MEDIA_TARGET_CLASS = 'drop-target'
+const STOP_PREVIEW_PLAYBACK_EVENT = 'stagedesk-stop-preview-playback'
+const STOP_EDITOR_PLAYBACK_EVENT = 'stagedesk-stop-editor-playback'
 type EditorCueState = 'playing' | 'paused' | 'stopped'
 type EditorCueStateWindow = Window & {
   __STAGEDESK_EDITOR_CUE_STATE__?: { id: string; state: EditorCueState }
@@ -398,6 +401,7 @@ function App() {
     }
 
     const startEditorCue = (cue: MediaCue, audio: HTMLAudioElement, assetUrl: string) => {
+      window.dispatchEvent(new CustomEvent(STOP_PREVIEW_PLAYBACK_EVENT))
       if (editorPlayingCueRef.current?.id) dispatchEditorCueState(editorPlayingCueRef.current.id, 'stopped')
       if (isTauriRuntime()) void stopNativeAudioAsset()
       clearAudioTimers(editorAudioTimersRef)
@@ -447,6 +451,7 @@ function App() {
     }
 
     const startNativeEditorCue = (cue: MediaCue, audio: HTMLAudioElement, assetUrl: string) => {
+      window.dispatchEvent(new CustomEvent(STOP_PREVIEW_PLAYBACK_EVENT))
       if (editorPlayingCueRef.current?.id) dispatchEditorCueState(editorPlayingCueRef.current.id, 'stopped')
       clearAudioTimers(editorAudioTimersRef)
       editorAudioRef.current?.pause()
@@ -509,12 +514,18 @@ function App() {
         clearAudioTimers(editorAudioTimersRef)
         if (isTauriRuntime()) {
           void pauseNativeAudioAsset()
+            .then(() => {
+              editorPlayingCueRef.current = { id: cue.id, state: 'paused' }
+              dispatchEditorCueState(cue.id, 'paused')
+              setStorageStatus(`Cue in pausa: ${cue.title || cue.src}`)
+            })
+            .catch((error: unknown) => setStorageStatus(nativePlaybackErrorMessage(cue, error)))
         } else {
           audio.pause()
+          editorPlayingCueRef.current = { id: cue.id, state: 'paused' }
+          dispatchEditorCueState(cue.id, 'paused')
+          setStorageStatus(`Cue in pausa: ${cue.title || cue.src}`)
         }
-        editorPlayingCueRef.current = { id: cue.id, state: 'paused' }
-        dispatchEditorCueState(cue.id, 'paused')
-        setStorageStatus(`Cue in pausa: ${cue.title || cue.src}`)
         return
       }
 
@@ -572,6 +583,21 @@ function App() {
       stopEditorAudioImmediately(cue)
     }
 
+    const stopEditorPlaybackFromOutside = () => {
+      const current = editorPlayingCueRef.current
+      if (!current?.id) return
+      const cue = projectRef.current.cues.find((item) => item.id === current.id)
+      if (cue) {
+        stopEditorAudioImmediately(cue)
+        return
+      }
+      clearAudioTimers(editorAudioTimersRef)
+      if (isTauriRuntime()) void stopNativeAudioAsset()
+      editorAudioRef.current?.pause()
+      editorPlayingCueRef.current = undefined
+      dispatchEditorCueState(current.id, 'stopped')
+    }
+
     const deleteCueFromEditor = (event: Event) => {
       const { id } = (event as CustomEvent<{ id?: string }>).detail ?? {}
       if (!id) return
@@ -590,6 +616,7 @@ function App() {
     window.addEventListener('script-note-delete', deleteNoteFromEditor)
     window.addEventListener('script-cue-toggle', toggleCueFromEditor)
     window.addEventListener('script-cue-stop', stopCueFromEditor)
+    window.addEventListener(STOP_EDITOR_PLAYBACK_EVENT, stopEditorPlaybackFromOutside)
     window.addEventListener('script-cue-delete', deleteCueFromEditor)
 
     return () => {
@@ -597,6 +624,7 @@ function App() {
       window.removeEventListener('script-note-delete', deleteNoteFromEditor)
       window.removeEventListener('script-cue-toggle', toggleCueFromEditor)
       window.removeEventListener('script-cue-stop', stopCueFromEditor)
+      window.removeEventListener(STOP_EDITOR_PLAYBACK_EVENT, stopEditorPlaybackFromOutside)
       window.removeEventListener('script-cue-delete', deleteCueFromEditor)
       clearAudioTimers(editorAudioTimersRef)
       if (isTauriRuntime()) void stopNativeAudioAsset()
@@ -1113,6 +1141,25 @@ function App() {
       .catch((error) => setStorageStatus(`Salvataggio progetto non riuscito: ${String(error)}`))
   }
 
+  const stopEditorAndPreviewPlayback = (statusMessage?: string) => {
+    const currentEditorCue = editorPlayingCueRef.current
+    window.dispatchEvent(new CustomEvent(STOP_PREVIEW_PLAYBACK_EVENT))
+    clearAudioTimers(editorAudioTimersRef)
+    if (editorAudioRef.current) {
+      editorAudioRef.current.onended = null
+      editorAudioRef.current.onerror = null
+      editorAudioRef.current.pause()
+      editorAudioRef.current.removeAttribute('src')
+      editorAudioRef.current.load()
+    }
+    if (currentEditorCue?.id) {
+      window.dispatchEvent(new CustomEvent('script-cue-state', { detail: { id: currentEditorCue.id, state: 'stopped' } }))
+    }
+    editorPlayingCueRef.current = undefined
+    if (isTauriRuntime()) void stopNativeAudioAsset()
+    if (statusMessage) setStorageStatus(statusMessage)
+  }
+
   const startFullscreenWithValidation = () => {
     if (!editor || activeAppDocument) return
     const markdown = editorJsonToMarkdown(editor.getJSON())
@@ -1124,6 +1171,8 @@ function App() {
       return
     }
 
+    stopEditorAndPreviewPlayback('Playback editor e anteprime interrotto. Avvio fullscreen...')
+    setExecutedCueIds([])
     setFullscreenIndex(fullscreenIndexAtEditorPosition(editor, performanceBlocks))
     setFullscreen(true)
   }
@@ -2125,9 +2174,6 @@ function App() {
 
   const visibleSelectedCue = filteredCues.find((cue) => cue.id === selectedCueId)
   const visibleSelectedCueAsset = visibleSelectedCue ? findTreeNode(project.media, visibleSelectedCue.src) : undefined
-  const visibleSelectedCueAssetUrl = visibleSelectedCueAsset
-    ? mediaAssetUrl(visibleSelectedCueAsset, project.rootPath)
-    : undefined
 
   const exportActiveFile = async (mode: 'complete' | 'clean') => {
     try {
@@ -2226,7 +2272,7 @@ function App() {
           </button>
           <button
             type="button"
-            className="topbar-icon-button primary"
+            className="topbar-icon-button primary fullscreen-launch-button"
             title="Fullscreen"
             aria-label="Fullscreen"
             onClick={startFullscreenWithValidation}
@@ -2455,7 +2501,12 @@ function App() {
                 />
               </div>
               {selectedMediaNode && selectedMediaNode.kind !== 'folder' ? (
-                <MediaPreview asset={selectedMediaNode} projectRootPath={project.rootPath} onCue={insertCue} />
+                <MediaPreview
+                  asset={selectedMediaNode}
+                  projectRootPath={project.rootPath}
+                  onCue={insertCue}
+                  onStatus={setStorageStatus}
+                />
               ) : null}
             </>
           ) : null}
@@ -2919,18 +2970,12 @@ function App() {
                 />
                 Loop
               </label>
-              {visibleSelectedCueAssetUrl && (visibleSelectedCue.type === 'audio' || visibleSelectedCue.type === 'music') ? (
-                <audio className="media-preview" controls src={visibleSelectedCueAssetUrl} />
-              ) : null}
-              {visibleSelectedCueAssetUrl && visibleSelectedCue.type === 'image' ? (
-                <img className="media-preview visual" src={visibleSelectedCueAssetUrl} alt={visibleSelectedCue.title || visibleSelectedCue.src} />
-              ) : null}
-              {visibleSelectedCueAssetUrl && visibleSelectedCue.type === 'video' ? (
-                <video className="media-preview visual" controls src={visibleSelectedCueAssetUrl} />
-              ) : null}
-              {!visibleSelectedCueAssetUrl ? (
-                <p className="empty-state">Anteprima non disponibile: file media non trovato nel progetto.</p>
-              ) : null}
+              <CueMediaPreview
+                cue={visibleSelectedCue}
+                asset={visibleSelectedCueAsset}
+                projectRootPath={project.rootPath}
+                onStatus={setStorageStatus}
+              />
               <button type="button" className="danger" onClick={deleteSelectedCue}><Trash2 size={16} />Elimina cue</button>
             </section>
           ) : (
@@ -3424,12 +3469,15 @@ function MediaPreview({
   asset,
   projectRootPath,
   onCue,
+  onStatus,
 }: {
   asset: MediaAsset
   projectRootPath: string
   onCue: (asset: MediaAsset) => void
+  onStatus: (message: string) => void
 }) {
   const assetUrl = mediaAssetUrl(asset, projectRootPath)
+  const previewCue = mediaAssetPreviewCue(asset)
   return (
     <section className="media-preview-card">
       <div className="media-preview-header">
@@ -3437,10 +3485,219 @@ function MediaPreview({
         <button type="button" title="Inserisci come cue" onClick={() => onCue(asset)}><Play size={13} /></button>
       </div>
       {assetUrl && asset.kind === 'image' ? <img src={assetUrl} alt="" /> : null}
-      {assetUrl && asset.kind === 'video' ? <video controls src={assetUrl} /> : null}
-      {assetUrl && (asset.kind === 'audio' || asset.kind === 'music') ? <audio controls src={assetUrl} /> : null}
+      {assetUrl && asset.kind === 'video' ? (
+        <PreviewMediaControls cue={previewCue} assetUrl={assetUrl} onStatus={onStatus} />
+      ) : null}
+      {assetUrl && (asset.kind === 'audio' || asset.kind === 'music') ? (
+        <PreviewMediaControls cue={previewCue} assetUrl={assetUrl} onStatus={onStatus} />
+      ) : null}
       {!assetUrl ? <p className="empty-state">Anteprima non disponibile: file media non trovato nel progetto.</p> : null}
     </section>
+  )
+}
+
+function CueMediaPreview({
+  cue,
+  asset,
+  projectRootPath,
+  onStatus,
+}: {
+  cue: MediaCue
+  asset: MediaAsset | undefined
+  projectRootPath: string
+  onStatus: (message: string) => void
+}) {
+  const assetUrl = asset ? mediaAssetUrl(asset, projectRootPath) : undefined
+  if (!asset || !assetUrl) {
+    return <p className="empty-state">Anteprima non disponibile: file media non trovato nel progetto.</p>
+  }
+
+  if (cue.type === 'image') {
+    return <img className="media-preview visual" src={assetUrl} alt={cue.title || cue.src} />
+  }
+
+  if (cue.type === 'video' || cue.type === 'audio' || cue.type === 'music') {
+    return <PreviewMediaControls cue={cue} assetUrl={assetUrl} onStatus={onStatus} compact />
+  }
+
+  return <p className="empty-state">Anteprima non disponibile per questo tipo di cue.</p>
+}
+
+function PreviewMediaControls({
+  cue,
+  assetUrl,
+  onStatus,
+  compact = false,
+}: {
+  cue: MediaCue
+  assetUrl: string
+  onStatus: (message: string) => void
+  compact?: boolean
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const timersRef = useRef<number[]>([])
+  const previewOwnsNativeAudioRef = useRef(false)
+  const [state, setState] = useState<'idle' | 'playing' | 'paused'>('idle')
+  const [status, setStatus] = useState('Anteprima pronta')
+  const isNativeAudio = isTauriRuntime() && isAudioCue(cue)
+  const label = cue.title || cue.src
+
+  const setPreviewStatus = useCallback((message: string) => {
+    setStatus(message)
+    onStatus(message)
+  }, [onStatus])
+
+  const stopPreview = useCallback((silent = false, updateState = true) => {
+    clearAudioTimers(timersRef)
+    if (isNativeAudio && previewOwnsNativeAudioRef.current) {
+      previewOwnsNativeAudioRef.current = false
+      void stopNativeAudioAsset()
+    }
+    const media = cue.type === 'video' ? videoRef.current : audioRef.current
+    if (media) {
+      media.onended = null
+      media.pause()
+      try {
+        media.currentTime = Math.max(0, cue.options.startAt ?? 0)
+      } catch {
+        // Some media backends reject currentTime until metadata is loaded.
+      }
+    }
+    if (updateState) {
+      setState('idle')
+      if (!silent) setPreviewStatus(`Anteprima fermata: ${label}`)
+    }
+  }, [cue, isNativeAudio, label, setPreviewStatus])
+
+  useEffect(() => {
+    const stopOnGlobalRequest = () => stopPreview(true)
+    window.addEventListener(STOP_PREVIEW_PLAYBACK_EVENT, stopOnGlobalRequest)
+    return () => {
+      window.removeEventListener(STOP_PREVIEW_PLAYBACK_EVENT, stopOnGlobalRequest)
+      stopPreview(true, false)
+    }
+  }, [stopPreview])
+
+  const playPreview = () => {
+    window.dispatchEvent(new CustomEvent(STOP_PREVIEW_PLAYBACK_EVENT))
+    window.dispatchEvent(new CustomEvent(STOP_EDITOR_PLAYBACK_EVENT))
+    clearAudioTimers(timersRef)
+
+    if (isNativeAudio) {
+      void playNativeAudioAsset(cue)
+        .then((playbackDuration) => {
+          previewOwnsNativeAudioRef.current = true
+          setState('playing')
+          setPreviewStatus(`Anteprima in esecuzione: ${label}`)
+          scheduleNativeCueEnd(cue, timersRef, playbackDuration, () => {
+            previewOwnsNativeAudioRef.current = false
+            setState('idle')
+            setPreviewStatus(`Anteprima terminata: ${label}`)
+          })
+        })
+        .catch((error: unknown) => setPreviewStatus(nativePlaybackErrorMessage(cue, error)))
+      return
+    }
+
+    const media = cue.type === 'video' ? videoRef.current : audioRef.current
+    if (!media) return
+    media.loop = Boolean(cue.options.loop)
+    media.volume = cueTargetVolume(cue)
+    media.onended = () => {
+      setState('idle')
+      setPreviewStatus(`Anteprima terminata: ${label}`)
+    }
+    void prepareMediaForCue(media, cue, assetUrl)
+      .then((preparedSrc) => {
+        if (media.src !== preparedSrc) return
+        scheduleCueEnd(media, cue, timersRef, () => {
+          setState('idle')
+          setPreviewStatus(`Anteprima terminata: ${label}`)
+        })
+        return media.play()
+      })
+      .then(() => {
+        setState('playing')
+        setPreviewStatus(`Anteprima in esecuzione: ${label}`)
+      })
+      .catch((error: unknown) => setPreviewStatus(playbackErrorMessage(cue, error)))
+  }
+
+  const pausePreview = () => {
+    clearAudioTimers(timersRef)
+    if (isNativeAudio) {
+      void pauseNativeAudioAsset()
+        .then(() => {
+          setState('paused')
+          setPreviewStatus(`Anteprima in pausa: ${label}`)
+        })
+        .catch((error: unknown) => setPreviewStatus(nativePlaybackErrorMessage(cue, error)))
+      return
+    }
+    const media = cue.type === 'video' ? videoRef.current : audioRef.current
+    if (!media) return
+    media.pause()
+    setState('paused')
+    setPreviewStatus(`Anteprima in pausa: ${label}`)
+  }
+
+  const resumePreview = () => {
+    clearAudioTimers(timersRef)
+    if (isNativeAudio) {
+      void resumeNativeAudioAsset()
+        .then(() => {
+          previewOwnsNativeAudioRef.current = true
+          setState('playing')
+          setPreviewStatus(`Anteprima ripresa: ${label}`)
+          scheduleNativeCueEnd(cue, timersRef, undefined, () => {
+            previewOwnsNativeAudioRef.current = false
+            setState('idle')
+            setPreviewStatus(`Anteprima terminata: ${label}`)
+          })
+        })
+        .catch((error: unknown) => setPreviewStatus(nativePlaybackErrorMessage(cue, error)))
+      return
+    }
+    const media = cue.type === 'video' ? videoRef.current : audioRef.current
+    if (!media) return
+    void media.play()
+      .then(() => {
+        setState('playing')
+        setPreviewStatus(`Anteprima ripresa: ${label}`)
+      })
+      .catch((error: unknown) => setPreviewStatus(playbackErrorMessage(cue, error)))
+  }
+
+  const togglePreview = () => {
+    if (state === 'playing') {
+      pausePreview()
+      return
+    }
+    if (state === 'paused') {
+      resumePreview()
+      return
+    }
+    playPreview()
+  }
+
+  return (
+    <div className={compact ? 'preview-player compact' : 'preview-player'}>
+      {cue.type === 'video' ? (
+        <video ref={videoRef} className="media-preview visual" src={assetUrl} preload="metadata" playsInline />
+      ) : (
+        <audio ref={audioRef} className="sr-only" src={assetUrl} preload="metadata" />
+      )}
+      <div className="preview-player-controls">
+        <button type="button" onClick={togglePreview} title={state === 'playing' ? 'Pausa anteprima' : 'Esegui anteprima'}>
+          {state === 'playing' ? <Pause size={14} /> : <Play size={14} />}
+        </button>
+        <button type="button" onClick={() => stopPreview()} title="Ferma anteprima" disabled={state === 'idle'}>
+          <Square size={13} />
+        </button>
+        <span className={state === 'playing' ? 'preview-status playing' : 'preview-status'}>{status}</span>
+      </div>
+    </div>
   )
 }
 
@@ -3669,6 +3926,21 @@ const noteChipLabel = (note: Pick<DirectorNote, 'title' | 'type'>, noteTypes: No
 
 const cueChipLabel = (cue: Pick<MediaCue, 'src' | 'title'>) =>
   cue.title?.trim() || cue.src.split('/').pop() || 'Cue media'
+
+const mediaAssetPreviewCue = (asset: MediaAsset): MediaCue => ({
+  id: `preview-${asset.id}`,
+  type: asset.kind === 'music' || asset.kind === 'image' || asset.kind === 'video' ? asset.kind : 'audio',
+  src: asset.path,
+  title: asset.name,
+  description: '',
+  autoplay: false,
+  anchorId: `preview-${asset.id}`,
+  filePath: '',
+  sceneId: '',
+  options: { volume: 70, fadeIn: 0, fadeOut: 0, loop: false },
+  createdAt: new Date(0).toISOString(),
+  updatedAt: new Date(0).toISOString(),
+})
 
 const compactPath = (path: string) => {
   const parts = path.split('/')
@@ -4765,10 +5037,11 @@ function FullscreenView({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const audioTimersRef = useRef<number[]>([])
-  const activePlaybackRef = useRef<{ cueId: string; assetUrl: string; type: 'audio' | 'video' } | undefined>(undefined)
+  const activePlaybackRef = useRef<{ cueId: string; assetUrl: string; type: 'audio' | 'video'; token: number } | undefined>(undefined)
   const playingCueRef = useRef<MediaCue | undefined>(undefined)
   const onCueExecutedRef = useRef(onCueExecuted)
   const [playingCueId, setPlayingCueId] = useState('')
+  const [playbackToken, setPlaybackToken] = useState(0)
   const [mediaStatus, setMediaStatus] = useState('Pronto')
   const [nativeAudioPaused, setNativeAudioPaused] = useState(false)
   const stepCue = block?.cueId ? cues.find((cue) => cue.id === block.cueId) : undefined
@@ -4786,8 +5059,13 @@ function FullscreenView({
   const fullscreenText = isCueStep ? stepCue?.title || block?.text || 'Cue multimediale' : block?.text ?? 'Nessuna battuta disponibile.'
   const density = fullscreenText.length > 420 ? 'dense' : fullscreenText.length > 220 ? 'medium' : 'normal'
 
+  const requestCuePlayback = useCallback((cueId: string) => {
+    setPlayingCueId(cueId)
+    setPlaybackToken((current) => current + 1)
+  }, [])
+
   useEffect(() => {
-    if (!stepCue || !stepCue.autoplay || executedCueIds.includes(stepCue.id)) return
+    if (!stepCue || !stepCue.autoplay) return
 
     if (stepCue.type === 'image') {
       setMediaStatus(`Immagine visualizzata: ${stepCue.title || stepCue.src}`)
@@ -4795,8 +5073,8 @@ function FullscreenView({
       return
     }
 
-    setPlayingCueId(stepCue.id)
-  }, [executedCueIds, stepCue])
+    requestCuePlayback(stepCue.id)
+  }, [index, requestCuePlayback, stepCue])
 
   useEffect(() => {
     const cue = playingCueRef.current
@@ -4824,11 +5102,12 @@ function FullscreenView({
     if (
       activePlayback?.cueId === cue.id &&
       activePlayback.assetUrl === assetUrl &&
-      activePlayback.type === playbackType
+      activePlayback.type === playbackType &&
+      activePlayback.token === playbackToken
     ) {
       return
     }
-    activePlaybackRef.current = { cueId: cue.id, assetUrl, type: playbackType }
+    activePlaybackRef.current = { cueId: cue.id, assetUrl, type: playbackType, token: playbackToken }
     clearAudioTimers(audioTimersRef)
     setNativeAudioPaused(false)
 
@@ -4961,7 +5240,7 @@ function FullscreenView({
       clearAudioTimers(audioTimersRef)
       if (activePlaybackRef.current?.cueId === cue.id) activePlaybackRef.current = undefined
     }
-  }, [playingAssetUrl, playingCueId])
+  }, [playbackToken, playingAssetUrl, playingCueId])
 
   const togglePlayback = () => {
     if (!playablePlayingCue) {
@@ -4976,7 +5255,7 @@ function FullscreenView({
       if (!isPlayableCue(stepCue)) return
       clearAudioTimers(audioTimersRef)
       setNativeAudioPaused(false)
-      setPlayingCueId(stepCue.id)
+      requestCuePlayback(stepCue.id)
       return
     }
 
@@ -5053,7 +5332,6 @@ function FullscreenView({
     const cue = stepCue ?? playablePlayingCue
     if (!cue) return
     clearAudioTimers(audioTimersRef)
-    setPlayingCueId(cue.id)
     if (cue.type === 'image') {
       setMediaStatus(`Immagine visualizzata: ${cue.title || cue.src}`)
       onCueExecuted(cue.id)
@@ -5063,75 +5341,33 @@ function FullscreenView({
     }
     if (!isPlayableCue(cue)) return
     setNativeAudioPaused(false)
-
-    if (isAudioCue(cue) && isTauriRuntime()) {
-      void playNativeAudioAsset(cue)
-        .then((playbackDuration) => {
-          activePlaybackRef.current = { cueId: cue.id, assetUrl: cue.src, type: 'audio' }
-          onCueExecuted(cue.id)
-          setMediaStatus(`Riavviato: ${cue.title || cue.src}`)
-          scheduleNativeCueEnd(cue, audioTimersRef, playbackDuration, () => {
-            activePlaybackRef.current = undefined
-            setPlayingCueId('')
-            setNativeAudioPaused(false)
-            setMediaStatus(`Cue terminato: ${cue.title || cue.src}`)
-          })
-        })
-        .catch((error: unknown) => setMediaStatus(nativePlaybackErrorMessage(cue, error)))
-      return
-    }
-
-    const mediaElement = cue.type === 'video' ? videoRef.current : audioRef.current
-    if (!mediaElement) return
-    const restartAsset = findTreeNode(media, cue.src)
-    const restartAssetUrl = restartAsset ? mediaAssetUrl(restartAsset, projectRootPath) : undefined
-    void prepareMediaForCue(mediaElement, cue, restartAssetUrl)
-      .then((preparedSrc) => {
-        if (mediaElement.src !== preparedSrc) return
-        mediaElement.volume = cueTargetVolume(cue)
-        scheduleCueEnd(mediaElement, cue, audioTimersRef)
-        return mediaElement.play()
-      })
-      .then(() => {
-        onCueExecuted(cue.id)
-        setMediaStatus(`Riavviato: ${cue.title || cue.src}`)
-      })
-      .catch((error: unknown) => setMediaStatus(playbackErrorMessage(cue, error)))
-  }
-
-  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    event.stopPropagation()
-    if (event.key === 'ArrowRight') onNext()
-    if (event.key === 'ArrowLeft') onPrevious()
-    if (event.key === 'Home') onHome()
-    if (event.key === 'End') onEnd()
-    if (event.key === 'Escape') onClose()
-    if (event.key === ' ') {
-      event.preventDefault()
-      togglePlayback()
-    }
-    if (event.key.toLowerCase() === 's') stopPlayback()
-    if (event.key.toLowerCase() === 'r') restartPlayback()
+    requestCuePlayback(cue.id)
+    setMediaStatus(`Riavvio cue: ${cue.title || cue.src}`)
   }
 
   useEffect(() => {
     const handleWindowKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase()
+      const handledKeys = ['arrowright', 'arrowleft', 'home', 'end', 'escape', ' ', 's', 'r']
+      if (!handledKeys.includes(key)) return
+      event.preventDefault()
       if (event.key === 'ArrowRight') onNext()
       if (event.key === 'ArrowLeft') onPrevious()
       if (event.key === 'Home') onHome()
       if (event.key === 'End') onEnd()
       if (event.key === 'Escape') onClose()
       if (event.key === ' ') {
-        event.preventDefault()
         togglePlayback()
       }
+      if (key === 's') stopPlayback()
+      if (key === 'r') restartPlayback()
     }
     window.addEventListener('keydown', handleWindowKeyDown)
     return () => window.removeEventListener('keydown', handleWindowKeyDown)
   })
 
   return (
-    <div className="fullscreen-view" tabIndex={0} onKeyDown={handleKeyDown}>
+    <div className="fullscreen-view" tabIndex={0}>
       <button type="button" className="exit-fullscreen" onClick={onClose} aria-label="Esci" title="Esci">
         <X size={18} />
       </button>
@@ -5172,6 +5408,29 @@ function FullscreenView({
         <audio ref={audioRef} src={playingCue && isAudioCue(playingCue) ? playingAssetUrl : undefined} />
         <progress value={index + 1} max={Math.max(total, 1)} />
         <small>{index + 1} / {total}</small>
+      </div>
+      <div className="fullscreen-shortcuts" aria-label="Scorciatoie fullscreen">
+        <button type="button" onClick={onPrevious} title="Freccia sinistra">
+          <kbd>←</kbd><span>Precedente</span>
+        </button>
+        <button type="button" onClick={onNext} title="Freccia destra">
+          <kbd>→</kbd><span>Avanti</span>
+        </button>
+        <button type="button" onClick={togglePlayback} title="Spazio">
+          <kbd>Spazio</kbd><span>Play/Pausa</span>
+        </button>
+        <button type="button" onClick={stopPlayback} title="S">
+          <kbd>S</kbd><span>Stop</span>
+        </button>
+        <button type="button" onClick={restartPlayback} title="R">
+          <kbd>R</kbd><span>Riavvia</span>
+        </button>
+        <button type="button" onClick={onHome} title="Home">
+          <kbd>Home</kbd><span>Prima</span>
+        </button>
+        <button type="button" onClick={onEnd} title="Fine">
+          <kbd>Fine</kbd><span>Ultima</span>
+        </button>
       </div>
     </div>
   )
@@ -5795,7 +6054,7 @@ const drawPdfQuoteBox = (
   doc.setDrawColor(209, 213, 219)
   doc.setFillColor(249, 250, 251)
   doc.roundedRect(x, y, width, boxHeight, 4, 4, 'FD')
-  doc.setFillColor(124, 92, 255)
+  doc.setFillColor(233, 84, 32)
   doc.rect(x, y, 4, boxHeight, 'F')
   doc.setTextColor('#374151')
 
