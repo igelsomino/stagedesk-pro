@@ -1,5 +1,6 @@
 import type { Editor } from '@tiptap/core'
 import { DOMParser as ProseMirrorDOMParser, type Node as ProseMirrorNode } from '@tiptap/pm/model'
+import { Selection } from '@tiptap/pm/state'
 import { insertPoint } from '@tiptap/pm/transform'
 import type { EditorView } from '@tiptap/pm/view'
 import { useEditor, EditorContent } from '@tiptap/react'
@@ -55,7 +56,17 @@ import {
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, ChangeEvent, Dispatch, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MutableRefObject, SetStateAction } from 'react'
+import type {
+  CSSProperties,
+  ChangeEvent,
+  Dispatch,
+  DragEvent as ReactDragEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  MutableRefObject,
+  PointerEvent as ReactPointerEvent,
+  SetStateAction,
+} from 'react'
 import './App.css'
 import { appDocumentContent, fetchAppDocumentContent, getAppDocument, isAppDocumentPath } from './appDocs'
 import { useAuth } from './authContext'
@@ -87,11 +98,25 @@ const NOTE_ID_DND_PREFIX = 'stagedesk-note:'
 const INSTALLED_UPDATE_VERSION_KEY = 'stagedesk-installed-update-version'
 const STAGEDESK_SITE_URL = 'https://stagedesk-pro.aigconsulting.it'
 const STAGEDESK_DRAG_STATE_KEY = '__STAGEDESK_DRAG_PAYLOAD__'
+const POINTER_DRAGGING_CLASS = 'stagedesk-pointer-dragging'
+const POINTER_EDITOR_TARGET_CLASS = 'stagedesk-pointer-editor-target'
+const POINTER_MEDIA_TARGET_CLASS = 'drop-target'
 type EditorCueState = 'playing' | 'paused' | 'stopped'
 type EditorCueStateWindow = Window & {
   __STAGEDESK_EDITOR_CUE_STATE__?: { id: string; state: EditorCueState }
 }
-type StagedeskDragPayload = { type: string; value: string; startedAt: number }
+type StagedeskDragPayload = {
+  type: string
+  value: string
+  startedAt: number
+  startX?: number
+  startY?: number
+  pointerId?: number
+  pointerActive?: boolean
+  label?: string
+  detail?: string
+  tone?: 'cue' | 'note' | 'media'
+}
 type StagedeskDragWindow = Window & {
   __STAGEDESK_DRAG_PAYLOAD__?: StagedeskDragPayload
 }
@@ -109,6 +134,23 @@ type ScriptValidationIssue = {
   message: string
   highlight: string
   severity: 'error' | 'warning'
+}
+type PointerDropTarget =
+  | { kind: 'editor'; position: number; element: HTMLElement }
+  | { kind: 'media'; folderPath: string; element: HTMLElement }
+type InternalDragEvent = PointerEvent | MouseEvent
+type PointerDragPreview = {
+  x: number
+  y: number
+  label: string
+  detail?: string
+  tone: 'cue' | 'note' | 'media'
+}
+type PointerDropIndicator = {
+  x: number
+  y: number
+  width: number
+  label: string
 }
 const tableExtensions = TableKit.configure({
   table: {
@@ -157,6 +199,8 @@ function App() {
   const [desktopStorageReady, setDesktopStorageReady] = useState(false)
   const [startupProjectReady, setStartupProjectReady] = useState(false)
   const [scriptValidationIssues, setScriptValidationIssues] = useState<ScriptValidationIssue[]>([])
+  const [pointerDragPreview, setPointerDragPreview] = useState<PointerDragPreview | undefined>()
+  const [pointerDropIndicator, setPointerDropIndicator] = useState<PointerDropIndicator | undefined>()
   const updateCheckStartedRef = useRef(false)
   const updateInstallInProgressRef = useRef(false)
   const startupProjectLoadedRef = useRef(false)
@@ -233,6 +277,8 @@ function App() {
   const noteMenuRef = useRef<HTMLDivElement>(null)
   const exportMenuRef = useRef<HTMLDivElement>(null)
   const appMenuRef = useRef<HTMLDivElement>(null)
+  const pointerDropTargetRef = useRef<PointerDropTarget | undefined>(undefined)
+  const moveMediaNodeRef = useRef<(sourcePath: string, targetFolderPath: string) => Promise<void>>(async () => undefined)
   const fileNotes = useMemo(
     () => project.notes.filter((note) => note.filePath === activePath),
     [activePath, project.notes],
@@ -1485,6 +1531,165 @@ function App() {
     expandPath(targetFolderPath)
     showStatus(`Media spostato in ${targetFolder?.name ?? 'media'}: ${sourceNode.name}`)
   }
+  moveMediaNodeRef.current = moveMediaNode
+
+  useEffect(() => {
+    const clearPointerTarget = () => {
+      const target = pointerDropTargetRef.current
+      if (target?.kind === 'editor') target.element.classList.remove(POINTER_EDITOR_TARGET_CLASS)
+      if (target?.kind === 'media') target.element.classList.remove(POINTER_MEDIA_TARGET_CLASS)
+      pointerDropTargetRef.current = undefined
+      setPointerDropIndicator(undefined)
+    }
+
+    const setPointerTarget = (target: PointerDropTarget | undefined) => {
+      const current = pointerDropTargetRef.current
+      if (current?.element === target?.element && current?.kind === target?.kind) {
+        pointerDropTargetRef.current = target
+        if (target?.kind === 'editor' && editor) {
+          setPointerDropIndicator(editorDropIndicator(editor.view, target.position))
+        }
+        return
+      }
+      clearPointerTarget()
+      if (!target) return
+      target.element.classList.add(target.kind === 'editor' ? POINTER_EDITOR_TARGET_CLASS : POINTER_MEDIA_TARGET_CLASS)
+      pointerDropTargetRef.current = target
+      if (target.kind === 'editor' && editor) {
+        setPointerDropIndicator(editorDropIndicator(editor.view, target.position))
+      }
+    }
+
+    const clearPointerDrag = () => {
+      clearPointerTarget()
+      clearGlobalDragPayload()
+      setPointerDragPreview(undefined)
+      document.body.classList.remove(POINTER_DRAGGING_CLASS)
+      document.documentElement.classList.remove(POINTER_DRAGGING_CLASS)
+    }
+
+    const editorDropTarget = (event: InternalDragEvent, payload: StagedeskDragPayload): PointerDropTarget | undefined => {
+      if (!editor || !isEditorDragPayload(payload.type)) return undefined
+      const view = editor.view
+      const pointTarget = document.elementFromPoint(event.clientX, event.clientY)
+      if (!pointTarget || !view.dom.contains(pointTarget)) return undefined
+      const position = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
+      if (position === undefined) return undefined
+      const element = editorBlockElementAtPosition(view, position)
+      return { kind: 'editor', position, element }
+    }
+
+    const mediaDropTarget = (event: InternalDragEvent, payload: StagedeskDragPayload): PointerDropTarget | undefined => {
+      if (payload.type !== MEDIA_PATH_DND_TYPE) return undefined
+      const pointTarget = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
+      if (!pointTarget) return undefined
+
+      const folderElement = pointTarget.closest<HTMLElement>('[data-media-drop-path][data-media-kind="folder"]')
+      if (folderElement) {
+        const folderPath = folderElement.dataset.mediaDropPath ?? ''
+        if (folderPath && folderPath !== payload.value && parentPath(payload.value) !== folderPath) {
+          return { kind: 'media', folderPath, element: folderElement }
+        }
+      }
+
+      const rootElement = pointTarget.closest<HTMLElement>('[data-media-drop-root="true"]')
+      if (rootElement && parentPath(payload.value) !== '/media') {
+        return { kind: 'media', folderPath: '/media', element: rootElement }
+      }
+
+      return undefined
+    }
+
+    const onPointerMove = (event: InternalDragEvent) => {
+      const payload = readAnyGlobalDragPayload()
+      if (!payload) {
+        clearPointerTarget()
+        setPointerDragPreview(undefined)
+        document.body.classList.remove(POINTER_DRAGGING_CLASS)
+        document.documentElement.classList.remove(POINTER_DRAGGING_CLASS)
+        return
+      }
+
+      const distance = pointerDragDistance(payload, event)
+      if (!payload.pointerActive && distance < 6) return
+      payload.pointerActive = true
+      writeGlobalDragPayload(payload.type, payload.value, payload)
+      document.body.classList.add(POINTER_DRAGGING_CLASS)
+      document.documentElement.classList.add(POINTER_DRAGGING_CLASS)
+      setPointerDragPreview(dragPreviewFromPayload(payload, event))
+      if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) {
+        document.activeElement.blur()
+      }
+      window.getSelection()?.removeAllRanges()
+      event.preventDefault()
+
+      const target = editorDropTarget(event, payload) ?? mediaDropTarget(event, payload)
+      setPointerTarget(target)
+    }
+
+    const onPointerUp = (event: InternalDragEvent) => {
+      const payload = readAnyGlobalDragPayload()
+      if (!payload) {
+        clearPointerDrag()
+        return
+      }
+
+      const target = payload.pointerActive
+        ? editorDropTarget(event, payload) ?? mediaDropTarget(event, payload) ?? pointerDropTargetRef.current
+        : pointerDropTargetRef.current
+      if (payload.pointerActive && target?.kind === 'editor' && editor) {
+        event.preventDefault()
+        const handled = handleEditorPointerDrop(
+          editor.view,
+          payload,
+          target.position,
+          projectRef.current,
+          activeFilePathRef.current,
+          cueDropActionsRef.current,
+          setSelectedNoteId,
+          setSelectedCueId,
+          showStatus,
+        )
+        clearPointerDrag()
+        if (handled) return
+      }
+
+      if (payload.pointerActive && target?.kind === 'media' && payload.type === MEDIA_PATH_DND_TYPE) {
+        event.preventDefault()
+        const sourcePath = payload.value
+        clearPointerDrag()
+        if (sourcePath && sourcePath !== target.folderPath && parentPath(sourcePath) !== target.folderPath) {
+          void moveMediaNodeRef.current(sourcePath, target.folderPath)
+        }
+        return
+      }
+
+      clearPointerDrag()
+    }
+
+    const onPointerCancel = () => clearPointerDrag()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') clearPointerDrag()
+    }
+
+    window.addEventListener('pointermove', onPointerMove, { passive: false })
+    window.addEventListener('pointerup', onPointerUp, { passive: false })
+    window.addEventListener('pointercancel', onPointerCancel)
+    window.addEventListener('mousemove', onPointerMove, { passive: false })
+    window.addEventListener('mouseup', onPointerUp, { passive: false })
+    window.addEventListener('blur', onPointerCancel)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerCancel)
+      window.removeEventListener('mousemove', onPointerMove)
+      window.removeEventListener('mouseup', onPointerUp)
+      window.removeEventListener('blur', onPointerCancel)
+      window.removeEventListener('keydown', onKeyDown)
+      clearPointerDrag()
+    }
+  }, [editor, showStatus])
 
   const toggleExpanded = (path: string) => {
     setExpandedPaths((current) =>
@@ -1782,8 +1987,8 @@ function App() {
     if (position !== undefined) {
       const safePosition = insertionPositionForNode(editor.state.doc, position, contentNode)
       if (safePosition === undefined) return
-      editor.view.dispatch(editor.state.tr.insert(safePosition, contentNode).scrollIntoView())
-      editor.commands.focus(safePosition + 1)
+      const transaction = editor.state.tr.insert(safePosition, contentNode)
+      editor.view.dispatch(transaction.setSelection(selectionNear(transaction.doc, safePosition + contentNode.nodeSize, -1)))
       return
     }
     editor.chain().focus().insertContent({
@@ -2139,6 +2344,7 @@ function App() {
               </div>
               <div
                 className="media-tree-drop-zone"
+                data-media-drop-root="true"
                 onDragOver={(event) => {
                   if (!hasDragPayload(event.dataTransfer, MEDIA_PATH_DND_TYPE)) return
                   event.preventDefault()
@@ -2538,11 +2744,21 @@ function App() {
               <button
                 type="button"
                 key={cue.id}
-                draggable
                 title="Trascina nell'editor o clicca per selezionare"
                 className={cue.id === selectedCueId ? 'note-card active' : 'note-card'}
-                onPointerDown={() => {
-                  writeGlobalDragPayload(CUE_ID_DND_TYPE, cue.id)
+                onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) => {
+                  writeGlobalDragPayload(CUE_ID_DND_TYPE, cue.id, pointerPayloadFromEvent(event, {
+                    label: cue.title || cue.src.split('/').pop() || 'Cue',
+                    detail: cue.src,
+                    tone: 'cue',
+                  }))
+                }}
+                onMouseDown={(event: ReactMouseEvent<HTMLButtonElement>) => {
+                  writeGlobalDragPayload(CUE_ID_DND_TYPE, cue.id, pointerPayloadFromEvent(event, {
+                    label: cue.title || cue.src.split('/').pop() || 'Cue',
+                    detail: cue.src,
+                    tone: 'cue',
+                  }))
                 }}
                 onDragStart={(event: ReactDragEvent<HTMLButtonElement>) => {
                   event.dataTransfer.effectAllowed = 'move'
@@ -2660,6 +2876,30 @@ function App() {
             void openProjectFolder(entry.path)
           }}
         />
+      ) : null}
+      {pointerDropIndicator ? (
+        <div
+          className="pointer-drop-indicator"
+          style={{
+            transform: `translate3d(${pointerDropIndicator.x}px, ${pointerDropIndicator.y}px, 0)`,
+            width: pointerDropIndicator.width,
+          }}
+          aria-hidden="true"
+        >
+          <span>{pointerDropIndicator.label}</span>
+        </div>
+      ) : null}
+      {pointerDragPreview ? (
+        <div
+          className="pointer-drag-preview"
+          data-tone={pointerDragPreview.tone}
+          style={{ transform: `translate3d(${pointerDragPreview.x}px, ${pointerDragPreview.y}px, 0)` }}
+          aria-hidden="true"
+        >
+          <span className="pointer-drag-preview-kind">{dragPreviewKindLabel(pointerDragPreview.tone)}</span>
+          <strong>{pointerDragPreview.label}</strong>
+          {pointerDragPreview.detail ? <span>{pointerDragPreview.detail}</span> : null}
+        </div>
       ) : null}
       {toastMessage ? (
         <div className="app-toast" role="status">
@@ -2991,10 +3231,23 @@ function MediaExplorerTree({
             <div
               role="treeitem"
               tabIndex={0}
-              draggable={asset.kind !== 'folder'}
+              draggable={false}
+              data-media-drop-path={asset.path}
+              data-media-kind={asset.kind}
               className={asset.path === selectedPath ? 'tree-node media-node selected' : 'tree-node media-node'}
-              onPointerDown={() => {
-                if (asset.kind !== 'folder') writeGlobalDragPayload(MEDIA_PATH_DND_TYPE, asset.path)
+              onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => {
+                if (asset.kind !== 'folder') writeGlobalDragPayload(MEDIA_PATH_DND_TYPE, asset.path, pointerPayloadFromEvent(event, {
+                  label: asset.name,
+                  detail: asset.path,
+                  tone: 'media',
+                }))
+              }}
+              onMouseDown={(event: ReactMouseEvent<HTMLDivElement>) => {
+                if (asset.kind !== 'folder') writeGlobalDragPayload(MEDIA_PATH_DND_TYPE, asset.path, pointerPayloadFromEvent(event, {
+                  label: asset.name,
+                  detail: asset.path,
+                  tone: 'media',
+                }))
               }}
               onDragStart={(event: ReactDragEvent<HTMLDivElement>) => {
                 if (asset.kind === 'folder') return
@@ -3602,8 +3855,23 @@ const dragTypes = (dataTransfer: DataTransfer) => {
   }
 }
 
-const writeGlobalDragPayload = (type: string, value: string) => {
-  ;(window as StagedeskDragWindow)[STAGEDESK_DRAG_STATE_KEY] = { type, value, startedAt: Date.now() }
+const pointerPayloadFromEvent = (
+  event: ReactPointerEvent<HTMLElement> | ReactMouseEvent<HTMLElement>,
+  metadata: Pick<StagedeskDragPayload, 'label' | 'detail' | 'tone'>,
+) => ({
+  startX: event.clientX,
+  startY: event.clientY,
+  pointerId: 'pointerId' in event ? event.pointerId : undefined,
+  ...metadata,
+})
+
+const writeGlobalDragPayload = (type: string, value: string, options: Partial<StagedeskDragPayload> = {}) => {
+  ;(window as StagedeskDragWindow)[STAGEDESK_DRAG_STATE_KEY] = {
+    type,
+    value,
+    startedAt: Date.now(),
+    ...options,
+  }
 }
 
 const readGlobalDragPayload = (type: string) => {
@@ -3616,8 +3884,122 @@ const readGlobalDragPayload = (type: string) => {
   return payload.value
 }
 
+const readAnyGlobalDragPayload = () => {
+  const payload = (window as StagedeskDragWindow)[STAGEDESK_DRAG_STATE_KEY]
+  if (!payload) return undefined
+  if (Date.now() - payload.startedAt > 12000) {
+    clearGlobalDragPayload()
+    return undefined
+  }
+  return payload
+}
+
 const clearGlobalDragPayload = () => {
   delete (window as StagedeskDragWindow)[STAGEDESK_DRAG_STATE_KEY]
+}
+
+const pointerDragDistance = (payload: StagedeskDragPayload, event: InternalDragEvent) => {
+  if (payload.startX === undefined || payload.startY === undefined) return 999
+  return Math.hypot(event.clientX - payload.startX, event.clientY - payload.startY)
+}
+
+const dragPreviewFromPayload = (payload: StagedeskDragPayload, event: InternalDragEvent): PointerDragPreview => ({
+  x: event.clientX + 14,
+  y: event.clientY + 14,
+  label: payload.label || fallbackDragLabel(payload),
+  detail: payload.detail,
+  tone: payload.tone ?? dragToneFromType(payload.type),
+})
+
+const fallbackDragLabel = (payload: StagedeskDragPayload) => {
+  if (payload.type === CUE_ID_DND_TYPE) return 'Cue'
+  if (payload.type === NOTE_ID_DND_TYPE) return 'Nota'
+  if (payload.type === MEDIA_PATH_DND_TYPE) return payload.value.split('/').pop() || 'Media'
+  return 'Elemento'
+}
+
+const dragToneFromType = (type: string): PointerDragPreview['tone'] => {
+  if (type === NOTE_ID_DND_TYPE) return 'note'
+  if (type === MEDIA_PATH_DND_TYPE) return 'media'
+  return 'cue'
+}
+
+const dragPreviewKindLabel = (tone: PointerDragPreview['tone']) => {
+  if (tone === 'note') return 'Nota'
+  if (tone === 'media') return 'Media'
+  return 'Cue'
+}
+
+const editorDropIndicator = (view: EditorView, position: number): PointerDropIndicator => {
+  const editorRect = view.dom.getBoundingClientRect()
+  const coords = view.coordsAtPos(Math.max(0, Math.min(position, view.state.doc.content.size)))
+  return {
+    x: Math.max(12, editorRect.left + 12),
+    y: Math.max(12, coords.top - 2),
+    width: Math.max(140, editorRect.width - 24),
+    label: 'Rilascia qui',
+  }
+}
+
+const isEditorDragPayload = (type: string) =>
+  type === NOTE_ID_DND_TYPE || type === CUE_ID_DND_TYPE || type === MEDIA_PATH_DND_TYPE
+
+const editorBlockElementAtPosition = (view: EditorView, position: number) => {
+  const domAtPosition = view.domAtPos(Math.max(0, Math.min(position, view.state.doc.content.size)))
+  const node = domAtPosition.node
+  const element = node.nodeType === Node.ELEMENT_NODE
+    ? (node as HTMLElement)
+    : (node.parentElement as HTMLElement | null)
+  return (
+    element?.closest<HTMLElement>('[data-note-block="true"], p, h1, h2, h3, h4, h5, h6, blockquote, li, table') ??
+    view.dom
+  )
+}
+
+const handleEditorPointerDrop = (
+  view: EditorView,
+  payload: StagedeskDragPayload,
+  dropPosition: number,
+  project: Project,
+  activeFilePath: string,
+  cueDropActions: {
+    insertExistingCue: (cue: MediaCue, position: number) => void
+    createCueFromAsset: (asset: MediaAsset, position: number) => void
+  },
+  setSelectedNoteId: Dispatch<SetStateAction<string>>,
+  setSelectedCueId: Dispatch<SetStateAction<string>>,
+  showStatus: (message: string, duration?: number) => void,
+) => {
+  if (payload.type === NOTE_ID_DND_TYPE) {
+    const note = project.notes.find((item) => item.id === payload.value && item.filePath === activeFilePath)
+    const match = nodeMatchByRef(view.state.doc, 'scriptNote', payload.value)
+    if (!note || !match) return false
+    if (dropPosition >= match.position && dropPosition <= match.position + match.nodeSize) return true
+    if (!moveEditorNode(view, match, dropPosition)) return true
+    setSelectedNoteId(note.id)
+    showStatus(`Nota spostata: ${note.title}`)
+    return true
+  }
+
+  if (payload.type === CUE_ID_DND_TYPE) {
+    const cue = project.cues.find((item) => item.id === payload.value && item.filePath === activeFilePath)
+    if (!cue) return false
+    if (!moveCueChip(view, cue.id, dropPosition)) {
+      cueDropActions.insertExistingCue(cue, dropPosition)
+    }
+    setSelectedCueId(cue.id)
+    showStatus(`Cue spostato: ${cue.title || cue.src}`)
+    return true
+  }
+
+  if (payload.type === MEDIA_PATH_DND_TYPE) {
+    const asset = findTreeNode(project.media, payload.value)
+    if (!asset || asset.kind === 'folder') return false
+    cueDropActions.createCueFromAsset(asset, dropPosition)
+    return true
+  }
+
+  return false
 }
 
 const arraysEqual = (left: string[], right: string[]) =>
@@ -4196,6 +4578,9 @@ const insertionPositionForNode = (doc: ProseMirrorNode, position: number, node: 
   return undefined
 }
 
+const selectionNear = (doc: ProseMirrorNode, position: number, bias = 1) =>
+  Selection.near(doc.resolve(Math.max(0, Math.min(position, doc.content.size))), bias)
+
 const standaloneBlockAroundInlineNode = (doc: ProseMirrorNode, match: ScriptChipMatch): ScriptNodeMatch | undefined => {
   const resolvedPosition = doc.resolve(match.position)
   for (let depth = resolvedPosition.depth; depth > 0; depth -= 1) {
@@ -4225,7 +4610,8 @@ const moveEditorNode = (view: EditorView, match: ScriptNodeMatch, dropPosition: 
   const safePosition = insertionPositionForNode(transaction.doc, mappedPosition, match.node)
   if (safePosition === undefined) return false
 
-  view.dispatch(transaction.insert(safePosition, match.node).scrollIntoView())
+  const nextTransaction = transaction.insert(safePosition, match.node)
+  view.dispatch(nextTransaction.setSelection(selectionNear(nextTransaction.doc, safePosition + match.node.nodeSize, -1)))
   return true
 }
 

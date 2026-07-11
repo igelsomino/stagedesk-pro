@@ -10,7 +10,18 @@ type ScriptNoteAttrs = {
 }
 
 type ScriptNoteWindow = Window & {
-  __STAGEDESK_DRAG_PAYLOAD__?: { type: string; value: string; startedAt: number }
+  __STAGEDESK_DRAG_PAYLOAD__?: {
+    type: string
+    value: string
+    startedAt: number
+    startX?: number
+    startY?: number
+    pointerId?: number
+    pointerActive?: boolean
+    label?: string
+    detail?: string
+    tone?: 'cue' | 'note' | 'media'
+  }
 }
 
 const noteTypes = [
@@ -31,7 +42,7 @@ export const ScriptNote = TiptapNode.create({
   group: 'block',
   atom: true,
   selectable: true,
-  draggable: true,
+  draggable: false,
 
   addAttributes() {
     return {
@@ -78,7 +89,7 @@ export const ScriptNote = TiptapNode.create({
         'data-note-content': attrs.content,
         'data-ref-id': attrs.refId,
         'data-note-collapsed': String(attrs.collapsed),
-        draggable: 'true',
+        draggable: 'false',
       }),
       attrs.title,
     ]
@@ -113,16 +124,16 @@ export const ScriptNote = TiptapNode.create({
       dom.className = 'script-note-block'
       dom.dataset.noteBlock = 'true'
       dom.contentEditable = 'false'
-      dom.draggable = true
+      dom.draggable = false
       header.className = 'script-note-header'
-      header.draggable = true
+      header.draggable = false
       collapseButton.type = 'button'
       collapseButton.className = 'script-note-collapse'
       collapseIcon.className = 'script-note-collapse-icon'
       collapseButton.append(collapseIcon)
       titleInput.className = 'script-note-title'
       titleInput.type = 'text'
-      titleInput.draggable = true
+      titleInput.draggable = false
       typeDropdown.className = 'script-note-type'
       typeButton.type = 'button'
       typeButton.className = 'script-note-type-trigger'
@@ -229,17 +240,25 @@ export const ScriptNote = TiptapNode.create({
         setTypeMenuOpen(false)
         updateAttrs({ type: noteType.id, color: noteType.color })
       })
-      dom.addEventListener('pointerdown', (event) => {
+      const writePointerDragPayload = (event: PointerEvent | MouseEvent) => {
         const target = event.target as HTMLElement | null
-        if (target?.closest('button, textarea, .script-note-type-menu')) return
+        if (target?.closest('button, .script-note-type-menu')) return
         const refId = String(currentNode.attrs.refId ?? '')
         if (!refId) return
         ;(window as ScriptNoteWindow).__STAGEDESK_DRAG_PAYLOAD__ = {
           type: 'application/x-stagedesk-note-id',
           value: refId,
           startedAt: Date.now(),
+          startX: event.clientX,
+          startY: event.clientY,
+          pointerId: 'pointerId' in event ? event.pointerId : undefined,
+          label: String(currentNode.attrs.title ?? 'Nota regia'),
+          detail: String(currentNode.attrs.content ?? ''),
+          tone: 'note',
         }
-      })
+      }
+      dom.addEventListener('pointerdown', writePointerDragPayload)
+      dom.addEventListener('mousedown', writePointerDragPayload)
       dom.addEventListener('dragstart', (event) => {
         const target = event.target as HTMLElement | null
         if (target?.closest('button, textarea, .script-note-type-menu')) {

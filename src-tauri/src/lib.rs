@@ -637,6 +637,16 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|_app| {
+            #[cfg(target_os = "linux")]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+
+                _app.deep_link().register_all()?;
+            }
+
+            Ok(())
+        })
         .manage(CurrentProject::default())
         .invoke_handler(tauri::generate_handler![
             app_ready,

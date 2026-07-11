@@ -57,15 +57,16 @@ export type AuthState = {
 }
 
 export const desktopAuthCallbackUrl = 'stagedeskpro://auth-callback'
+export const desktopAuthBridgeUrl = 'https://stagedesk-pro.aigconsulting.it/auth-callback/'
 
 export const isLocalAuthOrigin = () => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(window.location.origin)
 
 export const authRedirectUrl = () => {
   if (isLocalAuthOrigin()) return window.location.origin
-  return isTauri() ? desktopAuthCallbackUrl : window.location.origin
+  return isTauri() ? desktopAuthBridgeUrl : window.location.origin
 }
 
-export const usesDesktopAuthCallback = () => authRedirectUrl() === desktopAuthCallbackUrl
+export const usesDesktopAuthCallback = () => isTauri() && !isLocalAuthOrigin()
 
 export const userDisplayName = (user: User | null, profile: UserProfile | null) => {
   if (profile?.first_name || profile?.last_name) return `${profile.first_name} ${profile.last_name}`.trim()

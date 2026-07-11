@@ -37,6 +37,16 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.7
+
+> Patch dedicata a drag&drop editor e completamento autenticazione desktop.
+
+- Riprogettato il drag&drop interno dell'app per cue, note e file multimediali.
+- Corretto lo spostamento di cue e note nell'editor senza selezioni indesiderate del testo sottostante.
+- Il rilascio di cue e note non forza più lo scroll verso la vecchia posizione del cursore.
+- Migliorata la registrazione dei deep link su Linux per completare il login OAuth.
+- Il callback OAuth desktop passa da una pagina HTTPS di completamento per evitare browser bloccati sul redirect provider.
+
 ## Versione 1.0.5
 
 > Patch dedicata a drag&drop macOS, link legali e controllo copione.

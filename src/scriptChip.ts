@@ -7,7 +7,18 @@ type CuePlaybackState = {
 
 type CuePlaybackWindow = Window & {
   __STAGEDESK_EDITOR_CUE_STATE__?: CuePlaybackState
-  __STAGEDESK_DRAG_PAYLOAD__?: { type: string; value: string; startedAt: number }
+  __STAGEDESK_DRAG_PAYLOAD__?: {
+    type: string
+    value: string
+    startedAt: number
+    startX?: number
+    startY?: number
+    pointerId?: number
+    pointerActive?: boolean
+    label?: string
+    detail?: string
+    tone?: 'cue' | 'note' | 'media'
+  }
 }
 
 export const ScriptChip = Node.create({
@@ -16,7 +27,7 @@ export const ScriptChip = Node.create({
   inline: true,
   atom: true,
   selectable: true,
-  draggable: true,
+  draggable: false,
 
   addAttributes() {
     return {
@@ -52,7 +63,7 @@ export const ScriptChip = Node.create({
         'data-ref-id': node.attrs.refId,
         'data-chip-color': node.attrs.color,
         contenteditable: 'false',
-        draggable: 'true',
+        draggable: 'false',
       }),
       node.attrs.label,
     ]
@@ -73,7 +84,7 @@ export const ScriptChip = Node.create({
       let cueState: 'idle' | 'playing' | 'paused' = 'idle'
 
       dom.contentEditable = 'false'
-      dom.draggable = true
+      dom.draggable = false
       label.className = 'script-chip-label'
       playButton.type = 'button'
       playButton.className = 'script-chip-play'
@@ -132,7 +143,7 @@ export const ScriptChip = Node.create({
         window.dispatchEvent(new CustomEvent('script-cue-stop', { detail: { id: currentNode.attrs.refId } }))
       })
 
-      dom.addEventListener('pointerdown', (event) => {
+      const writePointerDragPayload = (event: PointerEvent | MouseEvent) => {
         const target = event.target as HTMLElement | null
         if (target?.closest('button')) return
 
@@ -145,6 +156,11 @@ export const ScriptChip = Node.create({
             type: 'application/x-stagedesk-cue-id',
             value: refId,
             startedAt: Date.now(),
+            startX: event.clientX,
+            startY: event.clientY,
+            pointerId: 'pointerId' in event ? event.pointerId : undefined,
+            label: String(currentNode.attrs.label ?? 'Cue'),
+            tone: 'cue',
           }
           return
         }
@@ -154,9 +170,17 @@ export const ScriptChip = Node.create({
             type: 'application/x-stagedesk-note-id',
             value: refId,
             startedAt: Date.now(),
+            startX: event.clientX,
+            startY: event.clientY,
+            pointerId: 'pointerId' in event ? event.pointerId : undefined,
+            label: String(currentNode.attrs.label ?? 'Nota'),
+            tone: 'note',
           }
         }
-      })
+      }
+
+      dom.addEventListener('pointerdown', writePointerDragPayload)
+      dom.addEventListener('mousedown', writePointerDragPayload)
 
       dom.addEventListener('dragstart', (event) => {
         const target = event.target as HTMLElement | null
