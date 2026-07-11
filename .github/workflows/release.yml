@@ -15,9 +15,62 @@ permissions:
   contents: write
 
 jobs:
+  prepare-release:
+    name: Prepare GitHub Release
+    runs-on: ubuntu-22.04
+    outputs:
+      release_id: ${{ steps.release.outputs.release_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate tag version
+        shell: bash
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+          else
+            TAG_VERSION="${{ github.event.inputs.version }}"
+          fi
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "Release $TAG_VERSION non allineata con package.json $PACKAGE_VERSION"
+            exit 1
+          fi
+
+      - name: Create or reuse release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="v${{ github.event.inputs.version }}"
+          fi
+
+          RELEASE_ID="$(gh release view "$TAG" --json databaseId --jq .databaseId 2>/dev/null || true)"
+          if [ -z "$RELEASE_ID" ]; then
+            RELEASE_ID="$(
+              gh api "repos/${GITHUB_REPOSITORY}/releases" \
+                -f tag_name="$TAG" \
+                -f target_commitish="$GITHUB_SHA" \
+                -f name="StageDesk Pro $TAG" \
+                -f body="Release desktop di StageDesk Pro. Il file latest.json alimenta l'aggiornamento automatico dell'app." \
+                -F draft=false \
+                -F prerelease=false \
+                --jq .id
+            )"
+          fi
+
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+
   publish:
     name: Publish ${{ matrix.platform }}
     runs-on: ${{ matrix.platform }}
+    needs: prepare-release
     strategy:
       fail-fast: false
       matrix:
@@ -92,6 +145,7 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
         with:
+          releaseId: ${{ needs.prepare-release.outputs.release_id }}
           tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', github.event.inputs.version) }}
           releaseName: StageDesk Pro ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', github.event.inputs.version) }}
           releaseBody: "Release desktop di StageDesk Pro. Il file latest.json alimenta l'aggiornamento automatico dell'app."
