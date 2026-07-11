@@ -401,8 +401,7 @@ function App() {
       clearAudioTimers(editorAudioTimersRef)
       audio.pause()
       setSelectedCueId(cue.id)
-      const preparedSrc = await prepareMediaForCue(audio, cue, assetUrl)
-      if (audio.src !== preparedSrc) return
+      const preparedSrc = prepareMediaSourceForCue(audio, cue, assetUrl)
       audio.loop = Boolean(cue.options.loop)
       const targetVolume = cueTargetVolume(cue)
       if ((cue.options.fadeIn ?? 0) > 0) {
@@ -420,7 +419,9 @@ function App() {
         dispatchEditorCueState(cue.id, 'stopped')
       }
       try {
-        await audio.play()
+        const playPromise = audio.play()
+        void alignMediaForCue(audio, cue, preparedSrc)
+        await playPromise
         editorPlayingCueRef.current = { id: cue.id, state: 'playing' }
         dispatchEditorCueState(cue.id, 'playing')
         setStorageStatus(`Cue avviato: ${cue.title || cue.src}`)
@@ -5119,7 +5120,7 @@ const waitForMediaReady = (media: HTMLMediaElement, readyState: number, timeoutM
   })
 }
 
-const prepareMediaForCue = async (media: HTMLMediaElement, cue: MediaCue, assetUrl?: string) => {
+const prepareMediaSourceForCue = (media: HTMLMediaElement, cue: MediaCue, assetUrl?: string) => {
   if (assetUrl && media.src !== assetUrl) {
     media.src = assetUrl
     media.load()
@@ -5127,14 +5128,32 @@ const prepareMediaForCue = async (media: HTMLMediaElement, cue: MediaCue, assetU
     media.load()
   }
 
-  const preparedSrc = media.src
+  const startAt = Math.max(0, cue.options.startAt ?? 0)
+  if (media.readyState >= 1 && Number.isFinite(startAt) && Math.abs(media.currentTime - startAt) > 0.05) {
+    try {
+      media.currentTime = startAt
+    } catch {
+      // Some WebKitGTK builds reject currentTime changes until metadata is fully available.
+    }
+  }
+
+  return media.src
+}
+
+const alignMediaForCue = async (media: HTMLMediaElement, cue: MediaCue, preparedSrc: string) => {
   await waitForMediaReady(media, 1)
+  if (media.src !== preparedSrc) return
   const startAt = Math.max(0, cue.options.startAt ?? 0)
   if (Number.isFinite(startAt) && Math.abs(media.currentTime - startAt) > 0.05) {
     media.currentTime = startAt
     await waitForMediaReady(media, 2)
   }
   await waitForMediaReady(media, 2)
+}
+
+const prepareMediaForCue = async (media: HTMLMediaElement, cue: MediaCue, assetUrl?: string) => {
+  const preparedSrc = prepareMediaSourceForCue(media, cue, assetUrl)
+  await alignMediaForCue(media, cue, preparedSrc)
   return preparedSrc
 }
 

@@ -37,6 +37,16 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.8
+
+> Patch dedicata a drag&drop note e avvio cue audio su Linux.
+
+- Reso compatto il ghost delle note durante il drag&drop.
+- Il trascinamento delle note parte dall'header della nota e non dal corpo modificabile.
+- Disattivato il drag nativo delle note per mantenere stabile l'indicatore di rilascio nell'editor.
+- Corretto l'avvio dei cue audio dall'editor su Linux eseguendo il comando play subito nel gesto utente.
+- Conservata la preparazione asincrona di posizione iniziale, fade e stato playback dopo l'avvio immediato del cue.
+
 ## Versione 1.0.7
 
 > Patch dedicata a drag&drop editor e completamento autenticazione desktop.

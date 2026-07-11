@@ -242,7 +242,9 @@ export const ScriptNote = TiptapNode.create({
       })
       const writePointerDragPayload = (event: PointerEvent | MouseEvent) => {
         const target = event.target as HTMLElement | null
-        if (target?.closest('button, .script-note-type-menu')) return
+        if (!target?.closest('.script-note-header') || target.closest('button, textarea, .script-note-type-menu')) {
+          return
+        }
         const refId = String(currentNode.attrs.refId ?? '')
         if (!refId) return
         ;(window as ScriptNoteWindow).__STAGEDESK_DRAG_PAYLOAD__ = {
@@ -253,27 +255,14 @@ export const ScriptNote = TiptapNode.create({
           startY: event.clientY,
           pointerId: 'pointerId' in event ? event.pointerId : undefined,
           label: String(currentNode.attrs.title ?? 'Nota regia'),
-          detail: String(currentNode.attrs.content ?? ''),
+          detail: noteTypes.find((item) => item.id === currentNode.attrs.type)?.label ?? 'Nota regia',
           tone: 'note',
         }
       }
       dom.addEventListener('pointerdown', writePointerDragPayload)
       dom.addEventListener('mousedown', writePointerDragPayload)
       dom.addEventListener('dragstart', (event) => {
-        const target = event.target as HTMLElement | null
-        if (target?.closest('button, textarea, .script-note-type-menu')) {
-          event.preventDefault()
-          return
-        }
-        const refId = String(currentNode.attrs.refId ?? '')
-        event.dataTransfer?.setData('text/plain', `stagedesk-note:${refId}`)
-        event.dataTransfer?.setData('application/x-stagedesk-note-id', refId)
-        ;(window as ScriptNoteWindow).__STAGEDESK_DRAG_PAYLOAD__ = {
-          type: 'application/x-stagedesk-note-id',
-          value: refId,
-          startedAt: Date.now(),
-        }
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+        event.preventDefault()
       })
       dom.addEventListener('dragend', () => {
         delete (window as ScriptNoteWindow).__STAGEDESK_DRAG_PAYLOAD__

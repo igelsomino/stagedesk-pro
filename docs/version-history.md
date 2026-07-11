@@ -1,5 +1,15 @@
 # Novità
 
+## Versione 1.0.8
+
+> Patch dedicata a drag&drop note e avvio cue audio su Linux.
+
+- Reso compatto il ghost delle note durante il drag&drop, evitando l'anteprima nativa grande quanto tutta la nota.
+- Il trascinamento delle note parte dall'header della nota e non dal corpo modificabile, riducendo i conflitti con WebKit su macOS e Linux.
+- Disattivato il drag nativo delle note per mantenere stabile l'indicatore di rilascio nell'editor.
+- Corretto l'avvio dei cue audio dall'editor su Linux: il comando `play()` viene eseguito subito nel gesto utente, prima delle attese di preparazione media.
+- Conservata la preparazione asincrona di posizione iniziale, fade e stato playback dopo l'avvio immediato del cue.
+
 ## Versione 1.0.7
 
 > Patch dedicata a drag&drop editor e completamento autenticazione desktop.

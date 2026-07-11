@@ -731,6 +731,7 @@ body.stagedesk-pointer-dragging * {
   box-shadow: 0 14px 42px rgba(0, 0, 0, 0.42);
   color: var(--text-normal);
   pointer-events: none;
+  -webkit-user-drag: none;
 }
 
 .pointer-drag-preview::before {
@@ -774,6 +775,10 @@ body.stagedesk-pointer-dragging * {
   font-size: 0.72rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pointer-drag-preview[data-tone='note'] {
+  width: min(220px, calc(100vw - 28px));
 }
 
 .pointer-drop-indicator {
@@ -1422,6 +1427,7 @@ body.stagedesk-pointer-dragging * {
   border: 1px solid color-mix(in srgb, var(--note-block-color) 42%, var(--background-modifier-border));
   border-radius: var(--radius-m);
   background: color-mix(in srgb, var(--note-block-color) 14%, var(--background-tertiary));
+  -webkit-user-drag: none;
 }
 
 .script-note-block[data-note-color='purple'] {
@@ -1469,6 +1475,7 @@ body.stagedesk-pointer-dragging * {
   padding: 5px 6px 5px 9px;
   border-bottom: 1px solid color-mix(in srgb, var(--note-block-color) 22%, transparent);
   cursor: grab;
+  -webkit-user-drag: none;
 }
 
 .script-note-header:active {
