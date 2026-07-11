@@ -82,6 +82,8 @@ export const ScriptChip = Node.create({
       const equalizer = document.createElement('span')
       const stopButton = document.createElement('button')
       let cueState: 'idle' | 'playing' | 'paused' = 'idle'
+      let playHandledOnPointerDown = false
+      let stopHandledOnPointerDown = false
 
       dom.contentEditable = 'false'
       dom.draggable = false
@@ -131,16 +133,48 @@ export const ScriptChip = Node.create({
         syncCueState()
       }
 
+      const dispatchCueToggle = () => {
+        window.dispatchEvent(new CustomEvent('script-cue-toggle', { detail: { id: currentNode.attrs.refId } }))
+      }
+
+      const dispatchCueStop = () => {
+        window.dispatchEvent(new CustomEvent('script-cue-stop', { detail: { id: currentNode.attrs.refId } }))
+      }
+
+      playButton.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return
+        event.preventDefault()
+        event.stopPropagation()
+        playHandledOnPointerDown = true
+        dispatchCueToggle()
+      })
+
       playButton.addEventListener('click', (event) => {
         event.preventDefault()
         event.stopPropagation()
-        window.dispatchEvent(new CustomEvent('script-cue-toggle', { detail: { id: currentNode.attrs.refId } }))
+        if (playHandledOnPointerDown) {
+          playHandledOnPointerDown = false
+          return
+        }
+        dispatchCueToggle()
+      })
+
+      stopButton.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return
+        event.preventDefault()
+        event.stopPropagation()
+        stopHandledOnPointerDown = true
+        dispatchCueStop()
       })
 
       stopButton.addEventListener('click', (event) => {
         event.preventDefault()
         event.stopPropagation()
-        window.dispatchEvent(new CustomEvent('script-cue-stop', { detail: { id: currentNode.attrs.refId } }))
+        if (stopHandledOnPointerDown) {
+          stopHandledOnPointerDown = false
+          return
+        }
+        dispatchCueStop()
       })
 
       const writePointerDragPayload = (event: PointerEvent | MouseEvent) => {

@@ -31,18 +31,20 @@ export type ProjectStorage = {
 
 let browserProjectDirectory: FileSystemDirectoryHandle | undefined
 let browserProjectParentDirectory: FileSystemDirectoryHandle | undefined
+const localRecoveryProjectKey = 'stagedesk-pro.recovery-project'
 
 export const browserProjectStorage: ProjectStorage = {
   requiresDirectFolderPicker() {
     return !isTauriRuntime() && !isLocalDevRuntime()
   },
   load() {
-    return defaultProject()
+    return loadLocalRecoveryProject() ?? defaultProject()
   },
-  save() {
-    // Intentionally no-op: project data is persisted through saveProjectFolder.
+  save(project) {
+    saveLocalRecoveryProject(project)
   },
   reset() {
+    clearLocalRecoveryProject()
     return defaultProject()
   },
   async prepareProjectFolderCreation() {
@@ -207,6 +209,60 @@ const pickBrowserDirectory = async () => {
 
 const isDirectoryPickerAbort = (error: unknown) =>
   error instanceof DOMException && (error.name === 'AbortError' || error.name === 'NotAllowedError')
+
+const loadLocalRecoveryProject = (): Project | undefined => {
+  if (typeof window === 'undefined') return undefined
+  const rawProject = window.localStorage.getItem(localRecoveryProjectKey)
+  if (!rawProject) return undefined
+
+  try {
+    const project = JSON.parse(rawProject) as Project
+    return isStorageProject(project) ? project : undefined
+  } catch {
+    window.localStorage.removeItem(localRecoveryProjectKey)
+    return undefined
+  }
+}
+
+const saveLocalRecoveryProject = (project: Project) => {
+  if (typeof window === 'undefined') return
+  if (!usesLocalRecovery(project)) {
+    clearLocalRecoveryProject()
+    return
+  }
+
+  try {
+    window.localStorage.setItem(localRecoveryProjectKey, JSON.stringify(project))
+  } catch {
+    // The folder-backed save remains authoritative when browser storage is unavailable.
+  }
+}
+
+const clearLocalRecoveryProject = () => {
+  if (typeof window === 'undefined') return
+  window.localStorage.removeItem(localRecoveryProjectKey)
+}
+
+const usesLocalRecovery = (project: Project) => !hasPersistedProjectRoot(project.rootPath)
+
+const hasPersistedProjectRoot = (rootPath: string) =>
+  Boolean(rootPath && rootPath !== '/progetto' && rootPath !== 'progetto')
+
+const isStorageProject = (value: unknown): value is Project => {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<Project>
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.name === 'string' &&
+    typeof candidate.rootPath === 'string' &&
+    Array.isArray(candidate.scripts) &&
+    Array.isArray(candidate.media) &&
+    Array.isArray(candidate.notes) &&
+    Array.isArray(candidate.cues) &&
+    Array.isArray(candidate.noteTypes) &&
+    Boolean(candidate.settings)
+  )
+}
 
 const readBrowserProject = async (directory: FileSystemDirectoryHandle): Promise<Project> => {
   const projectFile = await directory.getFileHandle('project.json')

@@ -41,6 +41,10 @@ const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
 > Patch dedicata a drag&drop note e avvio cue audio su Linux.
 
+- Ripristinato il callback OAuth desktop diretto stagedeskpro://auth-callback.
+- Aggiunto il recupero locale del progetto dimostrativo dopo refresh o riavvio automatico.
+- Anticipato l'avvio dei cue audio sul gesto pointerdown per ridurre i blocchi autoplay su Linux/WebKit.
+- Migliorati i messaggi di errore dei cue audio distinguendo blocco browser, file mancante e codec non supportato.
 - Reso compatto il ghost delle note durante il drag&drop.
 - Il trascinamento delle note parte dall'header della nota e non dal corpo modificabile.
 - Disattivato il drag nativo delle note per mantenere stabile l'indicatore di rilascio nell'editor.

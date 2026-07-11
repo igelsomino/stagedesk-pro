@@ -204,6 +204,7 @@ function App() {
   const updateCheckStartedRef = useRef(false)
   const updateInstallInProgressRef = useRef(false)
   const startupProjectLoadedRef = useRef(false)
+  const startupUserEditedRef = useRef(false)
   const toastTimeoutRef = useRef<number | undefined>(undefined)
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const [scriptDialog, setScriptDialog] = useState<ScriptActionDialog | undefined>()
@@ -396,40 +397,52 @@ function App() {
       window.dispatchEvent(new CustomEvent('script-cue-state', { detail: { id, state } }))
     }
 
-    const startEditorCue = async (cue: MediaCue, audio: HTMLAudioElement, assetUrl: string) => {
+    const startEditorCue = (cue: MediaCue, audio: HTMLAudioElement, assetUrl: string) => {
       if (editorPlayingCueRef.current?.id) dispatchEditorCueState(editorPlayingCueRef.current.id, 'stopped')
       clearAudioTimers(editorAudioTimersRef)
       audio.pause()
       setSelectedCueId(cue.id)
       const preparedSrc = prepareMediaSourceForCue(audio, cue, assetUrl)
+      audio.preload = 'auto'
       audio.loop = Boolean(cue.options.loop)
       const targetVolume = cueTargetVolume(cue)
       if ((cue.options.fadeIn ?? 0) > 0) {
         audio.volume = 0
-        fadeAudioVolume(audio, targetVolume, cue.options.fadeIn ?? 0, editorAudioTimersRef)
       } else {
         audio.volume = targetVolume
       }
-      scheduleCueEnd(audio, cue, editorAudioTimersRef, () => {
-        editorPlayingCueRef.current = undefined
-        dispatchEditorCueState(cue.id, 'stopped')
-      })
       audio.onended = () => {
         editorPlayingCueRef.current = undefined
         dispatchEditorCueState(cue.id, 'stopped')
       }
-      try {
-        const playPromise = audio.play()
-        void alignMediaForCue(audio, cue, preparedSrc)
-        await playPromise
-        editorPlayingCueRef.current = { id: cue.id, state: 'playing' }
-        dispatchEditorCueState(cue.id, 'playing')
-        setStorageStatus(`Cue avviato: ${cue.title || cue.src}`)
-      } catch {
+      audio.onerror = () => {
         editorPlayingCueRef.current = { id: cue.id, state: 'paused' }
         dispatchEditorCueState(cue.id, 'paused')
-        setStorageStatus(`Cue pronto, avvio bloccato dal browser: ${cue.title || cue.src}`)
+        setStorageStatus(mediaElementErrorMessage(cue, audio.error))
       }
+      const playPromise = audio.play()
+      playPromise
+        .then(() => {
+          if (audio.src !== preparedSrc) return
+          editorPlayingCueRef.current = { id: cue.id, state: 'playing' }
+          dispatchEditorCueState(cue.id, 'playing')
+          setStorageStatus(`Cue avviato: ${cue.title || cue.src}`)
+          if ((cue.options.fadeIn ?? 0) > 0) {
+            fadeAudioVolume(audio, targetVolume, cue.options.fadeIn ?? 0, editorAudioTimersRef)
+          }
+          void alignMediaForCue(audio, cue, preparedSrc).finally(() => {
+            if (audio.src !== preparedSrc || editorPlayingCueRef.current?.id !== cue.id) return
+            scheduleCueEnd(audio, cue, editorAudioTimersRef, () => {
+              editorPlayingCueRef.current = undefined
+              dispatchEditorCueState(cue.id, 'stopped')
+            })
+          })
+        })
+        .catch((error: unknown) => {
+          editorPlayingCueRef.current = { id: cue.id, state: 'paused' }
+          dispatchEditorCueState(cue.id, 'paused')
+          setStorageStatus(playbackErrorMessage(cue, error))
+        })
     }
 
     const stopEditorAudioImmediately = (cue: MediaCue) => {
@@ -437,6 +450,7 @@ function App() {
       if (!audio) return
       clearAudioTimers(editorAudioTimersRef)
       audio.onended = null
+      audio.onerror = null
       audio.pause()
       audio.currentTime = cue.options.startAt ?? 0
       audio.volume = cueTargetVolume(cue)
@@ -475,7 +489,7 @@ function App() {
             dispatchEditorCueState(cue.id, 'playing')
             setStorageStatus(`Cue ripreso: ${cue.title || cue.src}`)
           })
-          .catch(() => setStorageStatus(`Cue pronto, avvio bloccato dal browser: ${cue.title || cue.src}`))
+          .catch((error: unknown) => setStorageStatus(playbackErrorMessage(cue, error)))
         return
       }
 
@@ -486,7 +500,7 @@ function App() {
         return
       }
 
-      void startEditorCue(cue, audio, assetUrl)
+      startEditorCue(cue, audio, assetUrl)
     }
 
     const stopCueFromEditor = (event: Event) => {
@@ -871,6 +885,7 @@ function App() {
     if (!editor || !activeFilePath) return
 
     const markActiveFileDirty = () => {
+      if (!startupProjectReady) startupUserEditedRef.current = true
       const draft = editorJsonToMarkdown(editor.getJSON())
       const cueIds = markerRefIdsFromMarkdown(draft, 'cue')
       const noteIds = markerRefIdsFromMarkdown(draft, 'note')
@@ -894,7 +909,7 @@ function App() {
     return () => {
       editor.off('update', markActiveFileDirty)
     }
-  }, [activeFilePath, editor])
+  }, [activeFilePath, editor, startupProjectReady])
 
   useEffect(() => {
     if (!project.settings.autosave) return
@@ -1079,6 +1094,10 @@ function App() {
       .then((opened) => {
         if (cancelled) return
         if (opened?.project && isProject(opened.project)) {
+          if (startupUserEditedRef.current) {
+            setStorageStatus('Ultimo progetto non aperto: modifiche locali già presenti')
+            return
+          }
           activateProject(opened.project)
           setStorageStatus(`Ultimo progetto aperto: ${compactPath(opened.path)}`)
           return
@@ -4790,8 +4809,8 @@ function FullscreenView({
               onCueExecutedRef.current(cue.id)
               setMediaStatus(`Video in esecuzione senza audio: ${cue.title || cue.src}`)
             })
-            .catch(() => {
-              if (!cancelled) setMediaStatus(`Video pronto, avvio bloccato dal browser: ${cue.title || cue.src}`)
+            .catch((mutedError: unknown) => {
+              if (!cancelled) setMediaStatus(playbackErrorMessage(cue, mutedError))
             })
         })
       return () => {
@@ -4839,8 +4858,8 @@ function FullscreenView({
         onCueExecutedRef.current(cue.id)
         setMediaStatus(`In esecuzione: ${cue.title || cue.src}`)
       })
-      .catch(() => {
-        if (!cancelled) setMediaStatus(`Cue pronto, avvio bloccato dal browser: ${cue.title || cue.src}`)
+      .catch((error: unknown) => {
+        if (!cancelled) setMediaStatus(playbackErrorMessage(cue, error))
       })
 
     return () => {
@@ -4929,7 +4948,7 @@ function FullscreenView({
         onCueExecuted(cue.id)
         setMediaStatus(`Riavviato: ${cue.title || cue.src}`)
       })
-      .catch(() => setMediaStatus(`Cue pronto, avvio bloccato dal browser: ${cue.title || cue.src}`))
+      .catch((error: unknown) => setMediaStatus(playbackErrorMessage(cue, error)))
   }
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -5155,6 +5174,36 @@ const prepareMediaForCue = async (media: HTMLMediaElement, cue: MediaCue, assetU
   const preparedSrc = prepareMediaSourceForCue(media, cue, assetUrl)
   await alignMediaForCue(media, cue, preparedSrc)
   return preparedSrc
+}
+
+const playbackErrorMessage = (cue: MediaCue, error: unknown) => {
+  const label = cue.title || cue.src
+  const errorName = error instanceof DOMException ? error.name : error instanceof Error ? error.name : ''
+  const errorMessage = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+
+  if (errorName === 'NotAllowedError') return `Cue pronto, avvio bloccato dal browser: ${label}`
+  if (errorName === 'NotSupportedError') {
+    return `Cue non riproducibile: ${label}. Verifica che il file sia un MP3/WAV supportato dal sistema.`
+  }
+  if (/not supported|format|decode|demux|codec/i.test(errorMessage)) {
+    return `Cue non riproducibile: ${label}. Formato o codec audio non supportato dal sistema.`
+  }
+  if (errorMessage.trim()) return `Cue non avviato: ${label}. ${errorMessage}`
+  return `Cue non avviato: ${label}`
+}
+
+const mediaElementErrorMessage = (cue: MediaCue, error: MediaError | null) => {
+  const label = cue.title || cue.src
+  if (!error) return `Cue non riproducibile: ${label}`
+  if (error.code === MediaError.MEDIA_ERR_ABORTED) return `Cue interrotto: ${label}`
+  if (error.code === MediaError.MEDIA_ERR_NETWORK) return `Cue non caricato: ${label}. Verifica che il file esista nel progetto.`
+  if (error.code === MediaError.MEDIA_ERR_DECODE) {
+    return `Cue non riproducibile: ${label}. Il file audio non viene decodificato dal sistema.`
+  }
+  if (error.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+    return `Cue non riproducibile: ${label}. Formato o codec audio non supportato dal sistema.`
+  }
+  return `Cue non riproducibile: ${label}`
 }
 
 const updateInstallErrorMessage = (error: unknown) => {

@@ -4,6 +4,10 @@
 
 > Patch dedicata a drag&drop note e avvio cue audio su Linux.
 
+- Ripristinato il callback OAuth desktop diretto `stagedeskpro://auth-callback`, eliminando la dipendenza dal dominio pubblico durante login Google/GitHub su macOS e Linux.
+- Aggiunto il recupero locale del progetto dimostrativo per evitare che un refresh o un riavvio automatico ripristini la versione iniziale mentre l'utente sta scrivendo.
+- Anticipato l'avvio dei cue audio sul gesto `pointerdown` del pulsante play per ridurre i blocchi autoplay su Linux/WebKit.
+- Migliorati i messaggi di errore dei cue audio distinguendo blocco browser, file mancante e codec/formato non supportato.
 - Reso compatto il ghost delle note durante il drag&drop, evitando l'anteprima nativa grande quanto tutta la nota.
 - Il trascinamento delle note parte dall'header della nota e non dal corpo modificabile, riducendo i conflitti con WebKit su macOS e Linux.
 - Disattivato il drag nativo delle note per mantenere stabile l'indicatore di rilascio nell'editor.

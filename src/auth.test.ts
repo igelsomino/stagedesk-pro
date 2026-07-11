@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   authRedirectUrl,
-  desktopAuthBridgeUrl,
+  desktopAuthCallbackUrl,
   isLocalAuthOrigin,
   isProfileComplete,
   normalizeUserTypes,
@@ -31,7 +31,7 @@ describe('auth redirect urls', () => {
     setRuntime('http://tauri.localhost', true)
 
     expect(isLocalAuthOrigin()).toBe(false)
-    expect(authRedirectUrl()).toBe(desktopAuthBridgeUrl)
+    expect(authRedirectUrl()).toBe(desktopAuthCallbackUrl)
     expect(usesDesktopAuthCallback()).toBe(true)
   })
 
