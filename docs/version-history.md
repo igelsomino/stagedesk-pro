@@ -1,5 +1,15 @@
 # Novità
 
+## Versione 1.0.10
+
+> Patch dedicata alla riproduzione dei cue audio su Linux.
+
+- Aggiunto un player audio nativo per l'app desktop, usato per cue sonori e musicali in editor e modalità tutto schermo.
+- La riproduzione audio su Linux non dipende più dal solo WebView/GStreamer e riduce i casi di blocco con messaggio "avvio bloccato dal browser".
+- Sincronizzati play, pausa, ripresa e stop dei cue audio tra chip nell'editor, modalità tutto schermo e player nativo.
+- Migliorata la gestione dello stato di fine cue anche quando il file viene riprodotto fuori dal tag HTML audio.
+- Mantenuto il fallback HTML per il progetto dimostrativo non ancora salvato su una cartella reale.
+
 ## Versione 1.0.8
 
 > Patch dedicata a drag&drop note e avvio cue audio su Linux.

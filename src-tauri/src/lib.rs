@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose, Engine as _};
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use serde::Serialize;
 use serde_json::Value;
 use std::{
@@ -6,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::Mutex,
-    time::UNIX_EPOCH,
+    time::{Duration, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager, State};
 
@@ -15,6 +16,16 @@ const PROJECT_FILE_NAME: &str = "project.json";
 #[derive(Default)]
 struct CurrentProject {
     path: Mutex<Option<PathBuf>>,
+}
+
+#[derive(Default)]
+struct NativeAudio {
+    current: Mutex<Option<NativeAudioPlayback>>,
+}
+
+struct NativeAudioPlayback {
+    _sink: MixerDeviceSink,
+    player: Player,
 }
 
 #[derive(Serialize)]
@@ -245,6 +256,117 @@ fn delete_media_asset(state: State<CurrentProject>, target_path: String) -> Resu
     } else {
         fs::remove_file(target).map_err(|error| error.to_string())
     }
+}
+
+#[tauri::command]
+fn play_audio_asset(
+    state: State<CurrentProject>,
+    audio: State<NativeAudio>,
+    target_path: String,
+    volume: Option<f32>,
+    start_at: Option<f32>,
+    duration: Option<f32>,
+    loop_audio: Option<bool>,
+) -> Result<Option<f32>, String> {
+    let project_path = state
+        .path
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone()
+        .ok_or_else(|| "Nessuna cartella progetto aperta".to_string())?;
+    let target = project_path.join(relative_project_path(&target_path));
+
+    if !target.exists() {
+        return Err(format!("File media non trovato: {target_path}"));
+    }
+
+    let sink = DeviceSinkBuilder::open_default_sink()
+        .map_err(|error| format!("Dispositivo audio non disponibile: {error}"))?;
+    let player = Player::connect_new(sink.mixer());
+    player.set_volume(volume.unwrap_or(0.7).clamp(0.0, 1.0));
+
+    let file = fs::File::open(&target).map_err(|error| error.to_string())?;
+    let decoder = Decoder::try_from(file)
+        .map_err(|error| format!("File audio non decodificabile: {error}"))?;
+    let start = Duration::from_secs_f32(start_at.unwrap_or(0.0).max(0.0));
+    let segment_duration = duration
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .map(Duration::from_secs_f32);
+    let total_duration = decoder.total_duration();
+    let playback_duration = if loop_audio.unwrap_or(false) {
+        None
+    } else {
+        segment_duration
+            .or_else(|| total_duration.and_then(|total| total.checked_sub(start)))
+            .map(|value| value.as_secs_f32())
+    };
+
+    if loop_audio.unwrap_or(false) {
+        if let Some(segment_duration) = segment_duration {
+            player.append(
+                decoder
+                    .skip_duration(start)
+                    .take_duration(segment_duration)
+                    .repeat_infinite(),
+            );
+        } else {
+            player.append(decoder.skip_duration(start).repeat_infinite());
+        }
+    } else if let Some(segment_duration) = segment_duration {
+        player.append(decoder.skip_duration(start).take_duration(segment_duration));
+    } else {
+        player.append(decoder.skip_duration(start));
+    }
+    player.play();
+
+    let mut current = audio.current.lock().map_err(|error| error.to_string())?;
+    if let Some(previous) = current.take() {
+        previous.player.stop();
+    }
+    *current = Some(NativeAudioPlayback {
+        _sink: sink,
+        player,
+    });
+    Ok(playback_duration)
+}
+
+#[tauri::command]
+fn pause_audio_asset(audio: State<NativeAudio>) -> Result<(), String> {
+    if let Some(current) = audio
+        .current
+        .lock()
+        .map_err(|error| error.to_string())?
+        .as_ref()
+    {
+        current.player.pause();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn resume_audio_asset(audio: State<NativeAudio>) -> Result<(), String> {
+    if let Some(current) = audio
+        .current
+        .lock()
+        .map_err(|error| error.to_string())?
+        .as_ref()
+    {
+        current.player.play();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_audio_asset(audio: State<NativeAudio>) -> Result<(), String> {
+    if let Some(current) = audio
+        .current
+        .lock()
+        .map_err(|error| error.to_string())?
+        .take()
+    {
+        current.player.stop();
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -648,6 +770,7 @@ pub fn run() {
             Ok(())
         })
         .manage(CurrentProject::default())
+        .manage(NativeAudio::default())
         .invoke_handler(tauri::generate_handler![
             app_ready,
             current_project_folder_path,
@@ -661,6 +784,10 @@ pub fn run() {
             write_media_asset,
             move_media_asset,
             delete_media_asset,
+            play_audio_asset,
+            pause_audio_asset,
+            resume_audio_asset,
+            stop_audio_asset,
             save_pdf_to_downloads,
             open_path,
             desktop_project_path

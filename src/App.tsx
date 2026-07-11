@@ -399,6 +399,7 @@ function App() {
 
     const startEditorCue = (cue: MediaCue, audio: HTMLAudioElement, assetUrl: string) => {
       if (editorPlayingCueRef.current?.id) dispatchEditorCueState(editorPlayingCueRef.current.id, 'stopped')
+      if (isTauriRuntime()) void stopNativeAudioAsset()
       clearAudioTimers(editorAudioTimersRef)
       audio.pause()
       setSelectedCueId(cue.id)
@@ -445,10 +446,46 @@ function App() {
         })
     }
 
+    const startNativeEditorCue = (cue: MediaCue, audio: HTMLAudioElement, assetUrl: string) => {
+      if (editorPlayingCueRef.current?.id) dispatchEditorCueState(editorPlayingCueRef.current.id, 'stopped')
+      clearAudioTimers(editorAudioTimersRef)
+      editorAudioRef.current?.pause()
+      setSelectedCueId(cue.id)
+      editorPlayingCueRef.current = { id: cue.id, state: 'paused' }
+      dispatchEditorCueState(cue.id, 'paused')
+      setStorageStatus(`Cue pronto: ${cue.title || cue.src}`)
+
+      void playNativeAudioAsset(cue)
+        .then((playbackDuration) => {
+          editorPlayingCueRef.current = { id: cue.id, state: 'playing' }
+          dispatchEditorCueState(cue.id, 'playing')
+          setStorageStatus(`Cue avviato: ${cue.title || cue.src}`)
+          scheduleNativeCueEnd(cue, editorAudioTimersRef, playbackDuration, () => {
+            editorPlayingCueRef.current = undefined
+            dispatchEditorCueState(cue.id, 'stopped')
+          })
+        })
+        .catch((error: unknown) => {
+          if (isNativeProjectPathError(error)) {
+            startEditorCue(cue, audio, assetUrl)
+            return
+          }
+          editorPlayingCueRef.current = { id: cue.id, state: 'paused' }
+          dispatchEditorCueState(cue.id, 'paused')
+          setStorageStatus(nativePlaybackErrorMessage(cue, error))
+        })
+    }
+
     const stopEditorAudioImmediately = (cue: MediaCue) => {
       const audio = editorAudioRef.current
-      if (!audio) return
       clearAudioTimers(editorAudioTimersRef)
+      if (isTauriRuntime()) void stopNativeAudioAsset()
+      if (!audio) {
+        editorPlayingCueRef.current = undefined
+        dispatchEditorCueState(cue.id, 'stopped')
+        setStorageStatus(`Cue fermato: ${cue.title || cue.src}`)
+        return
+      }
       audio.onended = null
       audio.onerror = null
       audio.pause()
@@ -470,7 +507,11 @@ function App() {
 
       if (editorPlayingCueRef.current?.id === cue.id && editorPlayingCueRef.current.state === 'playing') {
         clearAudioTimers(editorAudioTimersRef)
-        audio.pause()
+        if (isTauriRuntime()) {
+          void pauseNativeAudioAsset()
+        } else {
+          audio.pause()
+        }
         editorPlayingCueRef.current = { id: cue.id, state: 'paused' }
         dispatchEditorCueState(cue.id, 'paused')
         setStorageStatus(`Cue in pausa: ${cue.title || cue.src}`)
@@ -479,6 +520,20 @@ function App() {
 
       if (editorPlayingCueRef.current?.id === cue.id && editorPlayingCueRef.current.state === 'paused') {
         clearAudioTimers(editorAudioTimersRef)
+        if (isTauriRuntime()) {
+          scheduleNativeCueEnd(cue, editorAudioTimersRef, undefined, () => {
+            editorPlayingCueRef.current = undefined
+            dispatchEditorCueState(cue.id, 'stopped')
+          })
+          void resumeNativeAudioAsset()
+            .then(() => {
+              editorPlayingCueRef.current = { id: cue.id, state: 'playing' }
+              dispatchEditorCueState(cue.id, 'playing')
+              setStorageStatus(`Cue ripreso: ${cue.title || cue.src}`)
+            })
+            .catch((error: unknown) => setStorageStatus(nativePlaybackErrorMessage(cue, error)))
+          return
+        }
         scheduleCueEnd(audio, cue, editorAudioTimersRef, () => {
           editorPlayingCueRef.current = undefined
           dispatchEditorCueState(cue.id, 'stopped')
@@ -497,6 +552,11 @@ function App() {
       const assetUrl = asset ? mediaAssetUrl(asset, projectRef.current.rootPath) : undefined
       if (!assetUrl) {
         setStorageStatus(`Cue non disponibile: importa di nuovo il file ${cue.src.split('/').pop()}`)
+        return
+      }
+
+      if (isTauriRuntime()) {
+        startNativeEditorCue(cue, audio, assetUrl)
         return
       }
 
@@ -539,6 +599,7 @@ function App() {
       window.removeEventListener('script-cue-stop', stopCueFromEditor)
       window.removeEventListener('script-cue-delete', deleteCueFromEditor)
       clearAudioTimers(editorAudioTimersRef)
+      if (isTauriRuntime()) void stopNativeAudioAsset()
     }
   }, [])
 
@@ -4709,6 +4770,7 @@ function FullscreenView({
   const onCueExecutedRef = useRef(onCueExecuted)
   const [playingCueId, setPlayingCueId] = useState('')
   const [mediaStatus, setMediaStatus] = useState('Pronto')
+  const [nativeAudioPaused, setNativeAudioPaused] = useState(false)
   const stepCue = block?.cueId ? cues.find((cue) => cue.id === block.cueId) : undefined
   const stepAsset = stepCue ? findTreeNode(media, stepCue.src) : undefined
   const stepAssetUrl = stepAsset ? mediaAssetUrl(stepAsset, projectRootPath) : undefined
@@ -4768,6 +4830,7 @@ function FullscreenView({
     }
     activePlaybackRef.current = { cueId: cue.id, assetUrl, type: playbackType }
     clearAudioTimers(audioTimersRef)
+    setNativeAudioPaused(false)
 
     if (cue.type === 'video') {
       if (!video) return
@@ -4818,6 +4881,36 @@ function FullscreenView({
         video.onended = null
         clearAudioTimers(audioTimersRef)
         if (activePlaybackRef.current?.cueId === cue.id) activePlaybackRef.current = undefined
+      }
+    }
+
+    if (isTauriRuntime()) {
+      video?.pause()
+      audio?.pause()
+      void playNativeAudioAsset(cue)
+        .then((playbackDuration) => {
+          if (cancelled) return
+          onCueExecutedRef.current(cue.id)
+          setNativeAudioPaused(false)
+          setMediaStatus(`In esecuzione: ${cue.title || cue.src}`)
+          scheduleNativeCueEnd(cue, audioTimersRef, playbackDuration, () => {
+            activePlaybackRef.current = undefined
+            setPlayingCueId('')
+            setNativeAudioPaused(false)
+            setMediaStatus(`Cue terminato: ${cue.title || cue.src}`)
+          })
+        })
+        .catch((error: unknown) => {
+          if (!cancelled) setMediaStatus(nativePlaybackErrorMessage(cue, error))
+        })
+
+      return () => {
+        cancelled = true
+        clearAudioTimers(audioTimersRef)
+        if (activePlaybackRef.current?.cueId === cue.id) {
+          activePlaybackRef.current = undefined
+          void stopNativeAudioAsset()
+        }
       }
     }
 
@@ -4882,7 +4975,32 @@ function FullscreenView({
       }
       if (!isPlayableCue(stepCue)) return
       clearAudioTimers(audioTimersRef)
+      setNativeAudioPaused(false)
       setPlayingCueId(stepCue.id)
+      return
+    }
+
+    if (isAudioCue(playablePlayingCue) && isTauriRuntime()) {
+      if (nativeAudioPaused) {
+        clearAudioTimers(audioTimersRef)
+        void resumeNativeAudioAsset()
+          .then(() => {
+            setNativeAudioPaused(false)
+            setMediaStatus(`In esecuzione: ${playablePlayingCue.title || playablePlayingCue.src}`)
+            scheduleNativeCueEnd(playablePlayingCue, audioTimersRef, undefined, () => {
+              activePlaybackRef.current = undefined
+              setPlayingCueId('')
+              setNativeAudioPaused(false)
+              setMediaStatus(`Cue terminato: ${playablePlayingCue.title || playablePlayingCue.src}`)
+            })
+          })
+          .catch((error: unknown) => setMediaStatus(nativePlaybackErrorMessage(playablePlayingCue, error)))
+      } else {
+        clearAudioTimers(audioTimersRef)
+        void pauseNativeAudioAsset()
+        setNativeAudioPaused(true)
+        setMediaStatus('Pausa')
+      }
       return
     }
 
@@ -4903,8 +5021,19 @@ function FullscreenView({
 
   const stopPlayback = () => {
     if (!playablePlayingCue) {
+      if (isTauriRuntime()) void stopNativeAudioAsset()
       setPlayingCueId('')
       activePlaybackRef.current = undefined
+      setNativeAudioPaused(false)
+      setMediaStatus('Media fermati')
+      return
+    }
+    if (isAudioCue(playablePlayingCue) && isTauriRuntime()) {
+      clearAudioTimers(audioTimersRef)
+      void stopNativeAudioAsset()
+      activePlaybackRef.current = undefined
+      setPlayingCueId('')
+      setNativeAudioPaused(false)
       setMediaStatus('Media fermati')
       return
     }
@@ -4915,6 +5044,7 @@ function FullscreenView({
       media.currentTime = 0
       activePlaybackRef.current = undefined
       setPlayingCueId('')
+      setNativeAudioPaused(false)
       setMediaStatus('Media fermati')
     })
   }
@@ -4932,6 +5062,24 @@ function FullscreenView({
       return
     }
     if (!isPlayableCue(cue)) return
+    setNativeAudioPaused(false)
+
+    if (isAudioCue(cue) && isTauriRuntime()) {
+      void playNativeAudioAsset(cue)
+        .then((playbackDuration) => {
+          activePlaybackRef.current = { cueId: cue.id, assetUrl: cue.src, type: 'audio' }
+          onCueExecuted(cue.id)
+          setMediaStatus(`Riavviato: ${cue.title || cue.src}`)
+          scheduleNativeCueEnd(cue, audioTimersRef, playbackDuration, () => {
+            activePlaybackRef.current = undefined
+            setPlayingCueId('')
+            setNativeAudioPaused(false)
+            setMediaStatus(`Cue terminato: ${cue.title || cue.src}`)
+          })
+        })
+        .catch((error: unknown) => setMediaStatus(nativePlaybackErrorMessage(cue, error)))
+      return
+    }
 
     const mediaElement = cue.type === 'video' ? videoRef.current : audioRef.current
     if (!mediaElement) return
@@ -5226,6 +5374,58 @@ const clearAudioTimers = (timersRef: MutableRefObject<number[]>) => {
 
 const cueTargetVolume = (cue: MediaCue) => Math.max(0, Math.min(1, (cue.options.volume ?? 70) / 100))
 
+const cuePlaybackDuration = (cue: MediaCue) => {
+  if (cue.options.duration && cue.options.duration > 0) return cue.options.duration
+  const startAt = Math.max(0, cue.options.startAt ?? 0)
+  const endAt = cue.options.endAt
+  if (endAt && endAt > startAt) return endAt - startAt
+  return undefined
+}
+
+const invokeNativeAudioCommand = async (command: string, args?: Record<string, unknown>) => {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke(command, args)
+}
+
+const playNativeAudioAsset = async (cue: MediaCue) => {
+  const duration = await invokeNativeAudioCommand('play_audio_asset', {
+    targetPath: cue.src,
+    volume: cueTargetVolume(cue),
+    startAt: Math.max(0, cue.options.startAt ?? 0),
+    duration: cuePlaybackDuration(cue),
+    loopAudio: Boolean(cue.options.loop),
+  })
+  return typeof duration === 'number' && Number.isFinite(duration) && duration > 0 ? duration : undefined
+}
+
+const pauseNativeAudioAsset = async () => {
+  await invokeNativeAudioCommand('pause_audio_asset')
+}
+
+const resumeNativeAudioAsset = async () => {
+  await invokeNativeAudioCommand('resume_audio_asset')
+}
+
+const stopNativeAudioAsset = async () => {
+  await invokeNativeAudioCommand('stop_audio_asset')
+}
+
+const nativePlaybackErrorMessage = (cue: MediaCue, error: unknown) => {
+  const label = cue.title || cue.src
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+  if (/dispositivo audio/i.test(message)) return `Dispositivo audio non disponibile: ${label}. ${message}`
+  if (/non decodificabile|decode|codec|format/i.test(message)) {
+    return `Cue non riproducibile: ${label}. Il file audio non viene decodificato dal player nativo.`
+  }
+  if (/non trovato|Nessuna cartella/i.test(message)) return `Cue senza file locale: ${label}. ${message}`
+  return message.trim() ? `Cue non avviato: ${label}. ${message}` : `Cue non avviato: ${label}`
+}
+
+const isNativeProjectPathError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+  return /Nessuna cartella progetto aperta/i.test(message)
+}
+
 const fadeAudioVolume = (
   audio: HTMLMediaElement,
   targetVolume: number,
@@ -5285,6 +5485,21 @@ const scheduleCueEnd = (
       onComplete?.()
     })
   }, delayMs)
+  timersRef.current.push(timeout)
+}
+
+const scheduleNativeCueEnd = (
+  cue: MediaCue,
+  timersRef: MutableRefObject<number[]>,
+  playbackDuration?: number,
+  onComplete?: () => void,
+) => {
+  const duration = playbackDuration ?? cuePlaybackDuration(cue)
+  if (!duration || cue.options.loop) return
+
+  const timeout = window.setTimeout(() => {
+    void stopNativeAudioAsset().finally(onComplete)
+  }, duration * 1000)
   timersRef.current.push(timeout)
 }
 
