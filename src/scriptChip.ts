@@ -132,6 +132,32 @@ export const ScriptChip = Node.create({
         window.dispatchEvent(new CustomEvent('script-cue-stop', { detail: { id: currentNode.attrs.refId } }))
       })
 
+      dom.addEventListener('pointerdown', (event) => {
+        const target = event.target as HTMLElement | null
+        if (target?.closest('button')) return
+
+        const kind = String(currentNode.attrs.kind ?? '')
+        const refId = String(currentNode.attrs.refId ?? '')
+        if (!refId) return
+
+        if (kind === 'cue') {
+          ;(window as CuePlaybackWindow).__STAGEDESK_DRAG_PAYLOAD__ = {
+            type: 'application/x-stagedesk-cue-id',
+            value: refId,
+            startedAt: Date.now(),
+          }
+          return
+        }
+
+        if (kind === 'note') {
+          ;(window as CuePlaybackWindow).__STAGEDESK_DRAG_PAYLOAD__ = {
+            type: 'application/x-stagedesk-note-id',
+            value: refId,
+            startedAt: Date.now(),
+          }
+        }
+      })
+
       dom.addEventListener('dragstart', (event) => {
         const target = event.target as HTMLElement | null
         if (target?.closest('button')) {

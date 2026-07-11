@@ -1,6 +1,7 @@
 import type { AuthError, OAuthResponse, Provider, Session, User } from '@supabase/supabase-js'
+import { isTauri } from '@tauri-apps/api/core'
 import { useEffect, useMemo, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
+import type { FormEvent, MouseEvent, ReactNode } from 'react'
 import { Chrome, Cloud, Github, LoaderCircle, LogIn, LogOut, ShieldCheck, UserRound } from 'lucide-react'
 import {
   authRedirectUrl,
@@ -486,6 +487,27 @@ const openAuthProviderUrl = async (url: string) => {
   }
 }
 
+const openLegalLink = async (href: string) => {
+  const url = new URL(href).toString()
+
+  if (isTauri()) {
+    const { openUrl } = await import('@tauri-apps/plugin-opener')
+    await openUrl(url)
+    return
+  }
+
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+const handleLegalLinkClick = (href: string) => (event: MouseEvent<HTMLAnchorElement>) => {
+  event.preventDefault()
+  event.stopPropagation()
+  void openLegalLink(href).catch((error: Error) => {
+    console.error('Apertura collegamento legale non riuscita', error)
+    window.open(href, '_blank', 'noopener,noreferrer')
+  })
+}
+
 function ProfilePanel({
   user,
   profile,
@@ -596,7 +618,12 @@ function ProfileFields({
         />
         <span>
           Accetto l’{' '}
-          <a href={legalLinks.privacy} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
+          <a
+            href={legalLinks.privacy}
+            target="_blank"
+            rel="noreferrer"
+            onClick={handleLegalLinkClick(legalLinks.privacy)}
+          >
             informativa privacy
           </a>
         </span>
@@ -609,7 +636,12 @@ function ProfileFields({
         />
         <span>
           Accetto i{' '}
-          <a href={legalLinks.terms} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
+          <a
+            href={legalLinks.terms}
+            target="_blank"
+            rel="noreferrer"
+            onClick={handleLegalLinkClick(legalLinks.terms)}
+          >
             termini d’uso
           </a>
         </span>

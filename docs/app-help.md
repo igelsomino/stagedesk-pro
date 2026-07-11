@@ -35,6 +35,10 @@ Per una battuta usa questo formato:
 
 `**MIRANDOLINA**: A pranzo, che cosa comanda?`
 
+È accettato anche il formato con i due punti inclusi nel grassetto:
+
+`**MIRANDOLINA:** A pranzo, che cosa comanda?`
+
 I link Markdown come `[sito](https://esempio.it)` vengono visualizzati come collegamenti cliccabili e aperti nel browser predefinito del sistema.
 
 ## Note di regia
@@ -73,6 +77,8 @@ Il controllo verifica, tra le altre cose:
 - nomi personaggio potenzialmente incoerenti;
 - battute senza personaggio;
 - paragrafi non collegati a note, citazioni, cue o sezioni strutturate.
+
+I nomi numerati con la stessa base, ad esempio "Personaggio 1" e "Personaggio 2", non vengono considerati incoerenti tra loro.
 
 | Tasto | Azione |
 | --- | --- |

@@ -1,5 +1,15 @@
 # Novità
 
+## Versione 1.0.5
+
+> Patch dedicata a drag&drop macOS, link legali e controllo copione.
+
+- Rafforzata la compatibilità del drag&drop su macOS per cue, note e file nella struttura multimediale.
+- L'editor accetta esplicitamente il rilascio di cue, note e media anche quando WebKit non espone correttamente i tipi del trascinamento.
+- I link a informativa privacy e termini d'uso vengono aperti nel browser predefinito del sistema operativo nell'app desktop.
+- Il controllo copione non segnala più come errore i due punti inclusi nel grassetto del nome personaggio.
+- Ridotti i falsi positivi sui nomi personaggio numerati, ad esempio "Personaggio 1" e "Personaggio 2".
+
 ## Versione 1.0.4
 
 > Patch dedicata a stabilità progetto, drag&drop macOS e controllo copione.

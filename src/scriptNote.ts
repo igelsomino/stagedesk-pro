@@ -229,6 +229,17 @@ export const ScriptNote = TiptapNode.create({
         setTypeMenuOpen(false)
         updateAttrs({ type: noteType.id, color: noteType.color })
       })
+      dom.addEventListener('pointerdown', (event) => {
+        const target = event.target as HTMLElement | null
+        if (target?.closest('button, textarea, .script-note-type-menu')) return
+        const refId = String(currentNode.attrs.refId ?? '')
+        if (!refId) return
+        ;(window as ScriptNoteWindow).__STAGEDESK_DRAG_PAYLOAD__ = {
+          type: 'application/x-stagedesk-note-id',
+          value: refId,
+          startedAt: Date.now(),
+        }
+      })
       dom.addEventListener('dragstart', (event) => {
         const target = event.target as HTMLElement | null
         if (target?.closest('button, textarea, .script-note-type-menu')) {

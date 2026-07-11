@@ -580,6 +580,14 @@ function App() {
         insertMarkdownAtSelection(view, markdown)
         return true
       },
+      handleDOMEvents: {
+        dragover(_view, event) {
+          if (!event.dataTransfer || !hasAnyEditorDragPayload(event.dataTransfer)) return false
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+          return true
+        },
+      },
       handleKeyDown(view, event) {
         if (event.key === 'Enter' && !event.shiftKey && convertMarkdownTableAroundSelection(view)) {
           event.preventDefault()
@@ -2134,6 +2142,7 @@ function App() {
                 onDragOver={(event) => {
                   if (!hasDragPayload(event.dataTransfer, MEDIA_PATH_DND_TYPE)) return
                   event.preventDefault()
+                  event.stopPropagation()
                   event.dataTransfer.dropEffect = 'move'
                   event.currentTarget.classList.add('drop-target')
                 }}
@@ -2143,6 +2152,7 @@ function App() {
                   event.currentTarget.classList.remove('drop-target')
                   if (!sourcePath) return
                   event.preventDefault()
+                  event.stopPropagation()
                   clearGlobalDragPayload()
                   void moveMediaNode(sourcePath, '/media')
                 }}
@@ -2531,6 +2541,9 @@ function App() {
                 draggable
                 title="Trascina nell'editor o clicca per selezionare"
                 className={cue.id === selectedCueId ? 'note-card active' : 'note-card'}
+                onPointerDown={() => {
+                  writeGlobalDragPayload(CUE_ID_DND_TYPE, cue.id)
+                }}
                 onDragStart={(event: ReactDragEvent<HTMLButtonElement>) => {
                   event.dataTransfer.effectAllowed = 'move'
                   writeDragPayload(event.dataTransfer, CUE_ID_DND_TYPE, CUE_ID_DND_PREFIX, cue.id)
@@ -2980,6 +2993,9 @@ function MediaExplorerTree({
               tabIndex={0}
               draggable={asset.kind !== 'folder'}
               className={asset.path === selectedPath ? 'tree-node media-node selected' : 'tree-node media-node'}
+              onPointerDown={() => {
+                if (asset.kind !== 'folder') writeGlobalDragPayload(MEDIA_PATH_DND_TYPE, asset.path)
+              }}
               onDragStart={(event: ReactDragEvent<HTMLDivElement>) => {
                 if (asset.kind === 'folder') return
                 event.dataTransfer.effectAllowed = 'copyMove'
@@ -2990,6 +3006,7 @@ function MediaExplorerTree({
                 if (!isFolder) return
                 if (!hasDragPayload(event.dataTransfer, MEDIA_PATH_DND_TYPE)) return
                 event.preventDefault()
+                event.stopPropagation()
                 event.dataTransfer.dropEffect = 'move'
                 event.currentTarget.classList.add('drop-target')
               }}
@@ -3569,8 +3586,21 @@ const writeDragPayload = (dataTransfer: DataTransfer, type: string, prefix: stri
 }
 
 const hasDragPayload = (dataTransfer: DataTransfer, type: string) =>
-  Array.from(dataTransfer.types).some((item) => item.toLowerCase() === type.toLowerCase() || item === 'text/plain') ||
+  dragTypes(dataTransfer).some((item) => item.toLowerCase() === type.toLowerCase() || item === 'text/plain') ||
   Boolean(readGlobalDragPayload(type))
+
+const hasAnyEditorDragPayload = (dataTransfer: DataTransfer) =>
+  hasDragPayload(dataTransfer, NOTE_ID_DND_TYPE) ||
+  hasDragPayload(dataTransfer, CUE_ID_DND_TYPE) ||
+  hasDragPayload(dataTransfer, MEDIA_PATH_DND_TYPE)
+
+const dragTypes = (dataTransfer: DataTransfer) => {
+  try {
+    return Array.from(dataTransfer.types ?? [])
+  } catch {
+    return []
+  }
+}
 
 const writeGlobalDragPayload = (type: string, value: string) => {
   ;(window as StagedeskDragWindow)[STAGEDESK_DRAG_STATE_KEY] = { type, value, startedAt: Date.now() }
@@ -3711,7 +3741,7 @@ const validateScriptForFullscreen = (markdown: string, project: Project): Script
       continue
     }
 
-    const dialogue = line.match(/^\*\*([^*:\n]+)\*\*:\s+(.+)$/)
+    const dialogue = line.match(/^\*\*([^*:\n]+)\*\*:\s+(.+)$/) ?? line.match(/^\*\*([^*:\n]+):\*\*\s+(.+)$/)
     if (dialogue) {
       const character = dialogue[1].trim()
       const spoken = dialogue[2].trim()
@@ -3734,10 +3764,6 @@ const validateScriptForFullscreen = (markdown: string, project: Project): Script
     }
     if (/^\*\*[^*]+\*\*:\S/.test(line)) {
       addIssue(index, 'Tipografia', 'Aggiungi uno spazio dopo i due punti: usa "**PERSONAGGIO**: Battuta".', ':')
-      continue
-    }
-    if (/^\*\*[^*]+:\*\*/.test(line)) {
-      addIssue(index, 'Tipografia', 'I due punti devono stare fuori dal grassetto: "**PERSONAGGIO**: Battuta".', ':**')
       continue
     }
     if (/^[A-ZÀ-Ý0-9 '._-]{2,}\s*:/.test(line)) {
@@ -3796,6 +3822,7 @@ const closestKnownCharacter = (character: string, candidates: string[]) => {
   for (const candidate of candidates) {
     const candidateNormalized = normalizeCharacterName(candidate)
     if (!candidateNormalized || candidateNormalized === normalized) continue
+    if (hasDifferentNumericSuffix(normalized, candidateNormalized)) continue
     const distance = levenshteinDistance(normalized, candidateNormalized)
     const limit = normalized.length <= 6 ? 1 : 2
     if (distance <= limit && (!best || distance < best.distance)) {
@@ -3811,6 +3838,17 @@ const normalizeCharacterName = (name: string) =>
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]/gi, '')
     .toLowerCase()
+
+const hasDifferentNumericSuffix = (left: string, right: string) => {
+  const leftMatch = left.match(/^(.+?)(\d+)$/)
+  const rightMatch = right.match(/^(.+?)(\d+)$/)
+  return Boolean(
+    leftMatch &&
+    rightMatch &&
+    leftMatch[1] === rightMatch[1] &&
+    leftMatch[2] !== rightMatch[2],
+  )
+}
 
 const normalizeSectionTitle = (title: string) =>
   title
