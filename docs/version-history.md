@@ -10,6 +10,10 @@
 - I cue previsti in modalità tutto schermo vengono rieseguiti quando lo step lo richiede, anche se erano già stati eseguiti nell'editor o in uno step precedente.
 - Riallineati gli shortcut della modalità tutto schermo con la riproduzione multimediale e aggiunti comandi ghost cliccabili in basso a destra.
 - Resa più robusta la pausa dei chip audio nell'editor.
+- Corrette le anteprime nella colonna Struttura della versione web: i media del progetto usano il file reale e, se necessario, il fallback ai media campione.
+- Sincronizzato lo stato play, pausa e stop delle anteprime cue e media anche quando il browser blocca l'avvio o il file termina senza emettere un evento di fine affidabile.
+- Migliorata la risoluzione delle anteprime media nell'app desktop macOS usando una lettura controllata del file progetto o della risorsa campione.
+- Conservati tab, file attivo, selezione, posizione cursore e dimensione finestra tra cambio focus e riapertura dell'app desktop.
 - Aggiornata l'icona dell'applicazione e sostituito l'accento viola con l'arancione Ubuntu.
 - Il pulsante di avvio fullscreen usa ora un'icona play piena.
 

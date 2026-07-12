@@ -259,6 +259,41 @@ fn delete_media_asset(state: State<CurrentProject>, target_path: String) -> Resu
 }
 
 #[tauri::command]
+fn read_media_asset_data_url(
+    app: AppHandle,
+    state: State<CurrentProject>,
+    target_path: String,
+    source_path: Option<String>,
+) -> Result<String, String> {
+    let project_path = state
+        .path
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let project_file = project_path
+        .as_ref()
+        .map(|path| path.join(relative_project_path(&target_path)))
+        .filter(|path| {
+            path.exists()
+                && path
+                    .metadata()
+                    .map(|metadata| metadata.len() > 0)
+                    .unwrap_or(false)
+        });
+    let source_file = match (project_file, source_path.as_deref()) {
+        (Some(path), _) => path,
+        (None, Some(source_path)) => bundled_media_source(source_path, Some(&app))?,
+        (None, None) => return Err(format!("File media non trovato: {target_path}")),
+    };
+    let bytes = fs::read(&source_file).map_err(|error| error.to_string())?;
+    let mime = mime_type_for_path(&source_file);
+    Ok(format!(
+        "data:{mime};base64,{}",
+        general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
+#[tauri::command]
 fn play_audio_asset(
     state: State<CurrentProject>,
     audio: State<NativeAudio>,
@@ -505,6 +540,31 @@ fn unique_file_path(directory: &Path, file_name: &str) -> PathBuf {
     }
 
     unreachable!()
+}
+
+fn mime_type_for_path(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_lowercase()
+        .as_str()
+    {
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "m4a" => "audio/mp4",
+        "flac" => "audio/flac",
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "mp4" => "video/mp4",
+        "mov" => "video/quicktime",
+        "m4v" => "video/x-m4v",
+        "webm" => "video/webm",
+        _ => "application/octet-stream",
+    }
 }
 
 fn read_project(project_path: &Path) -> Result<Value, String> {
@@ -784,6 +844,7 @@ pub fn run() {
             write_media_asset,
             move_media_asset,
             delete_media_asset,
+            read_media_asset_data_url,
             play_audio_asset,
             pause_audio_asset,
             resume_audio_asset,

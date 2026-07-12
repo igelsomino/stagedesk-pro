@@ -196,6 +196,13 @@ export const browserProjectStorage: ProjectStorage = {
   },
 }
 
+export const readBrowserMediaAssetObjectUrl = async (targetPath: string) => {
+  if (isTauriRuntime() || isLocalDevRuntime() || !browserProjectDirectory) return undefined
+  const file = await getBrowserFile(browserProjectDirectory, pathParts(targetPath))
+  if (!file || file.size === 0) return undefined
+  return URL.createObjectURL(file)
+}
+
 const pickBrowserDirectory = async () => {
   const picker = window.showDirectoryPicker
   if (!picker) return undefined

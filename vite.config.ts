@@ -62,8 +62,13 @@ const projectStorageApi = (): Plugin => ({
           return
         }
 
-        if (req.method === 'GET' && url.pathname === '/media') {
-          await sendMediaFile(req, res, String(url.searchParams.get('path') ?? ''))
+        if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/media') {
+          await sendMediaFile(
+            req,
+            res,
+            String(url.searchParams.get('path') ?? ''),
+            String(url.searchParams.get('source') ?? ''),
+          )
           return
         }
 
@@ -142,29 +147,63 @@ const sendJson = (res: ServerResponse, payload: unknown) => {
   res.end(JSON.stringify(payload))
 }
 
-const sendMediaFile = async (req: IncomingMessage, res: ServerResponse, mediaPath: string) => {
+const sendMediaFile = async (
+  req: IncomingMessage,
+  res: ServerResponse,
+  mediaPath: string,
+  sourcePath?: string,
+) => {
+  if (currentProjectPath) {
+    try {
+      const filePath = safeNodePath(currentProjectPath, mediaPath)
+      const stat = await fs.stat(filePath)
+      if (stat.size > 0) {
+        await streamMediaFile(req, res, filePath, stat.size)
+        return
+      }
+    } catch {
+      // Fall through to the bundled sample media when a restored project points to
+      // a missing or not-yet-materialized file.
+    }
+  }
+
+  if (sourcePath) {
+    const fallbackFilePath = publicSourcePath(sourcePath)
+    const fallbackStat = await fs.stat(fallbackFilePath)
+    await streamMediaFile(req, res, fallbackFilePath, fallbackStat.size)
+    return
+  }
+
   if (!currentProjectPath) throw new Error('Nessuna cartella progetto aperta')
-  const filePath = safeNodePath(currentProjectPath, mediaPath)
-  const stat = await fs.stat(filePath)
+  throw new Error(`File media non disponibile: ${mediaPath}`)
+}
+
+const streamMediaFile = async (req: IncomingMessage, res: ServerResponse, filePath: string, fileSize: number) => {
   const contentType = mediaContentType(filePath)
   const range = req.headers.range
 
   res.setHeader('Accept-Ranges', 'bytes')
   res.setHeader('Content-Type', contentType)
 
+  if (req.method === 'HEAD') {
+    res.setHeader('Content-Length', String(fileSize))
+    res.end()
+    return
+  }
+
   if (range) {
     const match = range.match(/bytes=(\d+)-(\d*)/)
     const start = match ? Number(match[1]) : 0
-    const end = match?.[2] ? Number(match[2]) : stat.size - 1
-    const safeEnd = Math.min(end, stat.size - 1)
+    const end = match?.[2] ? Number(match[2]) : fileSize - 1
+    const safeEnd = Math.min(end, fileSize - 1)
     res.statusCode = 206
-    res.setHeader('Content-Range', `bytes ${start}-${safeEnd}/${stat.size}`)
+    res.setHeader('Content-Range', `bytes ${start}-${safeEnd}/${fileSize}`)
     res.setHeader('Content-Length', String(safeEnd - start + 1))
     fsNative.createReadStream(filePath, { start, end: safeEnd }).pipe(res)
     return
   }
 
-  res.setHeader('Content-Length', String(stat.size))
+  res.setHeader('Content-Length', String(fileSize))
   fsNative.createReadStream(filePath).pipe(res)
 }
 

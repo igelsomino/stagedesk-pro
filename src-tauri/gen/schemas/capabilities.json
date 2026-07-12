@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Permessi desktop per StageDesk Pro.","local":true,"windows":["main"],"permissions":["core:default","deep-link:default","opener:default","updater:default","process:default"]}}
+{"default":{"identifier":"default","description":"Permessi desktop per StageDesk Pro.","local":true,"windows":["main"],"permissions":["core:default","core:window:allow-inner-size","core:window:allow-outer-position","core:window:allow-set-position","core:window:allow-set-size","deep-link:default","opener:default","updater:default","process:default"]}}

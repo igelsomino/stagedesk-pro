@@ -86,7 +86,7 @@ import {
 } from './markdown'
 import { ScriptChip } from './scriptChip'
 import { ScriptNote } from './scriptNote'
-import { browserProjectStorage } from './storage'
+import { browserProjectStorage, readBrowserMediaAssetObjectUrl } from './storage'
 import type { ProjectEntry } from './storage'
 
 const storage = browserProjectStorage
@@ -104,6 +104,8 @@ const POINTER_EDITOR_TARGET_CLASS = 'stagedesk-pointer-editor-target'
 const POINTER_MEDIA_TARGET_CLASS = 'drop-target'
 const STOP_PREVIEW_PLAYBACK_EVENT = 'stagedesk-stop-preview-playback'
 const STOP_EDITOR_PLAYBACK_EVENT = 'stagedesk-stop-editor-playback'
+const UI_STATE_STORAGE_KEY = 'stagedesk-pro.ui-state'
+const WINDOW_STATE_STORAGE_KEY = 'stagedesk-pro.window-state'
 type EditorCueState = 'playing' | 'paused' | 'stopped'
 type EditorCueStateWindow = Window & {
   __STAGEDESK_EDITOR_CUE_STATE__?: { id: string; state: EditorCueState }
@@ -154,6 +156,17 @@ type PointerDropIndicator = {
   y: number
   width: number
   label: string
+}
+
+type PersistedUiState = {
+  projectId: string
+  activePath: string
+  openTabs: string[]
+  selectedScriptPath: string
+  selectedMediaPath: string
+  expandedPaths: string[]
+  leftTab: 'outline' | 'script' | 'media' | 'bookmarks'
+  editorSelection?: number
 }
 const tableExtensions = TableKit.configure({
   table: {
@@ -207,9 +220,11 @@ function App() {
   const updateCheckStartedRef = useRef(false)
   const updateInstallInProgressRef = useRef(false)
   const startupProjectLoadedRef = useRef(false)
+  const startupProjectReadyRef = useRef(false)
   const startupUserEditedRef = useRef(false)
   const toastTimeoutRef = useRef<number | undefined>(undefined)
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
+  const pendingEditorSelectionRef = useRef<number | undefined>(undefined)
   const [scriptDialog, setScriptDialog] = useState<ScriptActionDialog | undefined>()
   const [noteMenuOpen, setNoteMenuOpen] = useState(false)
   const [noteMenuPosition, setNoteMenuPosition] = useState<{ top: number; left: number } | undefined>()
@@ -267,6 +282,12 @@ function App() {
   const projectRef = useRef(project)
   const projectScriptsRef = useRef(project.scripts)
   const activeFilePathRef = useRef(activeFilePath)
+  const activePathRef = useRef(activePath)
+  const openTabsRef = useRef(openTabs)
+  const selectedScriptPathRef = useRef(selectedScriptPath)
+  const selectedMediaPathRef = useRef(selectedMediaPath)
+  const expandedPathsRef = useRef(expandedPaths)
+  const leftTabRef = useRef(leftTab)
   const cueDropActionsRef = useRef({
     insertExistingCue: (_cue: MediaCue, _position: number) => {},
     createCueFromAsset: (_asset: MediaAsset, _position: number) => {},
@@ -274,10 +295,17 @@ function App() {
   projectScriptsRef.current = project.scripts
   projectRef.current = project
   activeFilePathRef.current = activeFilePath
+  activePathRef.current = activePath
+  openTabsRef.current = openTabs
+  selectedScriptPathRef.current = selectedScriptPath
+  selectedMediaPathRef.current = selectedMediaPath
+  expandedPathsRef.current = expandedPaths
+  leftTabRef.current = leftTab
   const lastEditorSelectionRef = useRef<number | undefined>(undefined)
   const editorAudioRef = useRef<HTMLAudioElement | null>(null)
   const editorAudioTimersRef = useRef<number[]>([])
   const editorPlayingCueRef = useRef<{ id: string; state: 'playing' | 'paused' } | undefined>(undefined)
+  const editorHadFocusBeforeWindowBlurRef = useRef(false)
   const noteMenuRef = useRef<HTMLDivElement>(null)
   const exportMenuRef = useRef<HTMLDivElement>(null)
   const appMenuRef = useRef<HTMLDivElement>(null)
@@ -301,6 +329,20 @@ function App() {
     if (duration > 0) {
       toastTimeoutRef.current = window.setTimeout(() => setToastMessage(''), duration)
     }
+  }, [])
+
+  const persistUiStateNow = useCallback((selection = lastEditorSelectionRef.current) => {
+    if (!startupProjectReadyRef.current) return
+    savePersistedUiState({
+      projectId: projectRef.current.id,
+      activePath: activePathRef.current,
+      openTabs: openTabsRef.current,
+      selectedScriptPath: selectedScriptPathRef.current,
+      selectedMediaPath: selectedMediaPathRef.current,
+      expandedPaths: expandedPathsRef.current,
+      leftTab: leftTabRef.current,
+      editorSelection: selection,
+    })
   }, [])
 
   const saveProjectFolderQueued = useCallback((nextProject: Project) => {
@@ -358,6 +400,95 @@ function App() {
   }, [drafts])
 
   useEffect(() => {
+    startupProjectReadyRef.current = startupProjectReady
+  }, [startupProjectReady])
+
+  useEffect(() => {
+    if (!startupProjectReady) return
+    persistUiStateNow()
+  }, [
+    activePath,
+    expandedPaths,
+    leftTab,
+    openTabs,
+    persistUiStateNow,
+    project.id,
+    selectedMediaPath,
+    selectedScriptPath,
+    startupProjectReady,
+  ])
+
+  useEffect(() => {
+    const persistBeforePageLifecycleChange = () => persistUiStateNow()
+    window.addEventListener('blur', persistBeforePageLifecycleChange)
+    window.addEventListener('pagehide', persistBeforePageLifecycleChange)
+    window.addEventListener('beforeunload', persistBeforePageLifecycleChange)
+    return () => {
+      window.removeEventListener('blur', persistBeforePageLifecycleChange)
+      window.removeEventListener('pagehide', persistBeforePageLifecycleChange)
+      window.removeEventListener('beforeunload', persistBeforePageLifecycleChange)
+    }
+  }, [persistUiStateNow])
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return
+    let disposed = false
+    let unlistenResize: (() => void) | undefined
+    let unlistenMove: (() => void) | undefined
+    let saveTimeout = 0
+
+    const setupWindowPersistence = async () => {
+      try {
+        const windowApi = await import('@tauri-apps/api/window')
+        const appWindow = windowApi.getCurrentWindow()
+        const savedState = loadPersistedWindowState()
+        if (savedState && !disposed) {
+          if (savedState.width > 0 && savedState.height > 0) {
+            await appWindow.setSize(new windowApi.LogicalSize(savedState.width, savedState.height))
+          }
+          if (Number.isFinite(savedState.x) && Number.isFinite(savedState.y)) {
+            await appWindow.setPosition(new windowApi.LogicalPosition(savedState.x, savedState.y))
+          }
+        }
+
+        const saveWindowState = async () => {
+          if (disposed) return
+          try {
+            const [size, position] = await Promise.all([appWindow.innerSize(), appWindow.outerPosition()])
+            savePersistedWindowState({
+              width: size.width,
+              height: size.height,
+              x: position.x,
+              y: position.y,
+            })
+          } catch {
+            // Window state persistence is best-effort and must never interrupt editing.
+          }
+        }
+        const scheduleSave = () => {
+          if (saveTimeout) window.clearTimeout(saveTimeout)
+          saveTimeout = window.setTimeout(() => void saveWindowState(), 240)
+        }
+
+        unlistenResize = await appWindow.onResized(scheduleSave)
+        unlistenMove = await appWindow.onMoved(scheduleSave)
+        await saveWindowState()
+      } catch {
+        // Older desktop runtimes may not expose all window APIs.
+      }
+    }
+
+    void setupWindowPersistence()
+
+    return () => {
+      disposed = true
+      if (saveTimeout) window.clearTimeout(saveTimeout)
+      unlistenResize?.()
+      unlistenMove?.()
+    }
+  }, [])
+
+  useEffect(() => {
     setScriptValidationIssues([])
   }, [activePath, project.id])
 
@@ -403,7 +534,7 @@ function App() {
     const startEditorCue = (cue: MediaCue, audio: HTMLAudioElement, assetUrl: string) => {
       window.dispatchEvent(new CustomEvent(STOP_PREVIEW_PLAYBACK_EVENT))
       if (editorPlayingCueRef.current?.id) dispatchEditorCueState(editorPlayingCueRef.current.id, 'stopped')
-      if (isTauriRuntime()) void stopNativeAudioAsset()
+      if (shouldUseNativeAudioPlayback()) void stopNativeAudioAsset()
       clearAudioTimers(editorAudioTimersRef)
       audio.pause()
       setSelectedCueId(cue.id)
@@ -484,7 +615,7 @@ function App() {
     const stopEditorAudioImmediately = (cue: MediaCue) => {
       const audio = editorAudioRef.current
       clearAudioTimers(editorAudioTimersRef)
-      if (isTauriRuntime()) void stopNativeAudioAsset()
+      if (shouldUseNativeAudioPlayback()) void stopNativeAudioAsset()
       if (!audio) {
         editorPlayingCueRef.current = undefined
         dispatchEditorCueState(cue.id, 'stopped')
@@ -512,7 +643,7 @@ function App() {
 
       if (editorPlayingCueRef.current?.id === cue.id && editorPlayingCueRef.current.state === 'playing') {
         clearAudioTimers(editorAudioTimersRef)
-        if (isTauriRuntime()) {
+        if (shouldUseNativeAudioPlayback()) {
           void pauseNativeAudioAsset()
             .then(() => {
               editorPlayingCueRef.current = { id: cue.id, state: 'paused' }
@@ -531,7 +662,7 @@ function App() {
 
       if (editorPlayingCueRef.current?.id === cue.id && editorPlayingCueRef.current.state === 'paused') {
         clearAudioTimers(editorAudioTimersRef)
-        if (isTauriRuntime()) {
+        if (shouldUseNativeAudioPlayback()) {
           scheduleNativeCueEnd(cue, editorAudioTimersRef, undefined, () => {
             editorPlayingCueRef.current = undefined
             dispatchEditorCueState(cue.id, 'stopped')
@@ -566,7 +697,7 @@ function App() {
         return
       }
 
-      if (isTauriRuntime()) {
+      if (shouldUseNativeAudioPlayback()) {
         startNativeEditorCue(cue, audio, assetUrl)
         return
       }
@@ -592,7 +723,7 @@ function App() {
         return
       }
       clearAudioTimers(editorAudioTimersRef)
-      if (isTauriRuntime()) void stopNativeAudioAsset()
+      if (shouldUseNativeAudioPlayback()) void stopNativeAudioAsset()
       editorAudioRef.current?.pause()
       editorPlayingCueRef.current = undefined
       dispatchEditorCueState(current.id, 'stopped')
@@ -627,7 +758,7 @@ function App() {
       window.removeEventListener(STOP_EDITOR_PLAYBACK_EVENT, stopEditorPlaybackFromOutside)
       window.removeEventListener('script-cue-delete', deleteCueFromEditor)
       clearAudioTimers(editorAudioTimersRef)
-      if (isTauriRuntime()) void stopNativeAudioAsset()
+      if (shouldUseNativeAudioPlayback()) void stopNativeAudioAsset()
     }
   }, [])
 
@@ -704,6 +835,7 @@ function App() {
     },
     onSelectionUpdate({ editor: currentEditor }) {
       lastEditorSelectionRef.current = currentEditor.state.selection.from
+      persistUiStateNow(currentEditor.state.selection.from)
       syncToolbarState(currentEditor, setToolbarState)
       syncOutlineState(currentEditor, setActiveOutline, setActiveOutlineId)
       syncBookmarkState(currentEditor, setActiveBookmarks, setActiveBookmarkId)
@@ -938,6 +1070,31 @@ function App() {
   }, [activeAppDocument, editor])
 
   useEffect(() => {
+    if (!editor || activeAppDocument) return
+
+    const rememberEditorFocus = () => {
+      editorHadFocusBeforeWindowBlurRef.current = editor.view.hasFocus()
+      if (editor.view.hasFocus()) lastEditorSelectionRef.current = editor.state.selection.from
+    }
+    const restoreEditorFocus = () => {
+      if (!editorHadFocusBeforeWindowBlurRef.current) return
+      const position = lastEditorSelectionRef.current
+      if (position === undefined) return
+      window.requestAnimationFrame(() => {
+        const safePosition = Math.max(1, Math.min(position, editor.state.doc.content.size))
+        editor.chain().focus(safePosition).setTextSelection(safePosition).run()
+      })
+    }
+
+    window.addEventListener('blur', rememberEditorFocus)
+    window.addEventListener('focus', restoreEditorFocus)
+    return () => {
+      window.removeEventListener('blur', rememberEditorFocus)
+      window.removeEventListener('focus', restoreEditorFocus)
+    }
+  }, [activeAppDocument, editor])
+
+  useEffect(() => {
     if (!editor) return
 
     if (activeAppDocument) {
@@ -964,6 +1121,13 @@ function App() {
       findMarkdownNode(projectScriptsRef.current, activeFilePath)?.content ??
       ''
     editor.commands.setContent(markdownToHtml(content), { emitUpdate: false })
+    const pendingSelection = pendingEditorSelectionRef.current
+    if (pendingSelection !== undefined) {
+      const safePosition = Math.max(1, Math.min(pendingSelection, editor.state.doc.content.size))
+      editor.commands.setTextSelection(safePosition)
+      lastEditorSelectionRef.current = safePosition
+      pendingEditorSelectionRef.current = undefined
+    }
     syncToolbarState(editor, setToolbarState)
     syncOutlineState(editor, setActiveOutline, setActiveOutlineId)
     syncBookmarkState(editor, setActiveBookmarks, setActiveBookmarkId)
@@ -1156,7 +1320,7 @@ function App() {
       window.dispatchEvent(new CustomEvent('script-cue-state', { detail: { id: currentEditorCue.id, state: 'stopped' } }))
     }
     editorPlayingCueRef.current = undefined
-    if (isTauriRuntime()) void stopNativeAudioAsset()
+    if (shouldUseNativeAudioPlayback()) void stopNativeAudioAsset()
     if (statusMessage) setStorageStatus(statusMessage)
   }
 
@@ -1179,14 +1343,34 @@ function App() {
 
   const activateProject = (nextProject: typeof project) => {
     nextProject = normalizeProject(nextProject)
-    const nextPath = flattenMarkdownFiles(nextProject.scripts)[0]?.path ?? ''
+    const markdownPaths = flattenMarkdownFiles(nextProject.scripts).map((file) => file.path)
+    const savedUiState = loadPersistedUiState(nextProject.id)
+    const validOpenTabs = savedUiState?.openTabs.filter((path) => markdownPaths.includes(path) || isAppDocumentPath(path)) ?? []
+    const nextPath =
+      savedUiState?.activePath && (markdownPaths.includes(savedUiState.activePath) || isAppDocumentPath(savedUiState.activePath))
+        ? savedUiState.activePath
+        : validOpenTabs[0] ?? markdownPaths[0] ?? ''
+    const scriptPath =
+      savedUiState?.selectedScriptPath && findTreeNode(nextProject.scripts, savedUiState.selectedScriptPath)
+        ? savedUiState.selectedScriptPath
+        : nextPath && !isAppDocumentPath(nextPath)
+          ? nextPath
+          : markdownPaths[0] ?? '/copione'
+    const mediaPath =
+      savedUiState?.selectedMediaPath && (savedUiState.selectedMediaPath === '/media' || findTreeNode(nextProject.media, savedUiState.selectedMediaPath))
+        ? savedUiState.selectedMediaPath
+        : nextProject.media[0]?.path ?? '/media'
+    const savedExpandedPaths =
+      savedUiState?.expandedPaths.filter((path) => path === '/copione' || path === '/media' || findTreeNode(nextProject.scripts, path) || findTreeNode(nextProject.media, path)) ?? []
+    pendingEditorSelectionRef.current = savedUiState?.activePath === nextPath ? savedUiState.editorSelection : undefined
     setProject(nextProject)
     setDrafts({})
     setActivePath(nextPath)
-    setOpenTabs(nextPath ? [nextPath] : [])
-    setSelectedScriptPath(nextPath || '/copione')
-    setSelectedMediaPath(nextProject.media[0]?.path ?? '/media')
-    setExpandedPaths(['/copione', '/media', ...nextProject.media.map((asset) => asset.path)])
+    setOpenTabs(validOpenTabs.length > 0 ? validOpenTabs : nextPath ? [nextPath] : [])
+    setSelectedScriptPath(scriptPath)
+    setSelectedMediaPath(mediaPath)
+    setExpandedPaths(uniqueValues(['/copione', '/media', ...savedExpandedPaths, ...nextProject.media.map((asset) => asset.path)]))
+    if (savedUiState?.leftTab) setLeftTab(savedUiState.leftTab)
     setSelectedNoteId(nextProject.notes[0]?.id ?? '')
     setSelectedNoteTypeId(defaultNoteType(nextProject.noteTypes)?.id ?? '')
     setSelectedCueId(nextProject.cues[0]?.id ?? '')
@@ -3476,7 +3660,7 @@ function MediaPreview({
   onCue: (asset: MediaAsset) => void
   onStatus: (message: string) => void
 }) {
-  const assetUrl = mediaAssetUrl(asset, projectRootPath)
+  const assetUrl = useResolvedMediaAssetUrl(asset, projectRootPath, onStatus)
   const previewCue = mediaAssetPreviewCue(asset)
   return (
     <section className="media-preview-card">
@@ -3507,7 +3691,7 @@ function CueMediaPreview({
   projectRootPath: string
   onStatus: (message: string) => void
 }) {
-  const assetUrl = asset ? mediaAssetUrl(asset, projectRootPath) : undefined
+  const assetUrl = useResolvedMediaAssetUrl(asset, projectRootPath, onStatus)
   if (!asset || !assetUrl) {
     return <p className="empty-state">Anteprima non disponibile: file media non trovato nel progetto.</p>
   }
@@ -3540,7 +3724,7 @@ function PreviewMediaControls({
   const previewOwnsNativeAudioRef = useRef(false)
   const [state, setState] = useState<'idle' | 'playing' | 'paused'>('idle')
   const [status, setStatus] = useState('Anteprima pronta')
-  const isNativeAudio = isTauriRuntime() && isAudioCue(cue)
+  const isNativeAudio = shouldUseNativeAudioPlayback() && isAudioCue(cue)
   const label = cue.title || cue.src
 
   const setPreviewStatus = useCallback((message: string) => {
@@ -3570,6 +3754,23 @@ function PreviewMediaControls({
     }
   }, [cue, isNativeAudio, label, setPreviewStatus])
 
+  const finishPreview = useCallback(() => {
+    clearAudioTimers(timersRef)
+    previewOwnsNativeAudioRef.current = false
+    const media = cue.type === 'video' ? videoRef.current : audioRef.current
+    if (media) {
+      media.onended = null
+      media.pause()
+      try {
+        media.currentTime = Math.max(0, cue.options.startAt ?? 0)
+      } catch {
+        // Some media backends reject currentTime until metadata is loaded.
+      }
+    }
+    setState('idle')
+    setPreviewStatus(`Anteprima terminata: ${label}`)
+  }, [cue, label, setPreviewStatus])
+
   useEffect(() => {
     const stopOnGlobalRequest = () => stopPreview(true)
     window.addEventListener(STOP_PREVIEW_PLAYBACK_EVENT, stopOnGlobalRequest)
@@ -3584,6 +3785,30 @@ function PreviewMediaControls({
     window.dispatchEvent(new CustomEvent(STOP_EDITOR_PLAYBACK_EVENT))
     clearAudioTimers(timersRef)
 
+    const playWithMediaElement = () => {
+      const media = cue.type === 'video' ? videoRef.current : audioRef.current
+      if (!media) return
+      media.loop = Boolean(cue.options.loop)
+      media.volume = cueTargetVolume(cue)
+      media.onended = finishPreview
+      void prepareMediaForCue(media, cue, assetUrl)
+        .then((preparedSrc) => {
+          if (media.src !== preparedSrc) return false
+          scheduleCueEnd(media, cue, timersRef, finishPreview)
+          return media.play().then(() => true)
+        })
+        .then((started) => {
+          if (!started) return
+          scheduleMediaPauseMonitor(media, timersRef, finishPreview)
+          setState('playing')
+          setPreviewStatus(`Anteprima in esecuzione: ${label}`)
+        })
+        .catch((error: unknown) => {
+          setState('idle')
+          setPreviewStatus(playbackErrorMessage(cue, error))
+        })
+    }
+
     if (isNativeAudio) {
       void playNativeAudioAsset(cue)
         .then((playbackDuration) => {
@@ -3592,36 +3817,21 @@ function PreviewMediaControls({
           setPreviewStatus(`Anteprima in esecuzione: ${label}`)
           scheduleNativeCueEnd(cue, timersRef, playbackDuration, () => {
             previewOwnsNativeAudioRef.current = false
-            setState('idle')
-            setPreviewStatus(`Anteprima terminata: ${label}`)
+            finishPreview()
           })
         })
-        .catch((error: unknown) => setPreviewStatus(nativePlaybackErrorMessage(cue, error)))
+        .catch((error: unknown) => {
+          if (assetUrl) {
+            playWithMediaElement()
+            return
+          }
+          setState('idle')
+          setPreviewStatus(nativePlaybackErrorMessage(cue, error))
+        })
       return
     }
 
-    const media = cue.type === 'video' ? videoRef.current : audioRef.current
-    if (!media) return
-    media.loop = Boolean(cue.options.loop)
-    media.volume = cueTargetVolume(cue)
-    media.onended = () => {
-      setState('idle')
-      setPreviewStatus(`Anteprima terminata: ${label}`)
-    }
-    void prepareMediaForCue(media, cue, assetUrl)
-      .then((preparedSrc) => {
-        if (media.src !== preparedSrc) return
-        scheduleCueEnd(media, cue, timersRef, () => {
-          setState('idle')
-          setPreviewStatus(`Anteprima terminata: ${label}`)
-        })
-        return media.play()
-      })
-      .then(() => {
-        setState('playing')
-        setPreviewStatus(`Anteprima in esecuzione: ${label}`)
-      })
-      .catch((error: unknown) => setPreviewStatus(playbackErrorMessage(cue, error)))
+    playWithMediaElement()
   }
 
   const pausePreview = () => {
@@ -3652,21 +3862,29 @@ function PreviewMediaControls({
           setPreviewStatus(`Anteprima ripresa: ${label}`)
           scheduleNativeCueEnd(cue, timersRef, undefined, () => {
             previewOwnsNativeAudioRef.current = false
-            setState('idle')
-            setPreviewStatus(`Anteprima terminata: ${label}`)
+            finishPreview()
           })
         })
-        .catch((error: unknown) => setPreviewStatus(nativePlaybackErrorMessage(cue, error)))
+        .catch((error: unknown) => {
+          setState('paused')
+          setPreviewStatus(nativePlaybackErrorMessage(cue, error))
+        })
       return
     }
     const media = cue.type === 'video' ? videoRef.current : audioRef.current
     if (!media) return
+    media.onended = finishPreview
+    scheduleCueEnd(media, cue, timersRef, finishPreview)
     void media.play()
       .then(() => {
+        scheduleMediaPauseMonitor(media, timersRef, finishPreview)
         setState('playing')
         setPreviewStatus(`Anteprima ripresa: ${label}`)
       })
-      .catch((error: unknown) => setPreviewStatus(playbackErrorMessage(cue, error)))
+      .catch((error: unknown) => {
+        setState('paused')
+        setPreviewStatus(playbackErrorMessage(cue, error))
+      })
   }
 
   const togglePreview = () => {
@@ -3942,6 +4160,68 @@ const mediaAssetPreviewCue = (asset: MediaAsset): MediaCue => ({
   updatedAt: new Date(0).toISOString(),
 })
 
+function useResolvedMediaAssetUrl(
+  asset: MediaAsset | undefined,
+  projectRootPath: string,
+  onStatus?: (message: string) => void,
+) {
+  const fallbackUrl = asset ? mediaAssetUrl(asset, projectRootPath) : undefined
+  const [resolvedUrl, setResolvedUrl] = useState('')
+  const [resolvedKey, setResolvedKey] = useState('')
+  const assetKey = asset ? `${projectRootPath}|${asset.path}|${asset.sourcePath ?? ''}` : ''
+
+  useEffect(() => {
+    let cancelled = false
+    let objectUrl = ''
+    setResolvedUrl('')
+    setResolvedKey('')
+    if (!asset || asset.kind === 'folder') return
+
+    if (!isTauriRuntime()) {
+      if (isLocalDevRuntime()) return
+
+      void readBrowserMediaAssetObjectUrl(asset.path)
+        .then((url) => {
+          if (cancelled) {
+            if (url) URL.revokeObjectURL(url)
+            return
+          }
+          if (!url) return
+          objectUrl = url
+          setResolvedUrl(url)
+          setResolvedKey(assetKey)
+        })
+        .catch((error: unknown) => {
+          if (!cancelled) onStatus?.(`Anteprima non disponibile: ${String(error)}`)
+        })
+
+      return () => {
+        cancelled = true
+        if (objectUrl) URL.revokeObjectURL(objectUrl)
+      }
+    }
+
+    void readMediaAssetDataUrl(asset)
+      .then((url) => {
+        if (cancelled) return
+        setResolvedUrl(url)
+        setResolvedKey(assetKey)
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) onStatus?.(`Anteprima non disponibile: ${String(error)}`)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [asset, assetKey, onStatus])
+
+  if (!asset) return undefined
+  if (resolvedKey === assetKey && resolvedUrl) return resolvedUrl
+  if (isTauriRuntime() && asset.sourcePath && !hasProjectStorageRoot(projectRootPath)) return undefined
+  return fallbackUrl
+}
+
 const compactPath = (path: string) => {
   const parts = path.split('/')
   if (parts.length <= 3) return path
@@ -3950,6 +4230,9 @@ const compactPath = (path: string) => {
 
 const isTauriRuntime = () =>
   typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
+
+const shouldUseNativeAudioPlayback = () =>
+  isTauriRuntime() && typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
 
 const isLocalDevRuntime = () =>
   typeof window !== 'undefined' &&
@@ -5163,7 +5446,7 @@ function FullscreenView({
       }
     }
 
-    if (isTauriRuntime()) {
+    if (shouldUseNativeAudioPlayback()) {
       video?.pause()
       audio?.pause()
       void playNativeAudioAsset(cue)
@@ -5259,7 +5542,7 @@ function FullscreenView({
       return
     }
 
-    if (isAudioCue(playablePlayingCue) && isTauriRuntime()) {
+    if (isAudioCue(playablePlayingCue) && shouldUseNativeAudioPlayback()) {
       if (nativeAudioPaused) {
         clearAudioTimers(audioTimersRef)
         void resumeNativeAudioAsset()
@@ -5300,14 +5583,14 @@ function FullscreenView({
 
   const stopPlayback = () => {
     if (!playablePlayingCue) {
-      if (isTauriRuntime()) void stopNativeAudioAsset()
+      if (shouldUseNativeAudioPlayback()) void stopNativeAudioAsset()
       setPlayingCueId('')
       activePlaybackRef.current = undefined
       setNativeAudioPaused(false)
       setMediaStatus('Media fermati')
       return
     }
-    if (isAudioCue(playablePlayingCue) && isTauriRuntime()) {
+    if (isAudioCue(playablePlayingCue) && shouldUseNativeAudioPlayback()) {
       clearAudioTimers(audioTimersRef)
       void stopNativeAudioAsset()
       activePlaybackRef.current = undefined
@@ -5474,6 +5757,91 @@ const fullscreenBlockLabel = (block: PerformanceBlock | undefined, isCueStep: bo
   return block.characterId?.toUpperCase() ?? 'COPIONE'
 }
 
+const loadPersistedUiState = (projectId: string): PersistedUiState | undefined => {
+  if (typeof window === 'undefined') return undefined
+  try {
+    const rawState = window.localStorage.getItem(UI_STATE_STORAGE_KEY)
+    if (!rawState) return undefined
+    const state = JSON.parse(rawState) as Partial<PersistedUiState>
+    if (state.projectId !== projectId) return undefined
+    if (
+      typeof state.activePath !== 'string' ||
+      !Array.isArray(state.openTabs) ||
+      typeof state.selectedScriptPath !== 'string' ||
+      typeof state.selectedMediaPath !== 'string' ||
+      !Array.isArray(state.expandedPaths)
+    ) {
+      return undefined
+    }
+    return {
+      projectId,
+      activePath: state.activePath,
+      openTabs: state.openTabs.filter((path): path is string => typeof path === 'string'),
+      selectedScriptPath: state.selectedScriptPath,
+      selectedMediaPath: state.selectedMediaPath,
+      expandedPaths: state.expandedPaths.filter((path): path is string => typeof path === 'string'),
+      leftTab: ['outline', 'script', 'media', 'bookmarks'].includes(String(state.leftTab))
+        ? state.leftTab as PersistedUiState['leftTab']
+        : 'outline',
+      editorSelection: typeof state.editorSelection === 'number' ? state.editorSelection : undefined,
+    }
+  } catch {
+    window.localStorage.removeItem(UI_STATE_STORAGE_KEY)
+    return undefined
+  }
+}
+
+const savePersistedUiState = (state: PersistedUiState) => {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(UI_STATE_STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    // UI state persistence is best-effort and must never interrupt editing.
+  }
+}
+
+type PersistedWindowState = {
+  width: number
+  height: number
+  x: number
+  y: number
+}
+
+const loadPersistedWindowState = (): PersistedWindowState | undefined => {
+  if (typeof window === 'undefined') return undefined
+  try {
+    const rawState = window.localStorage.getItem(WINDOW_STATE_STORAGE_KEY)
+    if (!rawState) return undefined
+    const state = JSON.parse(rawState) as Partial<PersistedWindowState>
+    if (
+      typeof state.width !== 'number' ||
+      typeof state.height !== 'number' ||
+      typeof state.x !== 'number' ||
+      typeof state.y !== 'number'
+    ) {
+      return undefined
+    }
+    return {
+      width: state.width,
+      height: state.height,
+      x: state.x,
+      y: state.y,
+    }
+  } catch {
+    window.localStorage.removeItem(WINDOW_STATE_STORAGE_KEY)
+    return undefined
+  }
+}
+
+const savePersistedWindowState = (state: PersistedWindowState) => {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(WINDOW_STATE_STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    // Window state persistence is best-effort.
+  }
+}
+
 const mediaKind = (mime: string, name: string): MediaAsset['kind'] => {
   if (mime.startsWith('audio/')) return name.toLowerCase().includes('music') ? 'music' : 'audio'
   if (mime.startsWith('image/')) return 'image'
@@ -5503,7 +5871,9 @@ const mediaAssetUrl = (asset: MediaAsset, projectRootPath: string) => {
   }
 
   if (isLocalDevRuntime()) {
-    return `/__project-storage/media?path=${encodeURIComponent(asset.path)}`
+    const parameters = new URLSearchParams({ path: asset.path })
+    if (asset.sourcePath) parameters.set('source', asset.sourcePath)
+    return `/__project-storage/media?${parameters.toString()}`
   }
 
   return undefined
@@ -5646,6 +6016,14 @@ const invokeNativeAudioCommand = async (command: string, args?: Record<string, u
   return invoke(command, args)
 }
 
+const readMediaAssetDataUrl = async (asset: MediaAsset) => {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string>('read_media_asset_data_url', {
+    targetPath: asset.path,
+    sourcePath: asset.sourcePath,
+  })
+}
+
 const playNativeAudioAsset = async (cue: MediaCue) => {
   const duration = await invokeNativeAudioCommand('play_audio_asset', {
     targetPath: cue.src,
@@ -5745,6 +6123,23 @@ const scheduleCueEnd = (
     })
   }, delayMs)
   timersRef.current.push(timeout)
+}
+
+const scheduleMediaPauseMonitor = (
+  media: HTMLMediaElement,
+  timersRef: MutableRefObject<number[]>,
+  onComplete: () => void,
+) => {
+  const startedAt = window.performance.now()
+  const interval = window.setInterval(() => {
+    const elapsedMs = window.performance.now() - startedAt
+    const duration = Number.isFinite(media.duration) ? media.duration : undefined
+    const nearNaturalEnd = Boolean(duration && media.currentTime >= duration - 0.08)
+    if (media.ended || nearNaturalEnd || (elapsedMs > 500 && media.paused && !media.seeking)) {
+      onComplete()
+    }
+  }, 250)
+  timersRef.current.push(interval)
 }
 
 const scheduleNativeCueEnd = (
