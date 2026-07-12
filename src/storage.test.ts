@@ -45,4 +45,28 @@ describe('browser project storage recovery', () => {
 
     expect(browserProjectStorage.load().name).toBe('La locandiera')
   })
+
+  it('removes the legacy ID column from recovered character tables', () => {
+    const project = defaultProject()
+    const script = project.scripts[0]?.children?.[0]
+    if (!script) throw new Error('Missing sample script')
+    script.content = `# Atto 1
+
+| ID | Personaggio | Interprete | Presenza | Note |
+| --- | --- | --- | --- | --- |
+| mirandolina | MIRANDOLINA | Da assegnare | In scena | Guida il ritmo della scena. |
+| cavaliere | CAVALIERE | Da assegnare | In scena | Resiste, poi si lascia incuriosire. |
+
+## Scena XV
+`
+
+    browserProjectStorage.save(project)
+
+    const recoveredScript = browserProjectStorage.load().scripts[0]?.children?.[0]?.content ?? ''
+    expect(recoveredScript).toContain('| Personaggio | Interprete | Presenza | Note |')
+    expect(recoveredScript).toContain('| MIRANDOLINA | Da assegnare | In scena | Guida il ritmo della scena. |')
+    expect(recoveredScript).toContain('| CAVALIERE | Da assegnare | In scena | Resiste, poi si lascia incuriosire. |')
+    expect(recoveredScript).not.toContain('| ID | Personaggio | Interprete | Presenza | Note |')
+    expect(recoveredScript).not.toContain('| mirandolina | MIRANDOLINA |')
+  })
 })

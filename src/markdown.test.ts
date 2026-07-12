@@ -55,6 +55,16 @@ describe('markdown chip rendering', () => {
     expect(html).toContain('>Blues intro</span>')
   })
 
+  it('renders structured actor dialogue blocks with stable ids', () => {
+    const html = markdownToHtml('::battuta{id="battuta-001" characterId="mirandolina" character="MIRANDOLINA" sceneId="scena-1"}\nA pranzo?\n::')
+
+    expect(html).toContain('data-dialogue-block="true"')
+    expect(html).toContain('data-dialogue-id="battuta-001"')
+    expect(html).toContain('data-character-id="mirandolina"')
+    expect(html).toContain('data-character-name="MIRANDOLINA"')
+    expect(html).toContain('data-dialogue-text="A pranzo?"')
+  })
+
   it('preserves rich markdown blocks when reopening editor content', () => {
     const html = markdownToHtml([
       '### Scena interna',
@@ -168,6 +178,17 @@ describe('markdown serialization', () => {
     expect(serialized).toContain('::media{id="cue-002"')
   })
 
+  it('serializes structured dialogue markers to battuta blocks', () => {
+    const serialized = serializeExtendedMarkdown(
+      '[BATTUTA: MIRANDOLINA] {#battuta-001 characterId="mirandolina" text="A pranzo?" sceneId="scena-1"}',
+      [],
+      [],
+    )
+
+    expect(serialized).toContain('::battuta{id="battuta-001" characterId="mirandolina" character="MIRANDOLINA" sceneId="scena-1"}')
+    expect(serialized).toContain('A pranzo?')
+  })
+
   it('removes visual note and cue markers from clean export', () => {
     const clean = cleanScriptMarkdown([
       'PERSONAGGIO',
@@ -218,6 +239,17 @@ describe('markdown serialization', () => {
       type: 'dialogue',
       characterId: 'mirandolina',
       text: '**MIRANDOLINA**: A pranzo, che cosa comanda?',
+    })
+  })
+
+  it('parses structured battuta blocks as fullscreen dialogue', () => {
+    const blocks = parseScriptBlocks('::battuta{id="battuta-001" characterId="mirandolina" character="MIRANDOLINA" sceneId="scena-1"}\nA pranzo?\n::')
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({
+      type: 'dialogue',
+      characterId: 'mirandolina',
+      text: '**MIRANDOLINA**: A pranzo?',
     })
   })
 

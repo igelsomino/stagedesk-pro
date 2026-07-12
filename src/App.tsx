@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Copy,
   Download,
+  Drama,
   Eraser,
   FileAudio,
   FileImage,
@@ -42,11 +43,12 @@ import {
   Pencil,
   Pause,
   Play,
+  Plus,
   Quote,
   Redo2,
   RefreshCw,
-  Grid2X2X,
   PanelTopClose,
+  Rows3,
   Search,
   Square,
   Trash2,
@@ -85,6 +87,7 @@ import {
   slug,
 } from './markdown'
 import { ScriptChip } from './scriptChip'
+import { ScriptDialogue } from './scriptDialogue'
 import { ScriptNote } from './scriptNote'
 import { browserProjectStorage, readBrowserMediaAssetObjectUrl } from './storage'
 import type { ProjectEntry } from './storage'
@@ -106,9 +109,32 @@ const STOP_PREVIEW_PLAYBACK_EVENT = 'stagedesk-stop-preview-playback'
 const STOP_EDITOR_PLAYBACK_EVENT = 'stagedesk-stop-editor-playback'
 const UI_STATE_STORAGE_KEY = 'stagedesk-pro.ui-state'
 const WINDOW_STATE_STORAGE_KEY = 'stagedesk-pro.window-state'
+const PLAYBACK_LOG_STORAGE_KEY = 'stagedesk-pro.playback-log'
 type EditorCueState = 'playing' | 'paused' | 'stopped'
 type EditorCueStateWindow = Window & {
   __STAGEDESK_EDITOR_CUE_STATE__?: { id: string; state: EditorCueState }
+}
+type CharacterOption = {
+  id: string
+  name: string
+}
+type CharacterOptionsWindow = Window & {
+  __STAGEDESK_CHARACTER_OPTIONS__?: CharacterOption[]
+}
+type StopPreviewPlaybackDetail = {
+  sourceId?: string
+}
+type PlaybackLogEntry = {
+  timestamp: string
+  scope: 'preview' | 'editor' | 'fullscreen' | 'native'
+  action: string
+  cueId?: string
+  cueType?: MediaCue['type']
+  label?: string
+  details?: Record<string, unknown>
+}
+type PlaybackLogWindow = Window & {
+  __STAGEDESK_PLAYBACK_LOGS__?: PlaybackLogEntry[]
 }
 type StagedeskDragPayload = {
   type: string
@@ -226,14 +252,15 @@ function App() {
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const pendingEditorSelectionRef = useRef<number | undefined>(undefined)
   const [scriptDialog, setScriptDialog] = useState<ScriptActionDialog | undefined>()
-  const [noteMenuOpen, setNoteMenuOpen] = useState(false)
-  const [noteMenuPosition, setNoteMenuPosition] = useState<{ top: number; left: number } | undefined>()
-  const [exportMenuOpen, setExportMenuOpen] = useState(false)
-  const [exportMenuPosition, setExportMenuPosition] = useState<{ top: number; left: number } | undefined>()
+  const [theaterMenuOpen, setTheaterMenuOpen] = useState(false)
+  const [theaterMenuPosition, setTheaterMenuPosition] = useState<{ top: number; left: number } | undefined>()
+  const [tableMenuOpen, setTableMenuOpen] = useState(false)
+  const [tableMenuPosition, setTableMenuPosition] = useState<{ top: number; left: number } | undefined>()
   const [appMenuOpen, setAppMenuOpen] = useState(false)
   const [appMenuPosition, setAppMenuPosition] = useState<{ top: number; left: number } | undefined>()
   const [projectPickerEntries, setProjectPickerEntries] = useState<ProjectEntry[]>([])
   const [toolbarState, setToolbarState] = useState<ToolbarState>(emptyToolbarState)
+  const [tableContextActive, setTableContextActive] = useState(false)
   const [activeEditorSceneId, setActiveEditorSceneId] = useState('')
   const [activeOutline, setActiveOutline] = useState<OutlineItem[]>(() =>
     markdownOutlineItems(findMarkdownNode(project.scripts, initialPath)?.content ?? ''),
@@ -262,6 +289,12 @@ function App() {
   const activeMarkdown = activeAppDocument
     ? activeAppDocumentMarkdown
     : drafts[activePath] ?? activeFile?.content ?? ''
+  const [editorMarkdown, setEditorMarkdown] = useState(activeMarkdown)
+  const activeCharacterMarkdown = activeAppDocument ? activeMarkdown : editorMarkdown || activeMarkdown
+  const activeCharacters = useMemo(
+    () => charactersFromMarkdown(activeCharacterMarkdown, project.characters),
+    [activeCharacterMarkdown, project.characters],
+  )
   const activeCueRefIds = useMemo(
     () => uniqueValues([...markerRefIdsFromMarkdown(activeMarkdown, 'cue'), ...editorCueRefIds]),
     [activeMarkdown, editorCueRefIds],
@@ -306,8 +339,8 @@ function App() {
   const editorAudioTimersRef = useRef<number[]>([])
   const editorPlayingCueRef = useRef<{ id: string; state: 'playing' | 'paused' } | undefined>(undefined)
   const editorHadFocusBeforeWindowBlurRef = useRef(false)
-  const noteMenuRef = useRef<HTMLDivElement>(null)
-  const exportMenuRef = useRef<HTMLDivElement>(null)
+  const theaterMenuRef = useRef<HTMLDivElement>(null)
+  const tableMenuRef = useRef<HTMLDivElement>(null)
   const appMenuRef = useRef<HTMLDivElement>(null)
   const pointerDropTargetRef = useRef<PointerDropTarget | undefined>(undefined)
   const moveMediaNodeRef = useRef<(sourcePath: string, targetFolderPath: string) => Promise<void>>(async () => undefined)
@@ -351,6 +384,11 @@ function App() {
     saveQueueRef.current = saveTask.catch(() => undefined)
     return saveTask
   }, [desktopStorageReady, startupProjectReady])
+
+  useEffect(() => {
+    ;(window as CharacterOptionsWindow).__STAGEDESK_CHARACTER_OPTIONS__ = activeCharacters
+    window.dispatchEvent(new CustomEvent('stagedesk-characters-updated'))
+  }, [activeCharacters])
 
   useEffect(() => {
     chipInspectorRef.current = { notes: fileNotes, cues: fileCues }
@@ -581,7 +619,7 @@ function App() {
         })
     }
 
-    const startNativeEditorCue = (cue: MediaCue, audio: HTMLAudioElement, assetUrl: string) => {
+    const startNativeEditorCue = (cue: MediaCue, audio: HTMLAudioElement, assetUrl: string, sourcePath?: string) => {
       window.dispatchEvent(new CustomEvent(STOP_PREVIEW_PLAYBACK_EVENT))
       if (editorPlayingCueRef.current?.id) dispatchEditorCueState(editorPlayingCueRef.current.id, 'stopped')
       clearAudioTimers(editorAudioTimersRef)
@@ -591,7 +629,7 @@ function App() {
       dispatchEditorCueState(cue.id, 'paused')
       setStorageStatus(`Cue pronto: ${cue.title || cue.src}`)
 
-      void playNativeAudioAsset(cue)
+      void playNativeAudioAsset(cue, sourcePath)
         .then((playbackDuration) => {
           editorPlayingCueRef.current = { id: cue.id, state: 'playing' }
           dispatchEditorCueState(cue.id, 'playing')
@@ -698,7 +736,7 @@ function App() {
       }
 
       if (shouldUseNativeAudioPlayback()) {
-        startNativeEditorCue(cue, audio, assetUrl)
+        startNativeEditorCue(cue, audio, assetUrl, asset?.sourcePath)
         return
       }
 
@@ -763,16 +801,16 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!noteMenuOpen && !exportMenuOpen && !appMenuOpen) return
+    if (!theaterMenuOpen && !tableMenuOpen && !appMenuOpen) return
 
     const closeOnOutsideClick = (event: PointerEvent) => {
-      if (noteMenuOpen && !noteMenuRef.current?.contains(event.target as Node)) {
-        setNoteMenuOpen(false)
-        setNoteMenuPosition(undefined)
+      if (theaterMenuOpen && !theaterMenuRef.current?.contains(event.target as Node)) {
+        setTheaterMenuOpen(false)
+        setTheaterMenuPosition(undefined)
       }
-      if (exportMenuOpen && !exportMenuRef.current?.contains(event.target as Node)) {
-        setExportMenuOpen(false)
-        setExportMenuPosition(undefined)
+      if (tableMenuOpen && !tableMenuRef.current?.contains(event.target as Node)) {
+        setTableMenuOpen(false)
+        setTableMenuPosition(undefined)
       }
       if (appMenuOpen && !appMenuRef.current?.contains(event.target as Node)) {
         setAppMenuOpen(false)
@@ -782,10 +820,10 @@ function App() {
 
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setNoteMenuOpen(false)
-        setNoteMenuPosition(undefined)
-        setExportMenuOpen(false)
-        setExportMenuPosition(undefined)
+        setTheaterMenuOpen(false)
+        setTheaterMenuPosition(undefined)
+        setTableMenuOpen(false)
+        setTableMenuPosition(undefined)
         setAppMenuOpen(false)
         setAppMenuPosition(undefined)
       }
@@ -798,7 +836,14 @@ function App() {
       document.removeEventListener('pointerdown', closeOnOutsideClick)
       document.removeEventListener('keydown', closeOnEscape)
     }
-  }, [appMenuOpen, exportMenuOpen, noteMenuOpen])
+  }, [appMenuOpen, tableMenuOpen, theaterMenuOpen])
+
+  useEffect(() => {
+    if (!toolbarState.table && !tableContextActive && tableMenuOpen) {
+      setTableMenuOpen(false)
+      setTableMenuPosition(undefined)
+    }
+  }, [tableContextActive, tableMenuOpen, toolbarState.table])
 
   useEffect(() => {
     let cancelled = false
@@ -824,9 +869,10 @@ function App() {
   }, [])
 
   const editor = useEditor({
-    extensions: [StarterKit, linkExtension, tableExtensions, ScriptNote, ScriptChip],
+    extensions: [StarterKit, linkExtension, tableExtensions, ScriptNote, ScriptDialogue, ScriptChip],
     content: markdownToHtml(activeMarkdown),
     onCreate({ editor: currentEditor }) {
+      setEditorMarkdown(editorJsonToMarkdown(currentEditor.getJSON()))
       syncToolbarState(currentEditor, setToolbarState)
       syncOutlineState(currentEditor, setActiveOutline, setActiveOutlineId)
       syncBookmarkState(currentEditor, setActiveBookmarks, setActiveBookmarkId)
@@ -843,6 +889,10 @@ function App() {
       syncEditorCueRefs(currentEditor, setEditorCueRefIds)
     },
     onTransaction({ editor: currentEditor }) {
+      setEditorMarkdown((current) => {
+        const next = editorJsonToMarkdown(currentEditor.getJSON())
+        return current === next ? current : next
+      })
       syncToolbarState(currentEditor, setToolbarState)
       syncOutlineState(currentEditor, setActiveOutline, setActiveOutlineId)
       syncBookmarkState(currentEditor, setActiveBookmarks, setActiveBookmarkId)
@@ -1099,6 +1149,7 @@ function App() {
 
     if (activeAppDocument) {
       editor.commands.setContent(markdownToHtml(activeAppDocumentMarkdown), { emitUpdate: false })
+      setEditorMarkdown(activeAppDocumentMarkdown)
       syncToolbarState(editor, setToolbarState)
       syncOutlineState(editor, setActiveOutline, setActiveOutlineId)
       syncBookmarkState(editor, setActiveBookmarks, setActiveBookmarkId)
@@ -1108,6 +1159,7 @@ function App() {
 
     if (!activeFilePath) {
       editor.commands.setContent('', { emitUpdate: false })
+      setEditorMarkdown('')
       setActiveOutline([])
       setActiveOutlineId('')
       setActiveBookmarks([])
@@ -1121,6 +1173,7 @@ function App() {
       findMarkdownNode(projectScriptsRef.current, activeFilePath)?.content ??
       ''
     editor.commands.setContent(markdownToHtml(content), { emitUpdate: false })
+    setEditorMarkdown(content)
     const pendingSelection = pendingEditorSelectionRef.current
     if (pendingSelection !== undefined) {
       const safePosition = Math.max(1, Math.min(pendingSelection, editor.state.doc.content.size))
@@ -1142,6 +1195,7 @@ function App() {
       const draft = editorJsonToMarkdown(editor.getJSON())
       const cueIds = markerRefIdsFromMarkdown(draft, 'cue')
       const noteIds = markerRefIdsFromMarkdown(draft, 'note')
+      setEditorMarkdown((current) => (current === draft ? current : draft))
       setDrafts((current) => (current[activeFilePath] === draft ? current : { ...current, [activeFilePath]: draft }))
       setProject((current) => {
         const cues = current.cues.filter((cue) => cue.filePath !== activeFilePath || cueIds.includes(cue.id))
@@ -1571,7 +1625,7 @@ function App() {
       name: safeName,
       path,
       kind: 'markdown',
-      content: `## NUOVA SCENA\n\nPERSONAGGIO\nNuova battuta.\n`,
+      content: `| Personaggio | Interprete | Presenza | Note |\n| --- | --- | --- | --- |\n| PERSONAGGIO 1 | Da assegnare | In scena | Primo personaggio della scena. |\n\n# ${stripMarkdownExtension(safeName)}\n\n## Scena 1\n\n::regia{id="note-characters" type="characters" color="blue" title="Personaggi in scena" sceneId="scena-1" anchorId="note-characters"}\nIn scena: PERSONAGGIO 1.\n::\n\n### Sinossi\n\n::battuta{id="battuta-1" characterId="personaggio-1" character="PERSONAGGIO 1" sceneId="scena-1"}\nBattuta 1\n::\n`,
       dirty: false,
     }
     const scripts = insertTreeChild(project.scripts, folderPath, file)
@@ -2052,28 +2106,99 @@ function App() {
 
   const insertCharactersSection = () => {
     if (!editor || !activeFile) return
+    const rows = (activeCharacters.length > 0 ? activeCharacters : [{ id: 'personaggio-1', name: 'PERSONAGGIO 1' }])
+      .map((character) => charactersTableRow([character.name, 'Da assegnare', 'In scena', '']))
     editor
       .chain()
       .focus()
       .insertContent([
         {
-          type: 'heading',
-          attrs: { level: 3 },
-          content: [{ type: 'text', text: 'Personaggi' }],
-        },
-        {
           type: 'table',
+          attrs: { 'data-character-table': 'true' },
           content: [
             charactersTableRow(['Personaggio', 'Attore', 'Presenza', 'Note'], true),
-            charactersTableRow(['REGISTA', 'Mario Rossi', 'In scena', 'Apre la scena e guida il ritmo.']),
-            charactersTableRow(['ATTORE', 'Laura Bianchi', 'In scena', 'Ingresso dopo il primo cue audio.']),
-            charactersTableRow(['TECNICO', 'Gianni Verdi', 'Fuori scena', 'Intervento tecnico durante il cambio scena.']),
+            ...rows,
           ],
         },
         { type: 'paragraph' },
       ])
       .run()
   }
+
+  const dialogueCharacters = useMemo(
+    () => activeCharacters.length > 0
+      ? activeCharacters
+      : [{ id: 'personaggio-1', name: 'PERSONAGGIO 1' }],
+    [activeCharacters],
+  )
+
+  const insertActorDialogueForCharacter = useCallback((selectedCharacter: CharacterOption) => {
+    if (!editor || !activeFile) return
+    const dialogueId = `battuta-${crypto.randomUUID().slice(0, 8)}`
+    editor
+      .chain()
+      .focus()
+      .insertContent([
+        {
+          type: 'scriptDialogue',
+          attrs: {
+            id: dialogueId,
+            characterId: selectedCharacter.id,
+            character: selectedCharacter.name,
+            text: 'Nuova battuta.',
+            sceneId: currentScene ?? '',
+          },
+        },
+        { type: 'paragraph' },
+      ])
+      .run()
+    setTheaterMenuOpen(false)
+    setTheaterMenuPosition(undefined)
+    showStatus(`Battuta inserita: ${selectedCharacter.name}`)
+  }, [activeFile, currentScene, editor, showStatus])
+
+  const toggleTheaterMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (theaterMenuOpen) {
+      setTheaterMenuOpen(false)
+      setTheaterMenuPosition(undefined)
+      return
+    }
+    const rect = event.currentTarget.getBoundingClientRect()
+    setTheaterMenuPosition({
+      top: rect.bottom + 4,
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 286)),
+    })
+    setTheaterMenuOpen(true)
+  }
+
+  const toggleTableMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (tableMenuOpen) {
+      setTableMenuOpen(false)
+      setTableMenuPosition(undefined)
+      return
+    }
+    const rect = event.currentTarget.getBoundingClientRect()
+    setTableMenuPosition({
+      top: rect.bottom + 4,
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 246)),
+    })
+    setTableMenuOpen(true)
+  }
+
+  const syncTableContextFromTarget = (target: EventTarget | null) => {
+    const element = target instanceof HTMLElement ? target : null
+    setTableContextActive(Boolean(element?.closest('table')))
+  }
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!editor || editorEditingDisabled || !event.altKey || event.key.toLowerCase() !== 'b') return
+      event.preventDefault()
+      insertActorDialogueForCharacter(dialogueCharacters[0])
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [dialogueCharacters, editor, editorEditingDisabled, insertActorDialogueForCharacter])
 
   const showBookmarkDialog = () => {
     if (!editor || !activeFile) return
@@ -2109,8 +2234,17 @@ function App() {
     showStatus(`Bookmark inserito: ${title}`)
   }
 
+  const addCurrentTableRow = () => {
+    if (!editor || !selectionIsInsideNode(editor, 'table')) {
+      showStatus('Posiziona il cursore nella tabella personaggi')
+      return
+    }
+    editor.chain().focus().addRowAfter().run()
+    showStatus('Riga tabella aggiunta')
+  }
+
   const deleteCurrentTableRow = () => {
-    if (!editor || !editor.isActive('table')) {
+    if (!editor || !selectionIsInsideNode(editor, 'table')) {
       showStatus('Posiziona il cursore nella tabella personaggi')
       return
     }
@@ -2119,7 +2253,7 @@ function App() {
   }
 
   const deleteCurrentTable = () => {
-    if (!editor || !editor.isActive('table')) {
+    if (!editor || !selectionIsInsideNode(editor, 'table')) {
       showStatus('Posiziona il cursore nella tabella personaggi')
       return
     }
@@ -2802,36 +2936,6 @@ function App() {
               >
                 <Type size={15} />
               </button>
-              <button
-                type="button"
-                title="Titolo 1"
-                aria-label="Titolo 1"
-                className={toolbarState.heading1 ? 'active' : ''}
-                onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
-                disabled={editorEditingDisabled}
-              >
-                <Heading1 size={15} />
-              </button>
-              <button
-                type="button"
-                title="Titolo 2"
-                aria-label="Titolo 2"
-                className={toolbarState.heading2 ? 'active' : ''}
-                onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
-                disabled={editorEditingDisabled}
-              >
-                <Heading2 size={15} />
-              </button>
-              <button
-                type="button"
-                title="Titolo 3"
-                aria-label="Titolo 3"
-                className={toolbarState.heading3 ? 'active' : ''}
-                onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
-                disabled={editorEditingDisabled}
-              >
-                <Heading3 size={15} />
-              </button>
             </div>
             <span className="toolbar-divider" aria-hidden="true" />
             <div className="toolbar-group" aria-label="Blocchi">
@@ -2885,134 +2989,234 @@ function App() {
               </button>
             </div>
             <span className="toolbar-divider" aria-hidden="true" />
-            <div className="toolbar-menu" ref={noteMenuRef}>
+            <div className="toolbar-menu" ref={theaterMenuRef}>
               <button
                 type="button"
-                className="toolbar-menu-trigger"
-                title="Nota regia"
-                aria-label="Nota regia"
+                className="toolbar-menu-trigger icon-only theater-menu-trigger"
+                title="Strumenti teatro"
+                aria-label="Strumenti teatro"
                 aria-haspopup="menu"
-                aria-expanded={noteMenuOpen}
-                disabled={editorEditingDisabled}
-                onClick={(event) => {
-                  if (noteMenuOpen) {
-                    setNoteMenuOpen(false)
-                    setNoteMenuPosition(undefined)
-                    return
-                  }
-
-                  const rect = event.currentTarget.getBoundingClientRect()
-                  setNoteMenuPosition({
-                    top: rect.bottom + 4,
-                    left: Math.max(8, Math.min(rect.left, window.innerWidth - 212)),
-                  })
-                  setNoteMenuOpen(true)
-                }}
+                aria-expanded={theaterMenuOpen}
+                onClick={toggleTheaterMenu}
               >
-                <span>Nota regia</span>
-                <span className="toolbar-menu-value">{selectedNoteType?.label ?? 'Tipo'}</span>
-                <ChevronDown size={14} />
+                <Drama size={16} />
               </button>
-              {noteMenuOpen ? (
-              <div className="toolbar-menu-popover floating" role="menu" style={noteMenuPosition}>
-                {project.noteTypes.map((noteType) => (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    key={noteType.id}
-                    className={noteType.id === selectedNoteType?.id ? 'active' : ''}
-                    onClick={() => {
-                      setNoteMenuOpen(false)
-                      setNoteMenuPosition(undefined)
-                      insertNote(noteType)
-                    }}
-                  >
-                    <span className={`note-dot ${noteType.color}`} />
-                    {noteType.label}
-                  </button>
-                ))}
-              </div>
-              ) : null}
-            </div>
-            <button type="button" title="Personaggi" aria-label="Personaggi" onClick={insertCharactersSection} disabled={editorEditingDisabled}>
-              <User size={16} />
-            </button>
-            <button
-              type="button"
-              title="Elimina riga tabella"
-              aria-label="Elimina riga tabella"
-              className={toolbarState.table ? 'active' : ''}
-              onClick={deleteCurrentTableRow}
-              disabled={editorEditingDisabled}
-            >
-              <PanelTopClose size={15} />
-            </button>
-            <button
-              type="button"
-              title="Elimina tabella"
-              aria-label="Elimina tabella"
-              className={toolbarState.table ? 'active' : ''}
-              onClick={deleteCurrentTable}
-              disabled={editorEditingDisabled}
-            >
-              <Grid2X2X size={15} />
-            </button>
-            <span className="toolbar-divider" aria-hidden="true" />
-            <div className="toolbar-menu" ref={exportMenuRef}>
-              <button
-                type="button"
-                className="toolbar-menu-trigger icon-only"
-                title="Export"
-                aria-label="Export"
-                aria-haspopup="menu"
-                aria-expanded={exportMenuOpen}
-                disabled={!activeFile}
-                onClick={(event) => {
-                  if (exportMenuOpen) {
-                    setExportMenuOpen(false)
-                    setExportMenuPosition(undefined)
-                    return
-                  }
-
-                  const rect = event.currentTarget.getBoundingClientRect()
-                  setExportMenuPosition({
-                    top: rect.bottom + 4,
-                    left: Math.max(8, Math.min(rect.left, window.innerWidth - 124)),
-                  })
-                  setExportMenuOpen(true)
-                }}
-              >
-                <Download size={15} />
-              </button>
-              {exportMenuOpen ? (
-                <div className="toolbar-menu-popover compact floating" role="menu" style={exportMenuPosition}>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setExportMenuOpen(false)
-                      setExportMenuPosition(undefined)
-                      void exportActiveFile('complete')
-                    }}
-                  >
-                    Completo
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setExportMenuOpen(false)
-                      setExportMenuPosition(undefined)
-                      void exportActiveFile('clean')
-                    }}
-                  >
-                    Pulito
-                  </button>
+              {theaterMenuOpen ? (
+                <div className="toolbar-menu-popover theater-menu-popover floating" role="menu" style={theaterMenuPosition}>
+                  <div className="theater-submenu">
+                    <div className="theater-submenu-trigger" role="menuitem" tabIndex={0}>
+                      <ListTree size={14} />
+                      <span>Struttura</span>
+                      <ChevronRight size={14} />
+                    </div>
+                    <div className="theater-submenu-panel" role="menu" aria-label="Struttura">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={toolbarState.heading1 ? 'active' : ''}
+                        disabled={editorEditingDisabled}
+                        onClick={() => {
+                          setTheaterMenuOpen(false)
+                          setTheaterMenuPosition(undefined)
+                          editor?.chain().focus().toggleHeading({ level: 1 }).run()
+                        }}
+                      >
+                        <Heading1 size={14} />
+                        Atto
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={toolbarState.heading2 ? 'active' : ''}
+                        disabled={editorEditingDisabled}
+                        onClick={() => {
+                          setTheaterMenuOpen(false)
+                          setTheaterMenuPosition(undefined)
+                          editor?.chain().focus().toggleHeading({ level: 2 }).run()
+                        }}
+                      >
+                        <Heading2 size={14} />
+                        Scena
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={toolbarState.heading3 ? 'active' : ''}
+                        disabled={editorEditingDisabled}
+                        onClick={() => {
+                          setTheaterMenuOpen(false)
+                          setTheaterMenuPosition(undefined)
+                          editor?.chain().focus().toggleHeading({ level: 3 }).run()
+                        }}
+                      >
+                        <Heading3 size={14} />
+                        Sezione
+                      </button>
+                    </div>
+                  </div>
+                  <div className="theater-submenu">
+                    <div className="theater-submenu-trigger" role="menuitem" tabIndex={0}>
+                      <BookOpen size={14} />
+                      <span>Note</span>
+                      <ChevronRight size={14} />
+                    </div>
+                    <div className="theater-submenu-panel" role="menu" aria-label="Note">
+                      {project.noteTypes.map((noteType) => (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          key={noteType.id}
+                          className={noteType.id === selectedNoteType?.id ? 'active' : ''}
+                          disabled={editorEditingDisabled}
+                          onClick={() => {
+                            setTheaterMenuOpen(false)
+                            setTheaterMenuPosition(undefined)
+                            insertNote(noteType)
+                          }}
+                        >
+                          <span className={`note-dot ${noteType.color}`} />
+                          {noteType.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="theater-submenu">
+                    <div className="theater-submenu-trigger" role="menuitem" tabIndex={0}>
+                      <Quote size={14} />
+                      <span>Battuta</span>
+                      <ChevronRight size={14} />
+                    </div>
+                    <div className="theater-submenu-panel" role="menu" aria-label="Battuta">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setTheaterMenuOpen(false)
+                          setTheaterMenuPosition(undefined)
+                          insertCharactersSection()
+                        }}
+                        disabled={editorEditingDisabled}
+                      >
+                        <User size={14} />
+                        Personaggi
+                      </button>
+                      {dialogueCharacters.map((character) => (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          key={character.id}
+                          disabled={editorEditingDisabled}
+                          onClick={() => insertActorDialogueForCharacter(character)}
+                        >
+                          <Quote size={14} />
+                          {character.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="theater-submenu">
+                    <div className="theater-submenu-trigger" role="menuitem" tabIndex={0}>
+                      <Download size={14} />
+                      <span>Export</span>
+                      <ChevronRight size={14} />
+                    </div>
+                    <div className="theater-submenu-panel" role="menu" aria-label="Export">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={!activeFile}
+                        onClick={() => {
+                          setTheaterMenuOpen(false)
+                          setTheaterMenuPosition(undefined)
+                          void exportActiveFile('complete')
+                        }}
+                      >
+                        <Download size={14} />
+                        Completo
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={!activeFile}
+                        onClick={() => {
+                          setTheaterMenuOpen(false)
+                          setTheaterMenuPosition(undefined)
+                          void exportActiveFile('clean')
+                        }}
+                      >
+                        <Eraser size={14} />
+                        Pulito
+                      </button>
+                    </div>
+                  </div>
                 </div>
               ) : null}
             </div>
+            {toolbarState.table || tableContextActive ? (
+              <div className="toolbar-menu" ref={tableMenuRef}>
+                <button
+                  type="button"
+                  className="toolbar-menu-trigger icon-only table-menu-trigger"
+                  title="Azioni tabella"
+                  aria-label="Azioni tabella"
+                  aria-haspopup="menu"
+                  aria-expanded={tableMenuOpen}
+                  onClick={toggleTableMenu}
+                  disabled={editorEditingDisabled}
+                >
+                  <Rows3 size={16} />
+                </button>
+                {tableMenuOpen ? (
+                  <div className="toolbar-menu-popover table-menu-popover floating" role="menu" style={tableMenuPosition}>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setTableMenuOpen(false)
+                        setTableMenuPosition(undefined)
+                        addCurrentTableRow()
+                      }}
+                      disabled={editorEditingDisabled}
+                    >
+                      <Plus size={14} />
+                      Aggiungi riga
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setTableMenuOpen(false)
+                        setTableMenuPosition(undefined)
+                        deleteCurrentTableRow()
+                      }}
+                      disabled={editorEditingDisabled}
+                    >
+                      <PanelTopClose size={14} />
+                      Elimina riga
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setTableMenuOpen(false)
+                        setTableMenuPosition(undefined)
+                        deleteCurrentTable()
+                      }}
+                      disabled={editorEditingDisabled}
+                    >
+                      <Trash2 size={14} />
+                      Elimina tabella
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
-          <div className="editor-scroll-area">
+          <div
+            className="editor-scroll-area"
+            onPointerUp={(event) => syncTableContextFromTarget(event.target)}
+            onKeyUp={() => setTableContextActive(editor ? selectionIsInsideNode(editor, 'table') : false)}
+          >
             <EditorContent editor={editor} />
           </div>
           {scriptValidationIssues.length > 0 ? (
@@ -3620,7 +3824,7 @@ function MediaExplorerTree({
                     }
                   }}
                 >
-                  <Play size={13} />
+                  <FilePlus2 size={13} />
                 </button>
               ) : null}
             </div>
@@ -3661,19 +3865,19 @@ function MediaPreview({
   onStatus: (message: string) => void
 }) {
   const assetUrl = useResolvedMediaAssetUrl(asset, projectRootPath, onStatus)
-  const previewCue = mediaAssetPreviewCue(asset)
+  const previewCue = useMemo(() => mediaAssetPreviewCue(asset), [asset])
   return (
     <section className="media-preview-card">
       <div className="media-preview-header">
         <strong>{asset.name}</strong>
-        <button type="button" title="Inserisci come cue" onClick={() => onCue(asset)}><Play size={13} /></button>
+        <button type="button" title="Inserisci come cue" onClick={() => onCue(asset)}><FilePlus2 size={13} /></button>
       </div>
       {assetUrl && asset.kind === 'image' ? <img src={assetUrl} alt="" /> : null}
       {assetUrl && asset.kind === 'video' ? (
         <PreviewMediaControls cue={previewCue} assetUrl={assetUrl} onStatus={onStatus} />
       ) : null}
       {assetUrl && (asset.kind === 'audio' || asset.kind === 'music') ? (
-        <PreviewMediaControls cue={previewCue} assetUrl={assetUrl} onStatus={onStatus} />
+        <PreviewMediaControls cue={previewCue} assetUrl={assetUrl} nativeSourcePath={asset.sourcePath} onStatus={onStatus} compact />
       ) : null}
       {!assetUrl ? <p className="empty-state">Anteprima non disponibile: file media non trovato nel progetto.</p> : null}
     </section>
@@ -3701,7 +3905,7 @@ function CueMediaPreview({
   }
 
   if (cue.type === 'video' || cue.type === 'audio' || cue.type === 'music') {
-    return <PreviewMediaControls cue={cue} assetUrl={assetUrl} onStatus={onStatus} compact />
+    return <PreviewMediaControls cue={cue} assetUrl={assetUrl} nativeSourcePath={asset.sourcePath} onStatus={onStatus} compact />
   }
 
   return <p className="empty-state">Anteprima non disponibile per questo tipo di cue.</p>
@@ -3710,11 +3914,13 @@ function CueMediaPreview({
 function PreviewMediaControls({
   cue,
   assetUrl,
+  nativeSourcePath,
   onStatus,
   compact = false,
 }: {
   cue: MediaCue
   assetUrl: string
+  nativeSourcePath?: string
   onStatus: (message: string) => void
   compact?: boolean
 }) {
@@ -3722,6 +3928,7 @@ function PreviewMediaControls({
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const timersRef = useRef<number[]>([])
   const previewOwnsNativeAudioRef = useRef(false)
+  const previewIdRef = useRef(`preview-${Math.random().toString(36).slice(2)}`)
   const [state, setState] = useState<'idle' | 'playing' | 'paused'>('idle')
   const [status, setStatus] = useState('Anteprima pronta')
   const isNativeAudio = shouldUseNativeAudioPlayback() && isAudioCue(cue)
@@ -3733,6 +3940,7 @@ function PreviewMediaControls({
   }, [onStatus])
 
   const stopPreview = useCallback((silent = false, updateState = true) => {
+    playbackLog('preview', 'stop-requested', cue, { silent, updateState, backend: playbackBackendName(isNativeAudio) })
     clearAudioTimers(timersRef)
     if (isNativeAudio && previewOwnsNativeAudioRef.current) {
       previewOwnsNativeAudioRef.current = false
@@ -3753,8 +3961,14 @@ function PreviewMediaControls({
       if (!silent) setPreviewStatus(`Anteprima fermata: ${label}`)
     }
   }, [cue, isNativeAudio, label, setPreviewStatus])
+  const stopPreviewRef = useRef(stopPreview)
+
+  useEffect(() => {
+    stopPreviewRef.current = stopPreview
+  }, [stopPreview])
 
   const finishPreview = useCallback(() => {
+    playbackLog('preview', 'finished', cue, { backend: playbackBackendName(isNativeAudio) })
     clearAudioTimers(timersRef)
     previewOwnsNativeAudioRef.current = false
     const media = cue.type === 'video' ? videoRef.current : audioRef.current
@@ -3769,49 +3983,148 @@ function PreviewMediaControls({
     }
     setState('idle')
     setPreviewStatus(`Anteprima terminata: ${label}`)
-  }, [cue, label, setPreviewStatus])
+  }, [cue, isNativeAudio, label, setPreviewStatus])
 
   useEffect(() => {
-    const stopOnGlobalRequest = () => stopPreview(true)
+    const stopOnGlobalRequest = (event: Event) => {
+      const detail = (event as CustomEvent<StopPreviewPlaybackDetail>).detail
+      if (detail?.sourceId === previewIdRef.current) return
+      stopPreviewRef.current(true)
+    }
     window.addEventListener(STOP_PREVIEW_PLAYBACK_EVENT, stopOnGlobalRequest)
     return () => {
       window.removeEventListener(STOP_PREVIEW_PLAYBACK_EVENT, stopOnGlobalRequest)
-      stopPreview(true, false)
     }
-  }, [stopPreview])
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      stopPreviewRef.current(true, false)
+    }
+  }, [assetUrl, cue.id])
 
   const playPreview = () => {
-    window.dispatchEvent(new CustomEvent(STOP_PREVIEW_PLAYBACK_EVENT))
+    playbackLog('preview', 'play-requested', cue, {
+      backend: playbackBackendName(isNativeAudio),
+      assetUrl,
+      nativeSourcePath,
+      isTauri: isTauriRuntime(),
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+      userActivation: playbackUserActivationSnapshot(),
+    })
+    window.dispatchEvent(new CustomEvent<StopPreviewPlaybackDetail>(STOP_PREVIEW_PLAYBACK_EVENT, {
+      detail: { sourceId: previewIdRef.current },
+    }))
     window.dispatchEvent(new CustomEvent(STOP_EDITOR_PLAYBACK_EVENT))
     clearAudioTimers(timersRef)
 
     const playWithMediaElement = () => {
       const media = cue.type === 'video' ? videoRef.current : audioRef.current
-      if (!media) return
+      if (!media) {
+        playbackLog('preview', 'media-element-missing', cue, { cueType: cue.type })
+        return
+      }
       media.loop = Boolean(cue.options.loop)
       media.volume = cueTargetVolume(cue)
       media.onended = finishPreview
+      media.onerror = () => {
+        const message = mediaElementErrorMessage(cue, media.error)
+        playbackLog('preview', 'media-element-error-event', cue, {
+          message,
+          media: mediaElementSnapshot(media),
+          error: mediaErrorDetails(media.error),
+        })
+      }
+      if (isAudioCue(cue)) {
+        const preparedSrc = prepareMediaSourceForCue(media, cue, assetUrl)
+        playbackLog('preview', 'media-element-play-call', cue, {
+          preparedSrc,
+          media: mediaElementSnapshot(media),
+        })
+        media.preload = 'auto'
+        void media.play()
+          .then(() => {
+            if (media.src !== preparedSrc) return
+            playbackLog('preview', 'media-element-play-started', cue, { media: mediaElementSnapshot(media) })
+            scheduleMediaPauseMonitor(media, timersRef, finishPreview)
+            setState('playing')
+            setPreviewStatus(`Anteprima in esecuzione: ${label}`)
+            void alignMediaForCue(media, cue, preparedSrc).finally(() => {
+              if (media.src !== preparedSrc || media.paused) return
+              scheduleCueEnd(media, cue, timersRef, finishPreview)
+            })
+          })
+          .catch((error: unknown) => {
+            playbackLog('preview', 'media-element-play-rejected', cue, {
+              error: playbackErrorDetails(error),
+              media: mediaElementSnapshot(media),
+            })
+            if (isPlaybackNotAllowed(error)) {
+              const previousMuted = media.muted
+              media.muted = true
+              playbackLog('preview', 'media-element-muted-unlock-call', cue, { media: mediaElementSnapshot(media) })
+              void media.play()
+                .then(() => {
+                  if (media.src !== preparedSrc) return
+                  media.muted = previousMuted
+                  playbackLog('preview', 'media-element-muted-unlock-started', cue, { media: mediaElementSnapshot(media) })
+                  scheduleMediaPauseMonitor(media, timersRef, finishPreview)
+                  setState('playing')
+                  setPreviewStatus(`Anteprima in esecuzione: ${label}`)
+                  void alignMediaForCue(media, cue, preparedSrc).finally(() => {
+                    if (media.src !== preparedSrc || media.paused) return
+                    scheduleCueEnd(media, cue, timersRef, finishPreview)
+                  })
+                })
+                .catch((unlockError: unknown) => {
+                  media.muted = previousMuted
+                  playbackLog('preview', 'media-element-muted-unlock-rejected', cue, {
+                    error: playbackErrorDetails(unlockError),
+                    media: mediaElementSnapshot(media),
+                  })
+                  setState('idle')
+                  setPreviewStatus(playbackErrorMessage(cue, unlockError))
+                })
+              return
+            }
+            setState('idle')
+            setPreviewStatus(playbackErrorMessage(cue, error))
+          })
+        return
+      }
+
       void prepareMediaForCue(media, cue, assetUrl)
         .then((preparedSrc) => {
+          playbackLog('preview', 'media-element-prepared', cue, {
+            preparedSrc,
+            media: mediaElementSnapshot(media),
+          })
           if (media.src !== preparedSrc) return false
           scheduleCueEnd(media, cue, timersRef, finishPreview)
           return media.play().then(() => true)
         })
         .then((started) => {
           if (!started) return
+          playbackLog('preview', 'media-element-play-started', cue, { media: mediaElementSnapshot(media) })
           scheduleMediaPauseMonitor(media, timersRef, finishPreview)
           setState('playing')
           setPreviewStatus(`Anteprima in esecuzione: ${label}`)
         })
         .catch((error: unknown) => {
+          playbackLog('preview', 'media-element-play-rejected', cue, {
+            error: playbackErrorDetails(error),
+            media: mediaElementSnapshot(media),
+          })
           setState('idle')
           setPreviewStatus(playbackErrorMessage(cue, error))
         })
     }
 
     if (isNativeAudio) {
-      void playNativeAudioAsset(cue)
+      playbackLog('preview', 'native-play-call', cue, { sourcePath: nativeSourcePath })
+      void playNativeAudioAsset(cue, nativeSourcePath)
         .then((playbackDuration) => {
+          playbackLog('preview', 'native-play-started', cue, { playbackDuration })
           previewOwnsNativeAudioRef.current = true
           setState('playing')
           setPreviewStatus(`Anteprima in esecuzione: ${label}`)
@@ -3821,7 +4134,12 @@ function PreviewMediaControls({
           })
         })
         .catch((error: unknown) => {
+          playbackLog('preview', 'native-play-rejected', cue, {
+            error: playbackErrorDetails(error),
+            fallbackToMediaElement: Boolean(assetUrl),
+          })
           if (assetUrl) {
+            playbackLog('preview', 'native-fallback-media-element', cue, { assetUrl })
             playWithMediaElement()
             return
           }
@@ -3835,6 +4153,7 @@ function PreviewMediaControls({
   }
 
   const pausePreview = () => {
+    playbackLog('preview', 'pause-requested', cue, { backend: playbackBackendName(isNativeAudio) })
     clearAudioTimers(timersRef)
     if (isNativeAudio) {
       void pauseNativeAudioAsset()
@@ -3848,11 +4167,13 @@ function PreviewMediaControls({
     const media = cue.type === 'video' ? videoRef.current : audioRef.current
     if (!media) return
     media.pause()
+    playbackLog('preview', 'media-element-paused', cue, { media: mediaElementSnapshot(media) })
     setState('paused')
     setPreviewStatus(`Anteprima in pausa: ${label}`)
   }
 
   const resumePreview = () => {
+    playbackLog('preview', 'resume-requested', cue, { backend: playbackBackendName(isNativeAudio) })
     clearAudioTimers(timersRef)
     if (isNativeAudio) {
       void resumeNativeAudioAsset()
@@ -3866,6 +4187,7 @@ function PreviewMediaControls({
           })
         })
         .catch((error: unknown) => {
+          playbackLog('preview', 'native-resume-rejected', cue, { error: playbackErrorDetails(error) })
           setState('paused')
           setPreviewStatus(nativePlaybackErrorMessage(cue, error))
         })
@@ -3877,11 +4199,16 @@ function PreviewMediaControls({
     scheduleCueEnd(media, cue, timersRef, finishPreview)
     void media.play()
       .then(() => {
+        playbackLog('preview', 'media-element-resumed', cue, { media: mediaElementSnapshot(media) })
         scheduleMediaPauseMonitor(media, timersRef, finishPreview)
         setState('playing')
         setPreviewStatus(`Anteprima ripresa: ${label}`)
       })
       .catch((error: unknown) => {
+        playbackLog('preview', 'media-element-resume-rejected', cue, {
+          error: playbackErrorDetails(error),
+          media: mediaElementSnapshot(media),
+        })
         setState('paused')
         setPreviewStatus(playbackErrorMessage(cue, error))
       })
@@ -3899,21 +4226,48 @@ function PreviewMediaControls({
     playPreview()
   }
 
+  const togglePreviewFromClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    togglePreview()
+  }
+
+  const playerClassName = [
+    'preview-player',
+    compact ? 'compact' : '',
+    state === 'playing' ? 'is-playing' : '',
+    state === 'paused' ? 'is-paused' : '',
+  ].filter(Boolean).join(' ')
+
   return (
-    <div className={compact ? 'preview-player compact' : 'preview-player'}>
+    <div className={playerClassName}>
       {cue.type === 'video' ? (
         <video ref={videoRef} className="media-preview visual" src={assetUrl} preload="metadata" playsInline />
       ) : (
         <audio ref={audioRef} className="sr-only" src={assetUrl} preload="metadata" />
       )}
       <div className="preview-player-controls">
-        <button type="button" onClick={togglePreview} title={state === 'playing' ? 'Pausa anteprima' : 'Esegui anteprima'}>
+        <button
+          type="button"
+          className="preview-play-button"
+          onClick={togglePreviewFromClick}
+          title={state === 'playing' ? 'Pausa anteprima' : 'Esegui anteprima'}
+        >
           {state === 'playing' ? <Pause size={14} /> : <Play size={14} />}
         </button>
-        <button type="button" onClick={() => stopPreview()} title="Ferma anteprima" disabled={state === 'idle'}>
+        <button
+          type="button"
+          className="preview-stop-button"
+          onClick={() => stopPreview()}
+          title="Ferma anteprima"
+          disabled={state === 'idle'}
+        >
           <Square size={13} />
         </button>
-        <span className={state === 'playing' ? 'preview-status playing' : 'preview-status'}>{status}</span>
+        <span className={state === 'playing' ? 'preview-status playing' : 'preview-status'}>
+          <span className="preview-status-text">{status}</span>
+          <span className="preview-equalizer" aria-hidden="true" />
+        </span>
       </div>
     </div>
   )
@@ -4231,8 +4585,7 @@ const compactPath = (path: string) => {
 const isTauriRuntime = () =>
   typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 
-const shouldUseNativeAudioPlayback = () =>
-  isTauriRuntime() && typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
+const shouldUseNativeAudioPlayback = () => isTauriRuntime()
 
 const isLocalDevRuntime = () =>
   typeof window !== 'undefined' &&
@@ -4688,7 +5041,8 @@ const fullscreenIndexAtEditorPosition = (editor: Editor | null, performanceBlock
 const validateScriptForFullscreen = (markdown: string, project: Project): ScriptValidationIssue[] => {
   const issues: ScriptValidationIssue[] = []
   const lines = markdown.split('\n')
-  const knownCharacters = project.characters.map((character) => character.name).filter(Boolean)
+  const knownCharacterOptions = charactersFromMarkdown(markdown, project.characters)
+  const knownCharacters = knownCharacterOptions.map((character) => character.name)
   const seenCharacters: string[] = []
   let h1Count = 0
   let inDirective = false
@@ -4726,6 +5080,43 @@ const validateScriptForFullscreen = (markdown: string, project: Project): Script
       continue
     }
     if (isMarkdownTableLine(lines, index)) continue
+    const structuredDialogue = parseStructuredDialogueMarker(line)
+    if (structuredDialogue) {
+      const character = structuredDialogue.character.trim()
+      const spoken = structuredDialogue.text.trim()
+      const normalizedCharacter = normalizeCharacterName(character)
+      if (!spoken) {
+        addIssue(index, 'Battuta', 'La battuta è vuota dopo il nome del personaggio.', character)
+      }
+      if (spoken === 'Nuova battuta.') {
+        addIssue(index, 'Battuta', 'La battuta contiene ancora il testo provvisorio.', spoken, 'warning')
+      }
+      if (!structuredDialogue.id) {
+        addIssue(index, 'Battuta', 'La battuta strutturata non ha un identificativo interno.', character, 'warning')
+      }
+      if (!structuredDialogue.characterId) {
+        addIssue(index, 'Personaggio', 'La battuta strutturata non è collegata a un personaggio della tabella.', character)
+      } else {
+        const characterById = knownCharacterOptions.find((item) => item.id === structuredDialogue.characterId)
+        const characterByName = knownCharacterOptions.find((item) => normalizeCharacterName(item.name) === normalizedCharacter)
+        if (!characterById && !characterByName) {
+          addIssue(index, 'Personaggio', 'Il personaggio della battuta non è presente nella tabella personaggi.', character)
+        } else if (characterById && normalizeCharacterName(characterById.name) !== normalizedCharacter) {
+          addIssue(index, 'Personaggio', `Nome personaggio non allineato alla tabella: "${characterById.name}".`, character, 'warning')
+        }
+      }
+      if (!structuredDialogue.sceneId) {
+        addIssue(index, 'Scena', 'La battuta strutturata non è associata a una scena.', character, 'warning')
+      }
+      const expectedName = closestKnownCharacter(character, [...knownCharacters, ...seenCharacters])
+      if (expectedName && normalizeCharacterName(expectedName) !== normalizedCharacter) {
+        addIssue(index, 'Personaggio', `Nome personaggio sospetto: forse intendevi "${expectedName}".`, character, 'warning')
+      }
+      if (!seenCharacters.some((name) => normalizeCharacterName(name) === normalizedCharacter)) {
+        seenCharacters.push(character)
+      }
+      continue
+    }
     if (/^\[NOTA:/.test(line) || /^\[CUE[:\s]/.test(line) || /^\[BOOKMARK:/.test(line)) continue
     if (/^> ?/.test(line)) continue
     if (/^-{3,}$/.test(line)) continue
@@ -4742,14 +5133,11 @@ const validateScriptForFullscreen = (markdown: string, project: Project): Script
         }
       } else if (level === 2) {
         currentSection = ''
-        if (!/^atto\b/i.test(title)) {
-          addIssue(index, 'Struttura', 'Un titolo H2 deve indicare un atto, ad esempio "## Atto 1".', title)
+        if (!/^scena\b/i.test(title)) {
+          addIssue(index, 'Struttura', 'Un titolo H2 deve indicare una scena, ad esempio "## Scena 1".', title)
         }
       } else if (level === 3) {
         currentSection = normalizeSectionTitle(title)
-        if (!/^(scena|personaggi|sinossi)\b/i.test(title)) {
-          addIssue(index, 'Struttura', 'Un titolo H3 deve indicare una scena, la sinossi o la sezione personaggi.', title)
-        }
         if (/^personaggi\b/i.test(title) && !nextContentStartsTable(lines, index + 1)) {
           addIssue(index, 'Personaggi', 'La sezione Personaggi dovrebbe essere seguita da una tabella.', title, 'warning')
         }
@@ -4815,6 +5203,95 @@ const validateScriptForFullscreen = (markdown: string, project: Project): Script
   }
 
   return issues
+}
+
+const charactersFromMarkdown = (markdown: string, fallbackCharacters: CharacterOption[]): CharacterOption[] => {
+  const tableCharacters = new Map<string, CharacterOption>()
+  const rows = markdown.split('\n')
+  for (let index = 0; index < rows.length - 1; index += 1) {
+    if (!isCharacterTableHeader(rows[index], rows[index + 1])) continue
+    const headers = splitMarkdownTableCells(rows[index]).map((cell) => normalizeCharacterHeader(cell))
+    const idIndex = headers.indexOf('id')
+    const nameIndex = headers.indexOf('personaggio')
+    if (nameIndex < 0) continue
+    index += 2
+    while (index < rows.length && /^\s*\|/.test(rows[index] ?? '')) {
+      const cells = splitMarkdownTableCells(rows[index])
+      const name = cells[nameIndex]?.trim()
+      const id = cells[idIndex]?.trim() || slug(name)
+      if (isValidCharacterOption(id, name)) {
+        tableCharacters.set(id, { id, name })
+      }
+      index += 1
+    }
+    if (tableCharacters.size > 0) return [...tableCharacters.values()]
+  }
+
+  const characters = new Map<string, CharacterOption>()
+  for (const character of fallbackCharacters) {
+    if (isValidCharacterOption(character.id, character.name) && !characters.has(character.id)) {
+      characters.set(character.id, { id: character.id, name: character.name })
+    }
+  }
+
+  return [...characters.values()]
+}
+
+const isCharacterTableHeader = (headerLine = '', separatorLine = '') => {
+  const headers = splitMarkdownTableCells(headerLine).map((cell) => normalizeCharacterHeader(cell))
+  return headers.includes('personaggio') &&
+    /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(separatorLine)
+}
+
+const splitMarkdownTableCells = (line: string) =>
+  line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim().replace(/\\\|/g, '|'))
+
+const normalizeCharacterHeader = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/gi, '')
+    .toLowerCase()
+
+const isMarkdownTableSeparatorValue = (value: string) =>
+  /^:?-{3,}:?$/.test(value.trim())
+
+const isValidCharacterOption = (id: string, name: string) =>
+  Boolean(
+    id &&
+    name &&
+    !isMarkdownTableSeparatorValue(id) &&
+    !isMarkdownTableSeparatorValue(name) &&
+    normalizeCharacterHeader(id) !== 'id' &&
+    normalizeCharacterHeader(name) !== 'personaggio',
+  )
+
+const parseStructuredDialogueMarker = (line: string) => {
+  const match = line.match(/^\[BATTUTA:\s*([^\]]+)\]\s*(?:\{([^}]*)\})?$/)
+  if (!match) return undefined
+  const attrs = match[2] ?? ''
+  return {
+    character: match[1].trim(),
+    id: readMarkdownMarkerId(attrs),
+    characterId: readMarkdownAttr(attrs, 'characterId') ?? '',
+    text: readMarkdownAttr(attrs, 'text') ?? '',
+    sceneId: readMarkdownAttr(attrs, 'sceneId') ?? '',
+  }
+}
+
+const readMarkdownMarkerId = (attrs: string) => {
+  const match = attrs.match(/#([^\s}]+)/)
+  return match?.[1] ?? ''
+}
+
+const readMarkdownAttr = (attrs: string, name: string) => {
+  const match = attrs.match(new RegExp(`${name}="([^"]*)"`, 'i'))
+  return match ? decodeMarkdownAttr(match[1]) : undefined
 }
 
 const isMarkdownTableLine = (lines: string[], index: number) => {
@@ -4940,6 +5417,7 @@ const editorSceneIdAtPosition = (doc: ProseMirrorDocNode, selectionPosition: num
 const readToolbarState = (editor: Editor): ToolbarState => {
   const currentBlock = editor.state.selection.$from.parent
   const headingLevel = currentBlock.type.name === 'heading' ? Number(currentBlock.attrs.level ?? 1) : undefined
+  const tableActive = editor.isActive('table') || selectionIsInsideNode(editor, 'table')
 
   return {
     bold: editor.isActive('bold'),
@@ -4951,8 +5429,16 @@ const readToolbarState = (editor: Editor): ToolbarState => {
     bulletList: editor.isActive('bulletList'),
     orderedList: editor.isActive('orderedList'),
     blockquote: editor.isActive('blockquote'),
-    table: editor.isActive('table'),
+    table: tableActive,
   }
+}
+
+const selectionIsInsideNode = (editor: Editor, nodeType: string) => {
+  const { $from } = editor.state.selection
+  for (let depth = $from.depth; depth > 0; depth -= 1) {
+    if ($from.node(depth).type.name === nodeType) return true
+  }
+  return false
 }
 
 const bookmarkTitleFromSelection = (editor: Editor) => {
@@ -5060,6 +5546,7 @@ const blockJsonToMarkdown = (node: TiptapJsonNode): string => {
     return `${'#'.repeat(level)} ${text}`
   }
   if (node.type === 'scriptNote') return noteMarkerFromAttrs(node.attrs)
+  if (node.type === 'scriptDialogue') return dialogueMarkerFromAttrs(node.attrs)
   if (node.type === 'bulletList') {
     return (node.content ?? []).map((item) => `- ${listItemJsonToMarkdown(item)}`).join('\n')
   }
@@ -5140,8 +5627,26 @@ const bookmarkMarkerFromAttrs = (attrs?: Record<string, unknown>) => {
   return refId ? `[BOOKMARK: ${label}] {#${refId}}` : `[BOOKMARK: ${label}]`
 }
 
+const dialogueMarkerFromAttrs = (attrs?: Record<string, unknown>) => {
+  const character = String(attrs?.character || 'PERSONAGGIO')
+  const id = String(attrs?.id || `battuta-${crypto.randomUUID().slice(0, 8)}`)
+  const characterId = String(attrs?.characterId || slug(character))
+  const text = String(attrs?.text || '')
+  const sceneId = String(attrs?.sceneId || '')
+  const attrsText = [
+    `#${id}`,
+    `characterId="${escapeMarkdownAttr(characterId)}"`,
+    `text="${escapeMarkdownAttr(text)}"`,
+    sceneId ? `sceneId="${escapeMarkdownAttr(sceneId)}"` : '',
+  ].filter(Boolean).join(' ')
+  return `[BATTUTA: ${character}] {${attrsText}}`
+}
+
 const escapeMarkdownAttr = (value: string) =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/\n/g, '&#10;')
+
+const decodeMarkdownAttr = (value: string) =>
+  value.replace(/&#10;/g, '\n').replace(/&quot;/g, '"').replace(/&amp;/g, '&')
 
 const chipIndexBeforePosition = (doc: ProseMirrorDocNode, position: number, kind: string) => {
   let index = 0
@@ -5333,6 +5838,7 @@ function FullscreenView({
   const playingCue = cues.find((cue) => cue.id === playingCueId)
   const playingAsset = playingCue ? findTreeNode(media, playingCue.src) : undefined
   const playingAssetUrl = playingAsset ? mediaAssetUrl(playingAsset, projectRootPath) : undefined
+  const playingAssetSourcePath = playingAsset?.sourcePath
   playingCueRef.current = playingCue
   onCueExecutedRef.current = onCueExecuted
   const visualCue = isVisualCue(stepCue) ? stepCue : undefined
@@ -5449,7 +5955,7 @@ function FullscreenView({
     if (shouldUseNativeAudioPlayback()) {
       video?.pause()
       audio?.pause()
-      void playNativeAudioAsset(cue)
+      void playNativeAudioAsset(cue, playingAssetSourcePath)
         .then((playbackDuration) => {
           if (cancelled) return
           onCueExecutedRef.current(cue.id)
@@ -5523,7 +6029,7 @@ function FullscreenView({
       clearAudioTimers(audioTimersRef)
       if (activePlaybackRef.current?.cueId === cue.id) activePlaybackRef.current = undefined
     }
-  }, [playbackToken, playingAssetUrl, playingCueId])
+  }, [playbackToken, playingAssetSourcePath, playingAssetUrl, playingCueId])
 
   const togglePlayback = () => {
     if (!playablePlayingCue) {
@@ -5917,8 +6423,9 @@ const waitForMediaReady = (media: HTMLMediaElement, readyState: number, timeoutM
 }
 
 const prepareMediaSourceForCue = (media: HTMLMediaElement, cue: MediaCue, assetUrl?: string) => {
-  if (assetUrl && media.src !== assetUrl) {
-    media.src = assetUrl
+  const preparedAssetUrl = assetUrl ? new URL(assetUrl, window.location.href).href : undefined
+  if (preparedAssetUrl && media.src !== preparedAssetUrl) {
+    media.src = preparedAssetUrl
     media.load()
   } else if (!media.src || media.readyState === 0) {
     media.load()
@@ -5953,6 +6460,11 @@ const prepareMediaForCue = async (media: HTMLMediaElement, cue: MediaCue, assetU
   return preparedSrc
 }
 
+const isPlaybackNotAllowed = (error: unknown) =>
+  error instanceof DOMException
+    ? error.name === 'NotAllowedError'
+    : error instanceof Error && error.name === 'NotAllowedError'
+
 const playbackErrorMessage = (cue: MediaCue, error: unknown) => {
   const label = cue.title || cue.src
   const errorName = error instanceof DOMException ? error.name : error instanceof Error ? error.name : ''
@@ -5981,6 +6493,129 @@ const mediaElementErrorMessage = (cue: MediaCue, error: MediaError | null) => {
     return `Cue non riproducibile: ${label}. Formato o codec audio non supportato dal sistema.`
   }
   return `Cue non riproducibile: ${label}`
+}
+
+const playbackBackendName = (nativeAudio: boolean) =>
+  nativeAudio ? 'native' : 'media-element'
+
+const playbackLog = (
+  scope: PlaybackLogEntry['scope'],
+  action: string,
+  cue?: MediaCue,
+  details?: Record<string, unknown>,
+) => {
+  if (typeof window === 'undefined') return
+  const entry: PlaybackLogEntry = {
+    timestamp: new Date().toISOString(),
+    scope,
+    action,
+    cueId: cue?.id,
+    cueType: cue?.type,
+    label: cue?.title || cue?.src,
+    details: sanitizePlaybackDetails(details),
+  }
+  const logs = [...readPlaybackLogs(), entry].slice(-200)
+  writePlaybackLogs(logs)
+  try {
+    document.documentElement.setAttribute('data-stagedesk-playback-log', JSON.stringify(logs.slice(-20)))
+  } catch {
+    // Diagnostic mirror only.
+  }
+  try {
+    ;(window as PlaybackLogWindow).__STAGEDESK_PLAYBACK_LOGS__ = logs
+  } catch {
+    // Some embedded browser inspection contexts expose a non-extensible global object.
+  }
+  const logMethod = /error|reject|missing|blocked|failed/i.test(action) ? 'error' : 'info'
+  console[logMethod]('[StageDesk playback]', entry)
+  window.dispatchEvent(new CustomEvent('stagedesk-playback-log', { detail: entry }))
+}
+
+const readPlaybackLogs = () => {
+  try {
+    const raw = window.localStorage.getItem(PLAYBACK_LOG_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed as PlaybackLogEntry[] : []
+  } catch {
+    return []
+  }
+}
+
+const writePlaybackLogs = (logs: PlaybackLogEntry[]) => {
+  try {
+    window.localStorage.setItem(PLAYBACK_LOG_STORAGE_KEY, JSON.stringify(logs))
+  } catch {
+    // Logging must never break playback.
+  }
+}
+
+const sanitizePlaybackDetails = (details?: Record<string, unknown>) => {
+  if (!details) return undefined
+  try {
+    return JSON.parse(JSON.stringify(details)) as Record<string, unknown>
+  } catch {
+    return { raw: String(details) }
+  }
+}
+
+const playbackErrorDetails = (error: unknown) => {
+  const isDomException = typeof DOMException !== 'undefined' && error instanceof DOMException
+  if (isDomException || error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    }
+  }
+  return {
+    type: typeof error,
+    message: typeof error === 'string' ? error : safeStringify(error),
+  }
+}
+
+const mediaErrorDetails = (error: MediaError | null) => {
+  if (!error) return undefined
+  return {
+    code: error.code,
+    message: error.message,
+  }
+}
+
+const mediaElementSnapshot = (media: HTMLMediaElement | null | undefined) => {
+  if (!media) return undefined
+  return {
+    tagName: media.tagName,
+    src: media.getAttribute('src') ?? '',
+    currentSrc: media.currentSrc,
+    paused: media.paused,
+    ended: media.ended,
+    currentTime: media.currentTime,
+    duration: Number.isFinite(media.duration) ? media.duration : null,
+    readyState: media.readyState,
+    networkState: media.networkState,
+    preload: media.preload,
+    muted: media.muted,
+    volume: media.volume,
+    error: mediaErrorDetails(media.error),
+  }
+}
+
+const playbackUserActivationSnapshot = () => {
+  if (typeof navigator === 'undefined' || !('userActivation' in navigator)) return undefined
+  const activation = navigator.userActivation
+  return {
+    isActive: activation.isActive,
+    hasBeenActive: activation.hasBeenActive,
+  }
+}
+
+const safeStringify = (value: unknown) => {
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
 }
 
 const updateInstallErrorMessage = (error: unknown) => {
@@ -6024,9 +6659,10 @@ const readMediaAssetDataUrl = async (asset: MediaAsset) => {
   })
 }
 
-const playNativeAudioAsset = async (cue: MediaCue) => {
+const playNativeAudioAsset = async (cue: MediaCue, sourcePath?: string) => {
   const duration = await invokeNativeAudioCommand('play_audio_asset', {
     targetPath: cue.src,
+    sourcePath,
     volume: cueTargetVolume(cue),
     startAt: Math.max(0, cue.options.startAt ?? 0),
     duration: cuePlaybackDuration(cue),
@@ -6162,6 +6798,7 @@ const stripMarkdownExtension = (name: string) => name.replace(/\.md$/i, '')
 type PdfBlock =
   | { type: 'heading'; level: number; text: string }
   | { type: 'paragraph'; text: string }
+  | { type: 'dialogue'; character: string; text: string }
   | { type: 'quote'; text: string }
   | { type: 'note'; title: string; content: string }
   | { type: 'cue'; title: string; content: string }
@@ -6181,6 +6818,35 @@ const markdownToPdfBlocks = (markdown: string, mode: 'complete' | 'clean'): PdfB
     const line = lines[index]
     const trimmed = line.trim()
     if (!trimmed) continue
+
+    const dialogueDirective = trimmed.match(/^::battuta\{([^}]*)\}/)
+    if (dialogueDirective) {
+      const attrs = dialogueDirective[1]
+      const contentLines: string[] = []
+      index += 1
+      while (index < lines.length && lines[index].trim() !== '::') {
+        contentLines.push(lines[index])
+        index += 1
+      }
+      blocks.push({
+        type: 'dialogue',
+        character: readDirectiveAttr(attrs, 'character') || readDirectiveAttr(attrs, 'characterId') || 'PERSONAGGIO',
+        text: contentLines.join('\n').trim(),
+      })
+      continue
+    }
+
+    const editorDialogue = parsePdfEditorDialogue(trimmed)
+    if (editorDialogue) {
+      blocks.push(editorDialogue)
+      continue
+    }
+
+    const plainDialogue = parsePdfPlainDialogue(trimmed)
+    if (plainDialogue) {
+      blocks.push(plainDialogue)
+      continue
+    }
 
     const directive = trimmed.match(/^::(regia|media)\{([^}]*)\}/)
     if (directive) {
@@ -6247,6 +6913,30 @@ const readDirectiveAttr = (attrs: string, name: string) => {
   return match?.[1]
 }
 
+const parsePdfEditorDialogue = (line: string): Extract<PdfBlock, { type: 'dialogue' }> | undefined => {
+  const match = line.match(/^\[BATTUTA:\s*([^\]]+)\]\s*(?:\{([^}]*)\})?$/)
+  if (!match) return undefined
+  const attrs = match[2] ?? ''
+  return {
+    type: 'dialogue',
+    character: match[1].trim(),
+    text: decodePdfAttr(readDirectiveAttr(attrs, 'text') ?? ''),
+  }
+}
+
+const parsePdfPlainDialogue = (line: string): Extract<PdfBlock, { type: 'dialogue' }> | undefined => {
+  const match = line.match(/^\*\*([^*:\n]+)\*\*:\s+(.+)$/) ?? line.match(/^\*\*([^*:\n]+):\*\*\s+(.+)$/)
+  if (!match) return undefined
+  return {
+    type: 'dialogue',
+    character: match[1].trim(),
+    text: match[2].trim(),
+  }
+}
+
+const decodePdfAttr = (value: string) =>
+  value.replace(/&#10;/g, '\n').replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+
 const downloadPdf = async (name: string, markdown: string, title: string, mode: 'complete' | 'clean'): Promise<ExportResult> => {
   const { jsPDF } = await import('jspdf')
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
@@ -6267,6 +6957,7 @@ const downloadPdf = async (name: string, markdown: string, title: string, mode: 
   for (const block of markdownToPdfBlocks(markdown, mode)) {
     if (block.type === 'heading') {
       const style = pdfHeadingStyle(block.level)
+      y += style.before
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(style.size)
       doc.setTextColor(style.color)
@@ -6306,6 +6997,12 @@ const downloadPdf = async (name: string, markdown: string, title: string, mode: 
     if (block.type === 'quote') {
       y = drawPdfQuoteBox(doc, block.text, marginX, y, maxWidth, pageBottom, marginTop)
       y += 10
+      continue
+    }
+
+    if (block.type === 'dialogue') {
+      y = drawPdfDialogueBlock(doc, block, marginX, y, maxWidth, pageBottom, marginTop)
+      y += 6
       continue
     }
 
@@ -6358,10 +7055,10 @@ const blobToBase64 = async (blob: Blob) => {
 }
 
 const pdfHeadingStyle = (level: number) => {
-  if (level === 1) return { size: 20, lineHeight: 25, after: 10, color: '#111111' }
-  if (level === 2) return { size: 16, lineHeight: 21, after: 8, color: '#1f2937' }
-  if (level === 3) return { size: 13, lineHeight: 18, after: 7, color: '#374151' }
-  return { size: 11, lineHeight: 16, after: 5, color: '#4b5563' }
+  if (level === 1) return { size: 20, lineHeight: 25, before: 18, after: 10, color: '#111111' }
+  if (level === 2) return { size: 16, lineHeight: 21, before: 16, after: 8, color: '#1f2937' }
+  if (level === 3) return { size: 13, lineHeight: 18, before: 12, after: 7, color: '#374151' }
+  return { size: 11, lineHeight: 16, before: 8, after: 5, color: '#4b5563' }
 }
 
 const stampPdfPages = (doc: JsPDF, marginX: number, generatedAt: Date) => {
@@ -6461,6 +7158,51 @@ const drawPdfQuoteBox = (
 
   doc.setFont('helvetica', 'normal')
   return y + boxHeight
+}
+
+const drawPdfDialogueBlock = (
+  doc: JsPDF,
+  block: Extract<PdfBlock, { type: 'dialogue' }>,
+  x: number,
+  y: number,
+  width: number,
+  pageBottom: number,
+  marginTop: number,
+) => {
+  const characterColumnWidth = Math.min(126, Math.max(92, width * 0.24))
+  const gutter = 14
+  const lineHeight = 15
+  const textX = x + characterColumnWidth + gutter
+  const textWidth = width - characterColumnWidth - gutter
+  const character = stripInlineMarkdown(block.character).toUpperCase()
+  const text = stripInlineMarkdown(block.text).replace(/\s+/g, ' ').trim()
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(10.8)
+  const textLines = doc.splitTextToSize(text || ' ', textWidth) as string[]
+  const blockHeight = Math.max(18, Math.max(1, textLines.length) * lineHeight)
+  y = ensurePdfSpace(doc, y, pageBottom, marginTop, blockHeight)
+
+  doc.setDrawColor(233, 84, 32)
+  doc.setLineWidth(1.4)
+  doc.line(x, y - 2, x, y + blockHeight - 3)
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(9.2)
+  doc.setTextColor('#111827')
+  doc.text(character, x + 8, y + 10, {
+    maxWidth: characterColumnWidth - 8,
+  })
+
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(10.8)
+  doc.setTextColor('#1f2937')
+  let textY = y + 10
+  for (const line of textLines) {
+    doc.text(line, textX, textY)
+    textY += lineHeight
+  }
+
+  return y + blockHeight
 }
 
 const drawPdfTable = (

@@ -38,7 +38,7 @@ export const browserProjectStorage: ProjectStorage = {
     return !isTauriRuntime() && !isLocalDevRuntime()
   },
   load() {
-    return loadLocalRecoveryProject() ?? defaultProject()
+    return normalizeProject(loadLocalRecoveryProject() ?? defaultProject())
   },
   save(project) {
     saveLocalRecoveryProject(project)
@@ -92,14 +92,14 @@ export const browserProjectStorage: ProjectStorage = {
   async openProjectFolder(path) {
     if (isTauriRuntime()) {
       const result = await invokeIfDesktop<ProjectOpenResult>('open_project_folder', path ? { projectPath: path } : undefined)
-      return result
+      return normalizeProjectOpenResult(result)
     }
     if (isLocalDevRuntime()) {
       if (!path) return undefined
       return fetchProjectStorage<ProjectOpenResult>('/open', {
         method: 'POST',
         body: { projectPath: path },
-      })
+      }).then(normalizeProjectOpenResult)
     }
 
     const directory = await pickBrowserDirectory()
@@ -111,10 +111,10 @@ export const browserProjectStorage: ProjectStorage = {
   async openLastProjectFolder() {
     if (isTauriRuntime()) {
       const result = await invokeIfDesktop<ProjectOpenResult | null>('open_last_project_folder')
-      return result ?? undefined
+      return normalizeProjectOpenResult(result ?? undefined)
     }
     if (isLocalDevRuntime()) {
-      return fetchProjectStorage<ProjectOpenResult | undefined>('/open-last').then((result) => result ?? undefined)
+      return fetchProjectStorage<ProjectOpenResult | undefined>('/open-last').then(normalizeProjectOpenResult)
     }
 
     return undefined
@@ -230,6 +230,80 @@ const loadLocalRecoveryProject = (): Project | undefined => {
     return undefined
   }
 }
+
+const normalizeProject = (project: Project): Project => ({
+  ...project,
+  scripts: normalizeScriptTree(project.scripts),
+})
+
+const normalizeProjectOpenResult = (result: ProjectOpenResult | undefined) =>
+  result ? { ...result, project: normalizeProject(result.project) } : undefined
+
+const normalizeScriptTree = (nodes: ProjectTreeNode[]): ProjectTreeNode[] =>
+  nodes.map((node) => {
+    if (node.kind === 'markdown') {
+      const content = node.content ? removeCharacterTableIdColumn(node.content) : node.content
+      return content === node.content ? node : { ...node, content }
+    }
+
+    return {
+      ...node,
+      children: node.children ? normalizeScriptTree(node.children) : undefined,
+    }
+  })
+
+const removeCharacterTableIdColumn = (content: string) => {
+  const lines = content.split('\n')
+  const normalizedLines: string[] = []
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    const separatorLine = lines[index + 1] ?? ''
+    const headerCells = splitMarkdownTableCells(line)
+
+    if (!isLegacyCharacterTableHeader(headerCells) || !isMarkdownTableSeparator(separatorLine)) {
+      normalizedLines.push(line)
+      continue
+    }
+
+    normalizedLines.push(markdownTableRow(headerCells.slice(1)))
+    normalizedLines.push(markdownTableRow(splitMarkdownTableCells(separatorLine).slice(1)))
+    index += 1
+
+    while (index + 1 < lines.length && isMarkdownTableRow(lines[index + 1])) {
+      index += 1
+      normalizedLines.push(markdownTableRow(splitMarkdownTableCells(lines[index]).slice(1)))
+    }
+  }
+
+  return normalizedLines.join('\n')
+}
+
+const isLegacyCharacterTableHeader = (cells: string[]) =>
+  normalizeTableCell(cells[0]) === 'id' && normalizeTableCell(cells[1]) === 'personaggio'
+
+const isMarkdownTableRow = (line: string) =>
+  /^\s*\|/.test(line) && splitMarkdownTableCells(line).length > 1
+
+const isMarkdownTableSeparator = (line: string) =>
+  isMarkdownTableRow(line) && splitMarkdownTableCells(line).every((cell) => /^:?-{3,}:?$/.test(cell.trim()))
+
+const splitMarkdownTableCells = (line: string) =>
+  line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim())
+
+const markdownTableRow = (cells: string[]) => `| ${cells.join(' | ')} |`
+
+const normalizeTableCell = (cell = '') =>
+  cell
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/gi, '')
+    .toLowerCase()
 
 const saveLocalRecoveryProject = (project: Project) => {
   if (typeof window === 'undefined') return

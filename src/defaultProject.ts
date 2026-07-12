@@ -32,18 +32,20 @@ const demoNoteContent: Record<string, string> = {
 }
 
 const demoNotes = (): DirectorNote[] =>
-  noteTypes.map((noteType) => ({
-    id: `note-${noteType.id}`,
-    type: noteType.id,
-    color: noteType.color,
-    title: noteType.label,
-    content: demoNoteContent[noteType.id],
-    filePath,
-    anchorId: `note-${noteType.id}`,
-    sceneId,
-    createdAt: now(),
-    updatedAt: now(),
-  }))
+  noteTypes
+    .filter((noteType) => noteType.id !== 'characters')
+    .map((noteType) => ({
+      id: `note-${noteType.id}`,
+      type: noteType.id,
+      color: noteType.color,
+      title: noteType.label,
+      content: demoNoteContent[noteType.id],
+      filePath,
+      anchorId: `note-${noteType.id}`,
+      sceneId,
+      createdAt: now(),
+      updatedAt: now(),
+    }))
 
 const demoCues = (): MediaCue[] => [
   {
@@ -166,29 +168,29 @@ const demoMedia = (): MediaAsset[] => [
   },
 ]
 
-const demoScriptContent = (projectName: string) => `# ${projectName}
+const demoScriptContent = () => `| Personaggio | Interprete | Presenza | Note |
+| --- | --- | --- | --- |
+| MIRANDOLINA | Da assegnare | In scena | Guida il ritmo della scena. |
+| CAVALIERE | Da assegnare | In scena | Resiste, poi si lascia incuriosire. |
+| SERVITORE | Da assegnare | Fuori scena | Ha appena lasciato la camera. |
+
+# Atto 1
 
 > **AVVISO IMPORTANTE**: questo è un file di esempio e non è registrato sul dispositivo. Per lavorare con dati reali crea un nuovo progetto dall'apposito pulsante.
-
-## ATTO I - SCENA XV
-
-::regia{id="note-characters" type="characters" color="blue" title="Personaggi in scena" sceneId="${sceneId}" anchorId="note-characters"}
-${demoNoteContent.characters}
-::
-
-### Sinossi
-
-Mirandolina conversa con il Cavaliere e usa cortesia, ironia e apparente sincerità per incrinare la sua diffidenza verso le donne.
 
 ::regia{id="note-general" type="general" color="cyan" title="Nota generale" sceneId="${sceneId}" anchorId="note-general"}
 ${demoNoteContent.general}
 ::
 
-| Personaggio | Interprete | Presenza | Note |
-| --- | --- | --- | --- |
-| MIRANDOLINA | Da assegnare | In scena | Guida il ritmo della scena. |
-| CAVALIERE | Da assegnare | In scena | Resiste, poi si lascia incuriosire. |
-| SERVITORE | Da assegnare | Fuori scena | Ha appena lasciato la camera. |
+## Scena XV
+
+::regia{id="note-characters" type="characters" color="blue" title="Personaggi in scena" sceneId="${sceneId}" anchorId="note-characters"}
+${demoNoteContent.characters}
+::
+
+::regia{id="note-7d903ab2" type="position" color="blue" title="Posizione" sceneId="scena-xv" anchorId="2d89799c-c7df-4224-b898-b9585dcd07e3"}
+Mirandolina conversa con il Cavaliere e usa cortesia, ironia e apparente sincerità per incrinare la sua diffidenza verso le donne.
+::
 
 ::regia{id="note-movement" type="movement" color="green" title="Movimento" sceneId="${sceneId}" anchorId="note-movement"}
 ${demoNoteContent.movement}
@@ -198,70 +200,96 @@ ${demoNoteContent.movement}
 ${demoNoteContent.position}
 ::
 
-::media{id="cue-campanello" type="audio" src="/media/suoni/doorbell-ding-dong.mp3" title="Campanello" autoplay="true" volume="75" fadeOut="1" sceneId="${sceneId}" anchorId="cue-campanello"}
-Campanello in apertura, eseguito automaticamente prima dell’ingresso di Mirandolina.
+::media{id="cue-campanello" type="audio" src="/media/suoni/doorbell-ding-dong.mp3" title="Campanello" autoplay="true" volume="75" fadeIn="0" fadeOut="1" loop="false" sceneId="${sceneId}" anchorId="cue-campanello"}
+Campanello eseguito automaticamente prima dell’arrivo di Mirandolina.
 ::
 
-**MIRANDOLINA**: A pranzo, che cosa comanda?
+::battuta{id="battuta-mirandolina-1" characterId="mirandolina" character="MIRANDOLINA" sceneId="${sceneId}"}
+A pranzo, che cosa comanda?
+::
 
 ::regia{id="note-tone" type="tone" color="purple" title="Tono" sceneId="${sceneId}" anchorId="note-tone"}
 ${demoNoteContent.tone}
 ::
 
-**CAVALIERE**: Mangerò quello che vi sarà.
+::battuta{id="battuta-cavaliere-1" characterId="cavaliere" character="CAVALIERE" sceneId="${sceneId}"}
+Mangerò quello che vi sarà.
+::
 
 ::regia{id="note-light" type="light" color="yellow" title="Luce" sceneId="${sceneId}" anchorId="note-light"}
 ${demoNoteContent.light}
 ::
 
-::media{id="cue-blues" type="music" src="/media/musiche/blues-jazz.mp3" title="Blues jazz" autoplay="true" volume="60" fadeIn="2" fadeOut="3" sceneId="${sceneId}" anchorId="cue-blues"}
-Tappeto musicale leggero con fade in morbido.
+::media{id="cue-blues" type="music" src="/media/musiche/blues-jazz.mp3" title="Blues jazz" autoplay="true" volume="60" fadeIn="2" fadeOut="3" loop="false" sceneId="${sceneId}" anchorId="cue-blues"}
+Tappeto musicale leggero sotto il primo scambio.
 ::
 
-**MIRANDOLINA**: Vorrei pur sapere il suo genio. Se le piace una cosa più dell’altra, lo dica con libertà.
+::battuta{id="battuta-mirandolina-2" characterId="mirandolina" character="MIRANDOLINA" sceneId="${sceneId}"}
+Vorrei pur sapere il suo genio. Se le piace una cosa più dell’altra, lo dica con libertà.
+::
 
 ::regia{id="note-audio" type="audio" color="orange" title="Audio" sceneId="${sceneId}" anchorId="note-audio"}
 ${demoNoteContent.audio}
 ::
 
-**CAVALIERE**: Se vorrò qualche cosa, lo dirò al cameriere.
+::battuta{id="battuta-cavaliere-2" characterId="cavaliere" character="CAVALIERE" sceneId="${sceneId}"}
+Se vorrò qualche cosa, lo dirò al cameriere.
+::
 
-**MIRANDOLINA**: Ma in queste cose gli uomini non hanno l’attenzione e la pazienza che abbiamo noi altre donne.
+::battuta{id="battuta-mirandolina-3" characterId="mirandolina" character="MIRANDOLINA" sceneId="${sceneId}"}
+Ma in queste cose gli uomini non hanno l’attenzione e la pazienza che abbiamo noi altre donne.
+::
 
 ::regia{id="note-video" type="video" color="red" title="Video" sceneId="${sceneId}" anchorId="note-video"}
 ${demoNoteContent.video}
 ::
 
 ::media{id="cue-immagine" type="image" src="/media/immagini/image.jpg" title="Trio jazz" autoplay="true" duration="8" sceneId="${sceneId}" anchorId="cue-immagine"}
-Immagine di riferimento caricata nel progetto iniziale.
+Immagine di riferimento per ambiente e atmosfera.
 ::
 
 ::regia{id="note-image" type="image" color="gray" title="Immagine" sceneId="${sceneId}" anchorId="note-image"}
-${demoNoteContent.image}
+Immagine di riferimento: trio jazz su fondo nero, utile come materiale visivo di prova.
 ::
 
-**CAVALIERE**: Vi ringrazio; ma ne anche per questo verso vi riuscirà di far con me quello che avete fatto col Conte e col Marchese.
+::battuta{id="battuta-cavaliere-3" characterId="cavaliere" character="CAVALIERE" sceneId="${sceneId}"}
+Vi ringrazio; ma ne anche per questo verso vi riuscirà di far con me quello che avete fatto col Conte e col Marchese.
+::
 
-**MIRANDOLINA**: Che dice della debolezza di quei due cavalieri? Vengono alla locanda per alloggiare, e pretendono poi di voler far all’amore colla locandiera.
+::battuta{id="battuta-mirandolina-4" characterId="mirandolina" character="MIRANDOLINA" sceneId="${sceneId}"}
+Che dice della debolezza di quei due cavalieri? Vengono alla locanda per alloggiare, e pretendono poi di voler far all’amore colla locandiera.
+::
 
 ::regia{id="note-prop" type="prop" color="brown" title="Oggetto di scena" sceneId="${sceneId}" anchorId="note-prop"}
-${demoNoteContent.prop}
+Tavola apparecchiata, tovaglia, biancheria di servizio.
 ::
 
-**MIRANDOLINA**: Abbiamo altro in testa noi, che dar retta alle loro ciarle. Cerchiamo di fare il nostro interesse; se diamo loro delle buone parole, lo facciamo per tenerli a bottega.
+::battuta{id="battuta-mirandolina-5" characterId="mirandolina" character="MIRANDOLINA" sceneId="${sceneId}"}
+Abbiamo altro in testa noi, che dar retta alle loro ciarle. Cerchiamo di fare il nostro interesse; se diamo loro delle buone parole, lo facciamo per tenerli a bottega.
+::
 
-::media{id="cue-pistola" type="audio" src="/media/suoni/gunshot.mp3" title="Colpo di pistola" autoplay="false" volume="75" sceneId="${sceneId}" anchorId="cue-pistola"}
-Colpo secco da usare come effetto sonoro manuale.
+::media{id="cue-pistola" type="audio" src="/media/suoni/gunshot.mp3" title="Colpo di pistola" autoplay="false" volume="75" fadeIn="0" fadeOut="0" loop="false" sceneId="${sceneId}" anchorId="cue-pistola"}
+Effetto secco da lanciare manualmente quando richiesto.
 ::
 `
 
-const blankScriptContent = (projectName: string) => `# ${projectName}
+const blankScriptContent = (projectName: string) => `| Personaggio | Interprete | Presenza | Note |
+| --- | --- | --- | --- |
+| PERSONAGGIO 1 | Da assegnare | In scena | Primo personaggio della scena. |
 
-## Atto 1
+# ${projectName}
 
-### Scena 1
+## Scena 1
 
-**PERSONAGGIO 1**: Battuta 1
+::regia{id="note-characters" type="characters" color="blue" title="Personaggi in scena" sceneId="scena-1" anchorId="note-characters"}
+In scena: PERSONAGGIO 1.
+::
+
+### Sinossi
+
+::battuta{id="battuta-1" characterId="personaggio-1" character="PERSONAGGIO 1" sceneId="scena-1"}
+Battuta 1
+::
 `
 
 const emptyMedia = (): MediaAsset[] => [
@@ -328,7 +356,7 @@ export const defaultProject = (name = 'La locandiera'): Project => ({
           name: 'atto-1.md',
           path: filePath,
           kind: 'markdown',
-          content: demoScriptContent(name),
+          content: demoScriptContent(),
         },
       ],
     },

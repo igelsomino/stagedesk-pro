@@ -1,5 +1,17 @@
 # Novità
 
+## Versione 1.0.13
+
+> Aggiornamento dedicato a battute strutturate, menu teatrale, PDF e anteprime media.
+
+- Aggiunti gli oggetti battuta collegati alla tabella personaggi del documento.
+- Il menu teatro raggruppa struttura, note, battute ed export in sottomenu più ordinati.
+- Il menu tabella è disponibile solo quando la selezione è dentro una tabella.
+- Il progetto di esempio e i nuovi progetti iniziano dalla tabella personaggi, seguita da Atto 1, Scena 1 e nota personaggi in scena.
+- Aggiornata la validazione del copione per riconoscere le battute strutturate.
+- Migliorato il rendering PDF delle battute e aumentati i margini superiori dei titoli H1, H2 e H3.
+- Rifiniti i player di anteprima media nella Struttura e nella colonna Cue.
+
 ## Versione 1.0.12
 
 > Patch dedicata alla sincronizzazione delle anteprime e alla persistenza dell'interfaccia.

@@ -2,6 +2,9 @@ import type { DirectorNote, MediaCue, ProjectTreeNode, ScriptBlock } from './dom
 
 export const cleanScriptMarkdown = (markdown: string) =>
   markdown
+    .replace(/::battuta\{([^}]*)\}([\s\S]*?)::/g, (_, attrs: string, content: string) =>
+      dialoguePlainLine(attrs, content),
+    )
     .replace(/::regia\{[^}]*\}[\s\S]*?::/g, '')
     .replace(/::media\{[^}]*\}[\s\S]*?::/g, '')
     .replace(/^\[NOTA:[^\]]+\](?:\s+\{[^}]+\})?\s*$/gm, '')
@@ -12,6 +15,9 @@ export const cleanScriptMarkdown = (markdown: string) =>
 
 export const toEditorMarkdown = (markdown: string) =>
   markdown
+    .replace(/::battuta\{([^}]*)\}([\s\S]*?)::/g, (_, attrs: string, content: string) =>
+      dialoguePlainLine(attrs, content),
+    )
     .replace(/::regia\{([^}]*)\}[\s\S]*?::/g, (_, attrs: string) => {
       const type = readAttr(attrs, 'type')?.toUpperCase() ?? 'GENERALE'
       return `[NOTA: ${type}]`
@@ -95,6 +101,11 @@ export const markdownToHtml = (markdown: string) => {
       html.push(chipHtml('cue', chip.label, chip.refId, chip.color))
       continue
     }
+    if (/^\[BATTUTA:/.test(line)) {
+      const dialogue = parseDialogueLine(line)
+      html.push(dialogueBlockHtml(dialogue.character, dialogue.id, dialogue.characterId, dialogue.text, dialogue.sceneId))
+      continue
+    }
     if (/^\[BOOKMARK:/.test(line)) {
       const chip = parseChipLine(line)
       html.push(chipHtml('bookmark', chip.label, chip.refId, 'bookmark'))
@@ -112,6 +123,13 @@ export const markdownToHtml = (markdown: string) => {
 
 const toEditorMarkdownWithRefs = (markdown: string) =>
   markdown
+    .replace(/::battuta\{([^}]*)\}([\s\S]*?)::/g, (_, attrs: string, content: string) => {
+      const character = readAttr(attrs, 'character') || readAttr(attrs, 'characterId') || 'PERSONAGGIO'
+      const id = readAttr(attrs, 'id') ?? ''
+      const characterId = readAttr(attrs, 'characterId') ?? ''
+      const sceneId = readAttr(attrs, 'sceneId') ?? ''
+      return dialogueBlockLine(character, id, characterId, content.trim(), sceneId)
+    })
     .replace(/::regia\{([^}]*)\}([\s\S]*?)::/g, (_, attrs: string, content: string) => {
       const type = readAttr(attrs, 'type')?.toUpperCase() ?? 'GENERALE'
       const title = readAttr(attrs, 'title')?.trim()
@@ -158,6 +176,10 @@ export const serializeExtendedMarkdown = (
         cueIndex += 1
         if (!cue) return line
         return serializeMediaCue(cue)
+      }
+
+      if (/^\[BATTUTA:/.test(line.trim())) {
+        return serializeDialogueLine(line)
       }
 
       if (/^\[BOOKMARK:/.test(line.trim())) return line
@@ -334,8 +356,10 @@ const markdownTableToHtml = (rows: string[]) => {
   const [headerRow, , ...bodyRows] = rows
   const headers = splitMarkdownTableRow(headerRow)
   const body = bodyRows.map(splitMarkdownTableRow)
+  const isCharacterTable = headers[0]?.toLowerCase() === 'id' && headers.some((cell) => /^personaggio$/i.test(cell))
+  const tableAttrs = isCharacterTable ? ' data-character-table="true"' : ''
   return [
-    '<table>',
+    `<table${tableAttrs}>`,
     `<thead><tr>${headers.map((cell) => `<th><p>${renderInlineMarkdown(cell)}</p></th>`).join('')}</tr></thead>`,
     `<tbody>${body.map((row) => `<tr>${row.map((cell) => `<td><p>${renderInlineMarkdown(cell)}</p></td>`).join('')}</tr>`).join('')}</tbody>`,
     '</table>',
@@ -399,11 +423,40 @@ const serializeMediaCue = (cue: MediaCue) => {
   return `::media{${attrs}}\n${(cue.description ?? '').trim()}\n::`
 }
 
+const dialoguePlainLine = (attrs: string, content: string) => {
+  const character = readAttr(attrs, 'character') || readAttr(attrs, 'characterId') || 'PERSONAGGIO'
+  return `**${character}**: ${content.trim()}`
+}
+
+const serializeDialogueLine = (line: string) => {
+  const dialogue = parseDialogueLine(line)
+  const attrs = [
+    ['id', dialogue.id],
+    ['characterId', dialogue.characterId],
+    ['character', dialogue.character],
+    ['sceneId', dialogue.sceneId],
+  ]
+    .filter(([, value]) => value)
+    .map(([name, value]) => `${name}="${escapeAttr(String(value))}"`)
+    .join(' ')
+  return `::battuta{${attrs}}\n${dialogue.text.trim()}\n::`
+}
+
 const escapeAttr = (value: string) =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/\n/g, '&#10;')
 
 const noteBlockLine = (label: string, refId = '', color = '', type = 'general', content = '', collapsed = false) =>
   `[NOTA: ${label}] {#${refId} .${color} type="${escapeAttr(type)}" content="${escapeAttr(content)}"${collapsed ? ' collapsed="true"' : ''}}`
+
+const dialogueBlockLine = (character: string, id = '', characterId = '', text = '', sceneId = '') => {
+  const attrs = [
+    id ? `#${id}` : '',
+    characterId ? `characterId="${escapeAttr(characterId)}"` : '',
+    text ? `text="${escapeAttr(text)}"` : '',
+    sceneId ? `sceneId="${escapeAttr(sceneId)}"` : '',
+  ].filter(Boolean).join(' ')
+  return attrs ? `[BATTUTA: ${character}] {${attrs}}` : `[BATTUTA: ${character}]`
+}
 
 const cueChipLine = (label: string, refId?: string, color?: string) => {
   const attrs = [refId ? `#${refId}` : '', color ? `.${color}` : ''].filter(Boolean).join(' ')
@@ -434,11 +487,28 @@ const parseChipLine = (line: string) => {
   return { label: cueMatch?.[1] ?? line, refId: cueMatch?.[2] ?? '', color: '', type: '', content: '', collapsed: false }
 }
 
+const parseDialogueLine = (line: string) => {
+  const match = line.match(/^\[BATTUTA:\s*([^\]]+)\](?:\s+\{#?([^\s}]*)\s*([^}]*)\})?$/)
+  const attrs = match?.[3] ?? ''
+  const id = match?.[2] ?? ''
+  const character = match?.[1]?.trim() || 'PERSONAGGIO'
+  return {
+    character,
+    id,
+    characterId: readAttr(attrs, 'characterId') ?? '',
+    text: readAttr(attrs, 'text') ?? '',
+    sceneId: readAttr(attrs, 'sceneId') ?? '',
+  }
+}
+
 const chipHtml = (kind: 'cue' | 'bookmark', label: string, refId = '', color = '') =>
   `<p><span data-chip="${kind}" data-chip-label="${escapeAttr(label)}" data-ref-id="${escapeAttr(refId)}" data-chip-color="${escapeAttr(color)}" contenteditable="false" draggable="true">${escapeHtml(label)}</span></p>`
 
 const noteBlockHtml = (label: string, refId = '', color = '', type = 'general', content = '', collapsed = false) =>
   `<div data-note-block="true" data-note-type="${escapeAttr(type)}" data-note-color="${escapeAttr(color)}" data-note-title="${escapeAttr(label)}" data-note-content="${escapeAttr(content)}" data-ref-id="${escapeAttr(refId)}" data-note-collapsed="${String(collapsed)}">${escapeHtml(label)}</div>`
+
+const dialogueBlockHtml = (character: string, id = '', characterId = '', text = '', sceneId = '') =>
+  `<div data-dialogue-block="true" data-dialogue-id="${escapeAttr(id)}" data-character-id="${escapeAttr(characterId)}" data-character-name="${escapeAttr(character)}" data-dialogue-text="${escapeAttr(text)}" data-scene-id="${escapeAttr(sceneId)}">${escapeHtml(character)}: ${escapeHtml(text)}</div>`
 
 const escapeHtml = (value: string) =>
   value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

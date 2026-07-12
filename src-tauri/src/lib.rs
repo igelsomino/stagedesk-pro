@@ -295,9 +295,11 @@ fn read_media_asset_data_url(
 
 #[tauri::command]
 fn play_audio_asset(
+    app: AppHandle,
     state: State<CurrentProject>,
     audio: State<NativeAudio>,
     target_path: String,
+    source_path: Option<String>,
     volume: Option<f32>,
     start_at: Option<f32>,
     duration: Option<f32>,
@@ -307,13 +309,16 @@ fn play_audio_asset(
         .path
         .lock()
         .map_err(|error| error.to_string())?
-        .clone()
-        .ok_or_else(|| "Nessuna cartella progetto aperta".to_string())?;
-    let target = project_path.join(relative_project_path(&target_path));
-
-    if !target.exists() {
-        return Err(format!("File media non trovato: {target_path}"));
-    }
+        .clone();
+    let project_file = project_path
+        .as_ref()
+        .map(|path| path.join(relative_project_path(&target_path)))
+        .filter(|path| path.exists());
+    let target = match (project_file, source_path.as_deref()) {
+        (Some(path), _) => path,
+        (None, Some(source_path)) => bundled_media_source(source_path, Some(&app))?,
+        (None, None) => return Err(format!("File media non trovato: {target_path}")),
+    };
 
     let sink = DeviceSinkBuilder::open_default_sink()
         .map_err(|error| format!("Dispositivo audio non disponibile: {error}"))?;
