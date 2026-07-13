@@ -1,5 +1,8 @@
 use base64::{engine::general_purpose, Engine as _};
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
+use rodio::{
+    source::SeekError, ChannelCount, Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Sample,
+    SampleRate, Source,
+};
 use serde::Serialize;
 use serde_json::Value;
 use std::{
@@ -26,6 +29,113 @@ struct NativeAudio {
 struct NativeAudioPlayback {
     _sink: MixerDeviceSink,
     player: Player,
+}
+
+struct NativeAudioEnvelope<S>
+where
+    S: Source,
+{
+    input: S,
+    sample_index: u64,
+    samples_per_second: f32,
+    target_volume: f32,
+    fade_in: f32,
+    fade_out: f32,
+    duration: Option<f32>,
+}
+
+impl<S> NativeAudioEnvelope<S>
+where
+    S: Source,
+{
+    fn new(
+        input: S,
+        target_volume: f32,
+        fade_in: f32,
+        fade_out: f32,
+        duration: Option<f32>,
+    ) -> Self {
+        let samples_per_second = input.sample_rate().get() as f32 * input.channels().get() as f32;
+        Self {
+            input,
+            sample_index: 0,
+            samples_per_second,
+            target_volume,
+            fade_in,
+            fade_out,
+            duration,
+        }
+    }
+
+    fn elapsed_seconds(&self) -> f32 {
+        if self.samples_per_second <= 0.0 {
+            0.0
+        } else {
+            self.sample_index as f32 / self.samples_per_second
+        }
+    }
+
+    fn gain(&self) -> f32 {
+        let elapsed = self.elapsed_seconds();
+        let mut gain = self.target_volume;
+        if self.fade_in > 0.0 && elapsed < self.fade_in {
+            gain *= (elapsed / self.fade_in).clamp(0.0, 1.0);
+        }
+        if let Some(duration) = self.duration {
+            if self.fade_out > 0.0 {
+                let remaining = (duration - elapsed).max(0.0);
+                if remaining < self.fade_out {
+                    gain *= (remaining / self.fade_out).clamp(0.0, 1.0);
+                }
+            }
+        }
+        gain.clamp(0.0, 1.0)
+    }
+}
+
+impl<S> Iterator for NativeAudioEnvelope<S>
+where
+    S: Source,
+{
+    type Item = Sample;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let gain = self.gain();
+        let sample = self.input.next()?;
+        self.sample_index = self.sample_index.saturating_add(1);
+        Some(sample * gain)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.input.size_hint()
+    }
+}
+
+impl<S> Source for NativeAudioEnvelope<S>
+where
+    S: Source,
+{
+    fn current_span_len(&self) -> Option<usize> {
+        self.input.current_span_len()
+    }
+
+    fn channels(&self) -> ChannelCount {
+        self.input.channels()
+    }
+
+    fn sample_rate(&self) -> SampleRate {
+        self.input.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.input.total_duration()
+    }
+
+    fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
+        self.input.try_seek(pos)?;
+        self.sample_index = (pos.as_secs_f32() * self.samples_per_second).max(0.0) as u64;
+        Ok(())
+    }
 }
 
 #[derive(Serialize)]
@@ -301,6 +411,8 @@ fn play_audio_asset(
     target_path: String,
     source_path: Option<String>,
     volume: Option<f32>,
+    fade_in: Option<f32>,
+    fade_out: Option<f32>,
     start_at: Option<f32>,
     duration: Option<f32>,
     loop_audio: Option<bool>,
@@ -323,7 +435,7 @@ fn play_audio_asset(
     let sink = DeviceSinkBuilder::open_default_sink()
         .map_err(|error| format!("Dispositivo audio non disponibile: {error}"))?;
     let player = Player::connect_new(sink.mixer());
-    player.set_volume(volume.unwrap_or(0.7).clamp(0.0, 1.0));
+    player.set_volume(1.0);
 
     let file = fs::File::open(&target).map_err(|error| error.to_string())?;
     let decoder = Decoder::try_from(file)
@@ -341,22 +453,32 @@ fn play_audio_asset(
             .map(|value| value.as_secs_f32())
     };
 
-    if loop_audio.unwrap_or(false) {
+    let target_volume = volume.unwrap_or(0.7).clamp(0.0, 1.0);
+    let fade_in_seconds = fade_in.unwrap_or(0.0).clamp(0.0, 120.0);
+    let fade_out_seconds = fade_out.unwrap_or(0.0).clamp(0.0, 120.0);
+    let source: Box<dyn Source + Send> = if loop_audio.unwrap_or(false) {
         if let Some(segment_duration) = segment_duration {
-            player.append(
+            Box::new(
                 decoder
                     .skip_duration(start)
                     .take_duration(segment_duration)
                     .repeat_infinite(),
-            );
+            )
         } else {
-            player.append(decoder.skip_duration(start).repeat_infinite());
+            Box::new(decoder.skip_duration(start).repeat_infinite())
         }
     } else if let Some(segment_duration) = segment_duration {
-        player.append(decoder.skip_duration(start).take_duration(segment_duration));
+        Box::new(decoder.skip_duration(start).take_duration(segment_duration))
     } else {
-        player.append(decoder.skip_duration(start));
-    }
+        Box::new(decoder.skip_duration(start))
+    };
+    player.append(NativeAudioEnvelope::new(
+        source,
+        target_volume,
+        fade_in_seconds,
+        fade_out_seconds,
+        playback_duration,
+    ));
     player.play();
 
     let mut current = audio.current.lock().map_err(|error| error.to_string())?;

@@ -1,5 +1,5 @@
 import { mergeAttributes, Node as TiptapNode } from '@tiptap/core'
-import { NodeSelection } from '@tiptap/pm/state'
+import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 
 type ScriptDialogueAttrs = {
   id: string
@@ -152,6 +152,18 @@ export const ScriptDialogue = TiptapNode.create({
         editor.view.dispatch(editor.state.tr.setSelection(selection))
       }
 
+      const insertParagraphAfterDialogue = () => {
+        const position = typeof getPos === 'function' ? getPos() : undefined
+        const paragraphType = editor.state.schema.nodes.paragraph
+        if (typeof position !== 'number' || !paragraphType) return
+        const insertPosition = position + currentNode.nodeSize
+        const transaction = editor.state.tr.insert(insertPosition, paragraphType.create())
+        transaction.setSelection(TextSelection.create(transaction.doc, insertPosition + 1))
+        transaction.scrollIntoView()
+        editor.view.dispatch(transaction)
+        editor.view.focus()
+      }
+
       const setCharacterMenuOpen = (open: boolean) => {
         characterMenuOpen = open
         characterDropdown.dataset.open = String(open)
@@ -211,6 +223,12 @@ export const ScriptDialogue = TiptapNode.create({
         selectDialogueNode()
         scheduleResize()
         updateAttrs({ text: body.value })
+      })
+      body.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) return
+        event.preventDefault()
+        event.stopPropagation()
+        insertParagraphAfterDialogue()
       })
       body.addEventListener('focus', selectDialogueNode)
       body.addEventListener('pointerdown', selectDialogueNode)

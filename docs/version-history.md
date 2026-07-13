@@ -1,5 +1,18 @@
 # Novità
 
+## Versione 1.0.15
+
+> Aggiornamento dedicato a stabilita editor, documentazione pubblica e standard del repository.
+
+- Corretto il rendering di Aiuto e Novità: le righe vuote Markdown non generano più paragrafi vuoti visibili tra le sezioni.
+- Aggiunta la scorciatoia testuale `nota:` per creare una nota generale con focus automatico nel contenuto.
+- Aggiunto `Cmd+Invio` su macOS e `Ctrl+Invio` su Windows/Linux nelle textarea di note e battute per creare una riga sotto il box.
+- Migliorata la normalizzazione Markdown/editor per rimuovere righe vuote reali tra blocchi strutturali, note, cue e battute.
+- I cue in modalità schermo intero vengono risolti tramite ID stabile, evitando duplicazioni di immagini e mancati avvii di cue musicali.
+- Il player audio nativo applica fade in e fade out anche nella versione desktop.
+- Aggiornati Aiuto, README tecnico e fallback offline dei documenti applicativi.
+- Aggiunti Code of Conduct, guida contributi, licenza, security policy, template issue e template pull request per completare gli standard community del repository GitHub.
+
 ## Versione 1.0.14
 
 > Aggiornamento dedicato alla sincronizzazione editor/fullscreen, agli oggetti battuta e alla toolbar teatrale.
@@ -10,8 +23,13 @@
 - Digitando i due punti dopo il nome di un personaggio presente nella tabella personaggi, la riga viene convertita automaticamente in un oggetto battuta.
 - Aggiunte scorciatoie rapide per inserire Atto, Scena, Sezione e battute dei personaggi.
 - Il pulsante struttura applica Atto, Scena o Sezione alla riga corrente, al testo selezionato o inserisce il titolo corretto se la riga è vuota.
+- Digitando `nota:` su una riga vuota viene inserita una nota generale con focus automatico nel contenuto.
+- Dentro le textarea di note e battute `Cmd+Invio` su macOS o `Ctrl+Invio` su Windows/Linux crea una nuova riga sotto il box e sposta lì il cursore.
 - Aggiunto un pulsante dedicato per collassare o espandere tutte le note dell'editor.
 - Aggiunto un inserimento tabella da toolbar con selezione rapida di righe e colonne e prima riga impostata come intestazione.
+- Rimossi i paragrafi vuoti reali generati tra blocchi strutturali, note, cue e battute durante la conversione Markdown/editor.
+- I cue in modalità schermo intero vengono risolti tramite ID stabile; questo evita duplicazioni di immagini e mancati avvii dei cue musicali.
+- Il player audio nativo applica fade in e fade out anche nella versione desktop.
 - Le tabelle vuote non vengono renderizzate in modalità schermo intero.
 - Raffinati gli stili di note, menu tipo nota, menu personaggio e box battuta.
 

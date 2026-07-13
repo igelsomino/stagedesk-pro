@@ -28,7 +28,12 @@ export const toEditorMarkdown = (markdown: string) =>
       return `[CUE ${type}: ${src}]`
     })
 
-export const markdownToHtml = (markdown: string) => {
+type MarkdownToHtmlOptions = {
+  preserveEmptyParagraphs?: boolean
+}
+
+export const markdownToHtml = (markdown: string, options: MarkdownToHtmlOptions = {}) => {
+  const preserveEmptyParagraphs = options.preserveEmptyParagraphs ?? true
   const lines = toEditorMarkdownWithRefs(markdown).split('\n')
   const html: string[] = []
 
@@ -112,6 +117,7 @@ export const markdownToHtml = (markdown: string) => {
       continue
     }
     if (!line.trim()) {
+      if (!preserveEmptyParagraphs) continue
       html.push('<p></p>')
       continue
     }
@@ -122,7 +128,7 @@ export const markdownToHtml = (markdown: string) => {
 }
 
 const toEditorMarkdownWithRefs = (markdown: string) =>
-  markdown
+  normalizeEditorMarkdownSpacing(markdown
     .replace(/::battuta\{([^}]*)\}([\s\S]*?)::/g, (_, attrs: string, content: string) => {
       const character = readAttr(attrs, 'character') || readAttr(attrs, 'characterId') || 'PERSONAGGIO'
       const id = readAttr(attrs, 'id') ?? ''
@@ -145,7 +151,25 @@ const toEditorMarkdownWithRefs = (markdown: string) =>
       const title = readAttr(attrs, 'title')?.trim()
       const id = readAttr(attrs, 'id')
       return cueChipLine(title || src, id, type.toLowerCase())
+    }))
+
+export const normalizeEditorMarkdownSpacing = (markdown: string) => {
+  const lines = markdown.split('\n')
+  return lines
+    .filter((line, index) => {
+      if (line.trim()) return true
+      const previous = lines[index - 1]?.trim() ?? ''
+      const next = lines[index + 1]?.trim() ?? ''
+      return !isEditorStructuralLine(previous) && !isEditorStructuralLine(next)
     })
+    .join('\n')
+}
+
+const isEditorStructuralLine = (line: string) =>
+  /^\[(?:NOTA:|CUE[\s:]|BATTUTA:|BOOKMARK:)/.test(line) ||
+  /^#{1,6}\s+/.test(line) ||
+  /^> ?/.test(line) ||
+  isMarkdownTableRow(line)
 
 export const serializeExtendedMarkdown = (
   editorMarkdown: string,
@@ -190,7 +214,7 @@ export const serializeExtendedMarkdown = (
 }
 
 export const parseScriptBlocks = (markdown: string): ScriptBlock[] => {
-  const lines = toEditorMarkdown(markdown).split('\n')
+  const lines = toEditorMarkdownWithRefs(markdown).split('\n')
   const blocks: ScriptBlock[] = []
   let sceneId: string | undefined
   let currentCharacter: string | undefined
@@ -263,7 +287,17 @@ export const parseScriptBlocks = (markdown: string): ScriptBlock[] => {
     }
 
     if (/^\[CUE[:\s]/.test(text)) {
-      blocks.push({ id: makeId('cue', index), type: 'media', text, sceneId, position: position++, sourceLine: index, endLine: index })
+      const chip = parseChipLine(text)
+      blocks.push({
+        id: chip.refId || makeId('cue', index),
+        type: 'media',
+        text,
+        cueId: chip.refId || undefined,
+        sceneId,
+        position: position++,
+        sourceLine: index,
+        endLine: index,
+      })
       continue
     }
 

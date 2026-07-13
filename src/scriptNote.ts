@@ -1,4 +1,5 @@
 import { mergeAttributes, Node as TiptapNode } from '@tiptap/core'
+import { TextSelection } from '@tiptap/pm/state'
 
 type ScriptNoteAttrs = {
   type: string
@@ -229,6 +230,18 @@ export const ScriptNote = TiptapNode.create({
         dispatchNoteEvent('script-note-update', attrs)
       }
 
+      const insertParagraphAfterNote = () => {
+        const position = typeof getPos === 'function' ? getPos() : undefined
+        const paragraphType = editor.state.schema.nodes.paragraph
+        if (typeof position !== 'number' || !paragraphType) return
+        const insertPosition = position + currentNode.nodeSize
+        const transaction = editor.state.tr.insert(insertPosition, paragraphType.create())
+        transaction.setSelection(TextSelection.create(transaction.doc, insertPosition + 1))
+        transaction.scrollIntoView()
+        editor.view.dispatch(transaction)
+        editor.view.focus()
+      }
+
       const resizeTextarea = () => {
         contentTextarea.style.height = 'auto'
         contentTextarea.style.height = `${Math.max(78, contentTextarea.scrollHeight)}px`
@@ -250,6 +263,7 @@ export const ScriptNote = TiptapNode.create({
       const render = () => {
         const attrs = currentNode.attrs as ScriptNoteAttrs
         const selectedType = noteTypes.find((item) => item.id === attrs.type) ?? noteTypes[noteTypes.length - 1]
+        dom.dataset.refId = attrs.refId
         dom.dataset.noteColor = attrs.color
         dom.dataset.noteCollapsed = String(attrs.collapsed)
         collapseButton.title = attrs.collapsed ? 'Espandi nota' : 'Collassa nota'
@@ -343,6 +357,12 @@ export const ScriptNote = TiptapNode.create({
       contentTextarea.addEventListener('input', () => {
         resizeTextarea()
         updateAttrs({ content: contentTextarea.value })
+      })
+      contentTextarea.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) return
+        event.preventDefault()
+        event.stopPropagation()
+        insertParagraphAfterNote()
       })
 
       render()

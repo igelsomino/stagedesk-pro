@@ -82,6 +82,7 @@ import {
   flattenMarkdownFiles,
   hasMarkdownTable,
   markdownToHtml,
+  normalizeEditorMarkdownSpacing,
   parseScriptBlocks,
   serializeExtendedMarkdown,
   slug,
@@ -232,6 +233,7 @@ function App() {
   const [search, setSearch] = useState('')
   const [isFullscreen, setFullscreen] = useState(false)
   const [fullscreenIndex, setFullscreenIndex] = useState(0)
+  const [fullscreenBlocks, setFullscreenBlocks] = useState<PerformanceBlock[]>([])
   const [executedCueIds, setExecutedCueIds] = useState<string[]>([])
   const [storageStatus, setStorageStatus] = useState('Storage locale browser')
   const [toastMessage, setToastMessage] = useState('')
@@ -308,7 +310,8 @@ function App() {
     () => assignCueBlocks(blocks.filter((block) => isFullscreenBlock(block.type)), project.cues, activePath, activeCueRefIds),
     [activeCueRefIds, activePath, blocks, project.cues],
   )
-  const currentBlock = performanceBlocks[fullscreenIndex] ?? performanceBlocks[0]
+  const activePerformanceBlocks = isFullscreen && fullscreenBlocks.length > 0 ? fullscreenBlocks : performanceBlocks
+  const currentBlock = activePerformanceBlocks[fullscreenIndex] ?? activePerformanceBlocks[0]
   const currentScene = activeEditorSceneId || currentBlock?.sceneId
   const selectedNoteType =
     project.noteTypes.find((noteType) => noteType.id === selectedNoteTypeId) ?? defaultNoteType(project.noteTypes)
@@ -929,6 +932,22 @@ function App() {
       },
       handleTextInput(view, from, to, text) {
         if (text !== ':') return false
+        if (
+          convertNoteColonToGeneralNote(
+            view,
+            from,
+            to,
+            activeFilePathRef.current,
+            currentSceneRef.current ?? '',
+            (note) => {
+              persistProject({ ...projectRef.current, notes: [...projectRef.current.notes, note] })
+              setSelectedNoteId(note.id)
+              setSelectedNoteTypeId(note.type)
+            },
+          )
+        ) {
+          return true
+        }
         return convertCharacterColonToDialogue(
           view,
           from,
@@ -1187,7 +1206,7 @@ function App() {
     if (!editor) return
 
     if (activeAppDocument) {
-      editor.commands.setContent(markdownToHtml(activeAppDocumentMarkdown), { emitUpdate: false })
+      editor.commands.setContent(markdownToHtml(activeAppDocumentMarkdown, { preserveEmptyParagraphs: false }), { emitUpdate: false })
       setEditorMarkdown(activeAppDocumentMarkdown)
       syncToolbarState(editor, setToolbarState)
       syncOutlineState(editor, setActiveOutline, setActiveOutlineId)
@@ -1429,8 +1448,16 @@ function App() {
     }
 
     stopEditorAndPreviewPlayback('Playback editor e anteprime interrotto. Avvio fullscreen...')
+    const nextCueRefIds = uniqueValues([...markerRefIdsFromMarkdown(markdown, 'cue'), ...editorCueRefIds])
+    const nextPerformanceBlocks = assignCueBlocks(
+      parseScriptBlocks(markdown).filter((block) => isFullscreenBlock(block.type)),
+      projectRef.current.cues,
+      activePathRef.current,
+      nextCueRefIds,
+    )
     setExecutedCueIds([])
-    setFullscreenIndex(fullscreenIndexAtEditorPosition(editor, performanceBlocks))
+    setFullscreenBlocks(nextPerformanceBlocks)
+    setFullscreenIndex(fullscreenIndexAtEditorPosition(editor, nextPerformanceBlocks))
     setFullscreen(true)
   }
 
@@ -1466,7 +1493,7 @@ function App() {
   }, [editor])
 
   const closeFullscreenAndRestoreEditor = () => {
-    const block = performanceBlocks[fullscreenIndex]
+    const block = activePerformanceBlocks[fullscreenIndex]
     fullscreenReturnBlockRef.current = block
     setFullscreen(false)
   }
@@ -4814,6 +4841,71 @@ const convertMarkdownTableAroundSelection = (view: EditorView) => {
   return true
 }
 
+const convertNoteColonToGeneralNote = (
+  view: EditorView,
+  from: number,
+  to: number,
+  filePath: string,
+  sceneId: string,
+  onNoteCreated: (note: DirectorNote) => void,
+) => {
+  if (from !== to || !filePath) return false
+  const { $from } = view.state.selection
+  const paragraph = $from.parent
+  if (paragraph.type.name !== 'paragraph') return false
+
+  const textBefore = paragraph.textBetween(0, $from.parentOffset, ' ', ' ').trim()
+  const textAfter = paragraph.textBetween($from.parentOffset, paragraph.content.size, ' ', ' ').trim()
+  if (normalizeCharacterName(textBefore) !== 'nota' || textAfter) return false
+
+  const nodeType = view.state.schema.nodes.scriptNote
+  if (!nodeType) return false
+
+  const note: DirectorNote = {
+    id: `note-${crypto.randomUUID().slice(0, 8)}`,
+    type: 'general',
+    color: 'cyan',
+    title: 'Nota generale',
+    content: '',
+    collapsed: false,
+    filePath,
+    anchorId: crypto.randomUUID(),
+    sceneId,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+  const paragraphStart = $from.before($from.depth)
+  const paragraphEnd = paragraphStart + paragraph.nodeSize
+  const noteNode = nodeType.create({
+    type: note.type,
+    color: note.color,
+    title: note.title,
+    content: note.content,
+    refId: note.id,
+    collapsed: false,
+  })
+  const transaction = view.state.tr.replaceWith(paragraphStart, paragraphEnd, noteNode)
+  transaction.setSelection(NodeSelection.create(transaction.doc, paragraphStart))
+  transaction.scrollIntoView()
+  view.dispatch(transaction)
+  onNoteCreated(note)
+  focusScriptNoteTextarea(view, note.id)
+  return true
+}
+
+const focusScriptNoteTextarea = (view: EditorView, noteId: string, attempts = 0) => {
+  window.requestAnimationFrame(() => {
+    const textarea = view.dom.querySelector<HTMLTextAreaElement>(`[data-ref-id="${noteId}"] textarea`)
+    if (textarea) {
+      textarea.focus()
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+      textarea.scrollIntoView({ block: 'center', inline: 'nearest' })
+      return
+    }
+    if (attempts < 8) focusScriptNoteTextarea(view, noteId, attempts + 1)
+  })
+}
+
 const convertCharacterColonToDialogue = (
   view: EditorView,
   from: number,
@@ -5900,7 +5992,7 @@ const sameToolbarState = (left: ToolbarState, right: ToolbarState) =>
   left.table === right.table
 
 const editorJsonToMarkdown = (doc: TiptapJsonNode) =>
-  (doc.content ?? []).map((node) => blockJsonToMarkdown(node)).join('\n')
+  normalizeEditorMarkdownSpacing((doc.content ?? []).map((node) => blockJsonToMarkdown(node)).join('\n'))
 
 const inlineJsonToText = (node: TiptapJsonNode): string => {
   if (node.type === 'text') return applyMarkdownMarks(node.text ?? '', node.marks)
@@ -6171,7 +6263,7 @@ const assignCueBlocks = (
   return blocks.map((block) => {
     if (block.type !== 'media') return block
     const text = block.text?.toLowerCase() ?? ''
-    const refId = cueRefIdFromBlockText(block.text ?? '')
+    const refId = block.cueId ?? cueRefIdFromBlockText(block.text ?? '')
     const matchedCue =
       (refId ? fileCues.find((cue) => cue.id === refId) : undefined) ??
       fileCues.find((cue) => text.includes(cue.src.split('/').pop()?.toLowerCase() ?? cue.id)) ?? fileCues[cueIndex]
@@ -7054,6 +7146,8 @@ const playNativeAudioAsset = async (cue: MediaCue, sourcePath?: string) => {
     targetPath: cue.src,
     sourcePath,
     volume: cueTargetVolume(cue),
+    fadeIn: Math.max(0, cue.options.fadeIn ?? 0),
+    fadeOut: Math.max(0, cue.options.fadeOut ?? 0),
     startAt: Math.max(0, cue.options.startAt ?? 0),
     duration: cuePlaybackDuration(cue),
     loopAudio: Boolean(cue.options.loop),

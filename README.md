@@ -43,17 +43,19 @@ Implementato:
 12. collasso o espansione globale delle note;
 13. oggetti battuta collegati alla tabella personaggi;
 14. conversione automatica `Personaggio:` in oggetto battuta quando il personaggio è presente in tabella;
-15. inserimento toolbar di Atto, Scena, Sezione, note, battute, tabelle ed export;
-16. scorciatoie per struttura e battute;
-17. cue audio, musica, immagine e video;
-18. controlli inline per cue audio/musica;
-19. inspector laterale dedicato ai cue;
-20. riapertura automatica dell'ultimo progetto nella versione desktop;
-21. validazione tipografica e formale prima della modalità schermo intero;
-22. sincronizzazione tra posizione editor e modalità schermo intero;
-23. modalità schermo intero con step battuta/cue;
-24. export PDF completo e pulito;
-25. aggiornamenti automatici tramite GitHub Releases.
+15. conversione automatica `nota:` in nota generale con focus sul contenuto;
+16. `Cmd/Ctrl+Invio` dalle textarea di note e battute per creare una riga sotto il box;
+17. inserimento toolbar di Atto, Scena, Sezione, note, battute, tabelle ed export;
+18. scorciatoie per struttura e battute;
+19. cue audio, musica, immagine e video;
+20. controlli inline per cue audio/musica;
+21. inspector laterale dedicato ai cue;
+22. riapertura automatica dell'ultimo progetto nella versione desktop;
+23. validazione tipografica e formale prima della modalità schermo intero;
+24. sincronizzazione tra posizione editor e modalità schermo intero;
+25. modalità schermo intero con step battuta/cue;
+26. export PDF completo e pulito;
+27. aggiornamenti automatici tramite GitHub Releases.
 
 ## Sviluppo
 
@@ -126,6 +128,16 @@ Prima di entrare in modalità schermo intero l'app esegue controlli tipografici 
 Le anomalie vengono mostrate in un pannello sotto l'editor. Ogni item conserva la riga sorgente, il tipo di errore e un frammento evidenziato; il click sull'item sposta il cursore nel punto corrispondente.
 
 La modalità schermo intero viene avviata dalla battuta o dalla sezione in cui si trova il cursore. All'uscita, l'app riporta il focus nell'editor sullo step visualizzato.
+
+## Scorciatoie editor
+
+Scorciatoie e inserimenti testuali principali:
+
+1. `Personaggio:` converte la riga in un oggetto battuta se il personaggio è presente nella tabella personaggi;
+2. `nota:` inserisce una nota generale nel punto corrente e porta il focus nel contenuto;
+3. `Alt+1`, `Alt+2`, `Alt+3` inseriscono o applicano Atto, Scena e Sezione;
+4. `Alt+Shift+1..9` inserisce una battuta del personaggio corrispondente;
+5. `Cmd+Invio` su macOS o `Ctrl+Invio` su Windows/Linux, dentro una textarea di nota o battuta, crea una riga sotto il box e sposta lì il cursore.
 
 ## Documenti applicativi
 

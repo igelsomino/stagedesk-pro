@@ -65,6 +65,53 @@ describe('markdown chip rendering', () => {
     expect(html).toContain('data-dialogue-text="A pranzo?"')
   })
 
+  it('does not render spacer paragraphs between editor object blocks', () => {
+    const html = markdownToHtml([
+      '| Personaggio | Interprete |',
+      '| --- | --- |',
+      '| MIRANDOLINA | Da assegnare |',
+      '',
+      '# Atto 1',
+      '',
+      '> Avviso',
+      '',
+      '::regia{id="note-001" type="tone" color="purple" title="Tono"}',
+      'Nota.',
+      '::',
+      '',
+      '::media{id="cue-001" type="music" src="media/blues.mp3" title="Blues"}',
+      'Cue.',
+      '::',
+      '',
+      '::battuta{id="battuta-001" characterId="mirandolina" character="MIRANDOLINA"}',
+      'Battuta.',
+      '::',
+    ].join('\n'))
+
+    expect(html).toContain('data-note-block="true"')
+    expect(html).toContain('data-chip="cue"')
+    expect(html).toContain('data-dialogue-block="true"')
+    expect(html).not.toContain('<p></p>')
+  })
+
+  it('can render read-only markdown documents without empty spacer paragraphs', () => {
+    const html = markdownToHtml([
+      '# Aiuto',
+      '',
+      'Primo paragrafo.',
+      '',
+      'Secondo paragrafo.',
+      '',
+      '- Voce',
+    ].join('\n'), { preserveEmptyParagraphs: false })
+
+    expect(html).toContain('<h1>Aiuto</h1>')
+    expect(html).toContain('<p>Primo paragrafo.</p>')
+    expect(html).toContain('<p>Secondo paragrafo.</p>')
+    expect(html).toContain('<ul><li><p>Voce</p></li></ul>')
+    expect(html).not.toContain('<p></p>')
+  })
+
   it('preserves rich markdown blocks when reopening editor content', () => {
     const html = markdownToHtml([
       '### Scena interna',
@@ -205,6 +252,24 @@ describe('markdown serialization', () => {
 
     expect(blocks).toHaveLength(1)
     expect(blocks[0]?.type).toBe('media')
+    expect(blocks[0]?.cueId).toBe('cue-001')
+    expect(blocks[0]?.id).toBe('cue-001')
+  })
+
+  it('preserves media cue ids from extended markdown for fullscreen playback', () => {
+    const blocks = parseScriptBlocks([
+      '::media{id="cue-blues" type="music" src="/media/musiche/blues-jazz.mp3" title="Blues jazz" autoplay="true"}',
+      'Tappeto musicale.',
+      '::',
+      '::media{id="cue-immagine" type="image" src="/media/immagini/image.jpg" title="Trio jazz" autoplay="true"}',
+      'Immagine di riferimento.',
+      '::',
+    ].join('\n'))
+
+    expect(blocks.map((block) => [block.type, block.id, block.cueId, block.text])).toEqual([
+      ['media', 'cue-blues', 'cue-blues', '[CUE: Blues jazz] {#cue-blues .music}'],
+      ['media', 'cue-immagine', 'cue-immagine', '[CUE: Trio jazz] {#cue-immagine .image}'],
+    ])
   })
 
   it('parses h3 sections for fullscreen navigation', () => {
@@ -219,8 +284,8 @@ describe('markdown serialization', () => {
 
     expect(blocks.map((block) => [block.type, block.sourceLine, block.endLine])).toEqual([
       ['scene', 0, 0],
-      ['section', 2, 2],
-      ['dialogue', 4, 4],
+      ['section', 1, 1],
+      ['dialogue', 2, 2],
     ])
   })
 

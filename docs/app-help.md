@@ -45,6 +45,10 @@ I link Markdown come `[sito](https://esempio.it)` vengono visualizzati come coll
 
 Se digiti i due punti dopo il nome di un personaggio presente nella tabella personaggi, StageDesk Pro converte automaticamente la riga in un oggetto battuta.
 
+Se digiti `nota:` su una riga vuota, StageDesk Pro inserisce una nota generale e porta il focus direttamente nel contenuto della nota.
+
+Quando stai scrivendo dentro la textarea di una battuta o di una nota, usa `Cmd+Invio` su macOS o `Ctrl+Invio` su Windows/Linux per creare una nuova riga sotto il box e continuare a scrivere nell'editor. `Shift+Invio` resta disponibile per andare a capo dentro la textarea.
+
 Dal menu con le maschere puoi inserire rapidamente Atto, Scena, Sezione, note di regia, battute dei personaggi ed export. I comandi Atto, Scena e Sezione applicano lo stile alla riga corrente, al testo selezionato o inseriscono il titolo base quando la riga è vuota.
 
 Scorciatoie utili:
@@ -55,10 +59,13 @@ Scorciatoie utili:
 | Alt+2 | Scena |
 | Alt+3 | Sezione |
 | Alt+Shift+1..9 | Battuta del personaggio corrispondente |
+| Cmd/Ctrl+Invio | Esci dalla textarea di nota o battuta e crea una riga sotto il box |
 
 ## Note di regia
 
 Le note di regia sono blocchi colorati inseriti direttamente nel testo. Ogni nota può essere modificata, collassata, eliminata e classificata per tipo, ad esempio movimento, tono, luce, audio, video, immagine o personaggi in scena.
+
+La scorciatoia testuale `nota:` crea una nota generale nel punto corrente. Dopo l'inserimento il cursore viene spostato automaticamente nella textarea della nota.
 
 Puoi collassare o espandere tutte le note con il pulsante dedicato nella toolbar. Dal menu del tipo nota puoi anche scegliere un colore predefinito.
 
