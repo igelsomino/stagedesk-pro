@@ -21,6 +21,10 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 - Scrivi il copione nell'editor centrale.
 - Organizza copioni, media e bookmark dalla colonna Struttura.
 - Inserisci note di regia e cue multimediali direttamente nel testo.
+- Usa oggetti battuta collegati alla tabella personaggi.
+- Inserisci Atto, Scena, Sezione, battute e tabelle dalla toolbar teatrale.
+- Usa Alt+1, Alt+2, Alt+3 per Atto, Scena e Sezione; usa Alt+Shift+1..9 per le battute dei personaggi.
+- Collassa o espandi tutte le note e assegna colori predefiniti alle note.
 - I media importati vengono salvati nella cartella progetto e restano collegati ai cue.
 - Usa la modalità schermo intero per seguire battute e cue durante l'esecuzione; prima dell'avvio l'app segnala eventuali anomalie tipografiche o formali.
 - Esporta il file attivo in PDF completo o pulito.
@@ -36,6 +40,21 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 `)
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
+
+## Versione 1.0.14
+
+> Aggiornamento dedicato alla sincronizzazione editor/fullscreen, agli oggetti battuta e alla toolbar teatrale.
+
+- La modalità schermo intero parte dalla battuta o dalla sezione in cui si trova il cursore nell'editor.
+- Uscendo dallo schermo intero, il focus torna alla battuta corrispondente nell'editor.
+- Migliorata la persistenza dello stile dei box battuta dopo entrata e uscita dalla modalità schermo intero.
+- Digitando i due punti dopo il nome di un personaggio presente nella tabella personaggi, la riga viene convertita automaticamente in un oggetto battuta.
+- Aggiunte scorciatoie rapide per inserire Atto, Scena, Sezione e battute dei personaggi.
+- Il pulsante struttura applica Atto, Scena o Sezione alla riga corrente, al testo selezionato o inserisce il titolo corretto se la riga è vuota.
+- Aggiunto un pulsante dedicato per collassare o espandere tutte le note dell'editor.
+- Aggiunto un inserimento tabella da toolbar con selezione rapida di righe e colonne e prima riga impostata come intestazione.
+- Le tabelle vuote non vengono renderizzate in modalità schermo intero.
+- Raffinati gli stili di note, menu tipo nota, menu personaggio e box battuta.
 
 ## Versione 1.0.13
 

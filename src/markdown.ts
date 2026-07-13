@@ -201,13 +201,13 @@ export const parseScriptBlocks = (markdown: string): ScriptBlock[] => {
     if (!text) continue
 
     if (text.startsWith('# ')) {
-      blocks.push({ id: makeId('title', index), type: 'title', text: text.slice(2), position: position++ })
+      blocks.push({ id: makeId('title', index), type: 'title', text: text.slice(2), position: position++, sourceLine: index, endLine: index })
       continue
     }
 
     if (text.startsWith('## ') || /^SCENA\b/i.test(text)) {
       sceneId = slug(text.replace(/^##\s*/, ''))
-      blocks.push({ id: sceneId, type: 'scene', text: text.replace(/^##\s*/, ''), sceneId, position: position++ })
+      blocks.push({ id: sceneId, type: 'scene', text: text.replace(/^##\s*/, ''), sceneId, position: position++, sourceLine: index, endLine: index })
       continue
     }
 
@@ -220,11 +220,14 @@ export const parseScriptBlocks = (markdown: string): ScriptBlock[] => {
         sceneId,
         headingLevel: heading?.[1].length ?? 3,
         position: position++,
+        sourceLine: index,
+        endLine: index,
       })
       continue
     }
 
     if (isMarkdownTableStart(lines, index)) {
+      const startLine = index
       const tableRows: string[] = []
       while (index < lines.length && isMarkdownTableRow(lines[index])) {
         tableRows.push(lines[index])
@@ -238,28 +241,45 @@ export const parseScriptBlocks = (markdown: string): ScriptBlock[] => {
         ...bodyRows.map((row) => ({ cells: splitMarkdownTableRow(row) })),
       ]
       const text = parsedRows.map((row) => row.cells.join(' | ')).join('\n')
-      blocks.push({ id: makeId('table', index), type: 'table', text, tableRows: parsedRows, sceneId, position: position++ })
+      blocks.push({ id: makeId('table', index), type: 'table', text, tableRows: parsedRows, sceneId, position: position++, sourceLine: startLine, endLine: index })
       continue
     }
 
     if (/^> ?/.test(text)) {
+      const startLine = index
       const quoteLines: string[] = []
       while (index < lines.length && /^> ?/.test(stripBookmarkMarkers(lines[index].trim()))) {
         quoteLines.push(stripBookmarkMarkers(lines[index].trim()).replace(/^> ?/, '').trim())
         index += 1
       }
       index -= 1
-      blocks.push({ id: makeId('quote', index), type: 'quote', text: quoteLines.join('\n'), sceneId, position: position++ })
+      blocks.push({ id: makeId('quote', index), type: 'quote', text: quoteLines.join('\n'), sceneId, position: position++, sourceLine: startLine, endLine: index })
       continue
     }
 
     if (/^\[NOTA:/.test(text)) {
-      blocks.push({ id: makeId('note', index), type: 'note', text, sceneId, position: position++ })
+      blocks.push({ id: makeId('note', index), type: 'note', text, sceneId, position: position++, sourceLine: index, endLine: index })
       continue
     }
 
     if (/^\[CUE[:\s]/.test(text)) {
-      blocks.push({ id: makeId('cue', index), type: 'media', text, sceneId, position: position++ })
+      blocks.push({ id: makeId('cue', index), type: 'media', text, sceneId, position: position++, sourceLine: index, endLine: index })
+      continue
+    }
+
+    if (/^\[BATTUTA:/.test(text)) {
+      const dialogue = parseDialogueLine(text)
+      currentCharacter = dialogue.character
+      blocks.push({
+        id: dialogue.id || makeId('dialogue', index),
+        type: 'dialogue',
+        text: `**${dialogue.character}**: ${dialogue.text}`,
+        characterId: dialogue.characterId || slug(dialogue.character),
+        sceneId: dialogue.sceneId || sceneId,
+        position: position++,
+        sourceLine: index,
+        endLine: index,
+      })
       continue
     }
 
@@ -273,6 +293,8 @@ export const parseScriptBlocks = (markdown: string): ScriptBlock[] => {
         characterId: slug(currentCharacter),
         sceneId,
         position: position++,
+        sourceLine: index,
+        endLine: index,
       })
       continue
     }
@@ -286,6 +308,8 @@ export const parseScriptBlocks = (markdown: string): ScriptBlock[] => {
         characterId: slug(text),
         sceneId,
         position: position++,
+        sourceLine: index,
+        endLine: index,
       })
       continue
     }
@@ -297,6 +321,8 @@ export const parseScriptBlocks = (markdown: string): ScriptBlock[] => {
       characterId: currentCharacter ? slug(currentCharacter) : undefined,
       sceneId,
       position: position++,
+      sourceLine: index,
+      endLine: index,
     })
   }
 
@@ -346,7 +372,7 @@ export const hasMarkdownTable = (markdown: string) => {
 
 const isMarkdownTableRow = (line = '') => {
   const cells = splitMarkdownTableRow(line)
-  return cells.length > 1 && cells.some(Boolean)
+  return cells.length > 1
 }
 
 const isMarkdownTableSeparator = (line = '') =>

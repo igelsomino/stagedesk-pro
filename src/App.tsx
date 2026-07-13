@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/core'
 import { DOMParser as ProseMirrorDOMParser, type Node as ProseMirrorNode } from '@tiptap/pm/model'
-import { Selection } from '@tiptap/pm/state'
+import { NodeSelection, Selection } from '@tiptap/pm/state'
 import { insertPoint } from '@tiptap/pm/transform'
 import type { EditorView } from '@tiptap/pm/view'
 import { useEditor, EditorContent } from '@tiptap/react'
@@ -51,11 +51,11 @@ import {
   Rows3,
   Search,
   Square,
+  Table2,
   Trash2,
   Type,
   Undo2,
   Upload,
-  User,
   LogOut,
   X,
 } from 'lucide-react'
@@ -251,11 +251,15 @@ function App() {
   const toastTimeoutRef = useRef<number | undefined>(undefined)
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const pendingEditorSelectionRef = useRef<number | undefined>(undefined)
+  const fullscreenReturnBlockRef = useRef<ReturnType<typeof parseScriptBlocks>[number] | undefined>(undefined)
   const [scriptDialog, setScriptDialog] = useState<ScriptActionDialog | undefined>()
   const [theaterMenuOpen, setTheaterMenuOpen] = useState(false)
   const [theaterMenuPosition, setTheaterMenuPosition] = useState<{ top: number; left: number } | undefined>()
   const [tableMenuOpen, setTableMenuOpen] = useState(false)
   const [tableMenuPosition, setTableMenuPosition] = useState<{ top: number; left: number } | undefined>()
+  const [tableInsertMenuOpen, setTableInsertMenuOpen] = useState(false)
+  const [tableInsertMenuPosition, setTableInsertMenuPosition] = useState<{ top: number; left: number } | undefined>()
+  const [tableInsertSize, setTableInsertSize] = useState({ rows: 3, cols: 3 })
   const [appMenuOpen, setAppMenuOpen] = useState(false)
   const [appMenuPosition, setAppMenuPosition] = useState<{ top: number; left: number } | undefined>()
   const [projectPickerEntries, setProjectPickerEntries] = useState<ProjectEntry[]>([])
@@ -311,6 +315,8 @@ function App() {
   const selectedMediaIsProtectedRoot = selectedMediaNode ? isProtectedMediaRoot(selectedMediaNode) : false
   const activeFilePath = activeFile?.path ?? ''
   const userEmail = user?.email ?? 'Utente autenticato'
+  const activeCharactersRef = useRef(activeCharacters)
+  const currentSceneRef = useRef(currentScene)
   const draftsRef = useRef(drafts)
   const projectRef = useRef(project)
   const projectScriptsRef = useRef(project.scripts)
@@ -334,6 +340,8 @@ function App() {
   selectedMediaPathRef.current = selectedMediaPath
   expandedPathsRef.current = expandedPaths
   leftTabRef.current = leftTab
+  activeCharactersRef.current = activeCharacters
+  currentSceneRef.current = currentScene
   const lastEditorSelectionRef = useRef<number | undefined>(undefined)
   const editorAudioRef = useRef<HTMLAudioElement | null>(null)
   const editorAudioTimersRef = useRef<number[]>([])
@@ -341,6 +349,7 @@ function App() {
   const editorHadFocusBeforeWindowBlurRef = useRef(false)
   const theaterMenuRef = useRef<HTMLDivElement>(null)
   const tableMenuRef = useRef<HTMLDivElement>(null)
+  const tableInsertMenuRef = useRef<HTMLDivElement>(null)
   const appMenuRef = useRef<HTMLDivElement>(null)
   const pointerDropTargetRef = useRef<PointerDropTarget | undefined>(undefined)
   const moveMediaNodeRef = useRef<(sourcePath: string, targetFolderPath: string) => Promise<void>>(async () => undefined)
@@ -801,7 +810,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!theaterMenuOpen && !tableMenuOpen && !appMenuOpen) return
+    if (!theaterMenuOpen && !tableMenuOpen && !tableInsertMenuOpen && !appMenuOpen) return
 
     const closeOnOutsideClick = (event: PointerEvent) => {
       if (theaterMenuOpen && !theaterMenuRef.current?.contains(event.target as Node)) {
@@ -811,6 +820,10 @@ function App() {
       if (tableMenuOpen && !tableMenuRef.current?.contains(event.target as Node)) {
         setTableMenuOpen(false)
         setTableMenuPosition(undefined)
+      }
+      if (tableInsertMenuOpen && !tableInsertMenuRef.current?.contains(event.target as Node)) {
+        setTableInsertMenuOpen(false)
+        setTableInsertMenuPosition(undefined)
       }
       if (appMenuOpen && !appMenuRef.current?.contains(event.target as Node)) {
         setAppMenuOpen(false)
@@ -824,6 +837,8 @@ function App() {
         setTheaterMenuPosition(undefined)
         setTableMenuOpen(false)
         setTableMenuPosition(undefined)
+        setTableInsertMenuOpen(false)
+        setTableInsertMenuPosition(undefined)
         setAppMenuOpen(false)
         setAppMenuPosition(undefined)
       }
@@ -836,7 +851,7 @@ function App() {
       document.removeEventListener('pointerdown', closeOnOutsideClick)
       document.removeEventListener('keydown', closeOnEscape)
     }
-  }, [appMenuOpen, tableMenuOpen, theaterMenuOpen])
+  }, [appMenuOpen, tableInsertMenuOpen, tableMenuOpen, theaterMenuOpen])
 
   useEffect(() => {
     if (!toolbarState.table && !tableContextActive && tableMenuOpen) {
@@ -911,6 +926,16 @@ function App() {
         event.preventDefault()
         insertMarkdownAtSelection(view, markdown)
         return true
+      },
+      handleTextInput(view, from, to, text) {
+        if (text !== ':') return false
+        return convertCharacterColonToDialogue(
+          view,
+          from,
+          to,
+          activeCharactersRef.current,
+          currentSceneRef.current ?? '',
+        )
       },
       handleDOMEvents: {
         dragover(_view, event) {
@@ -1028,6 +1053,14 @@ function App() {
   })
   const editorEditingDisabled = !editor || Boolean(activeAppDocument)
   const activeDocumentTitle = activeFile?.name ?? activeAppDocument?.title
+  const selectedTableContext = editor ? currentTableContext(editor) : undefined
+  const selectedCharacterTable = Boolean(selectedTableContext?.isCharacterTable)
+  const selectedCharacterTableHeaderRow = Boolean(selectedTableContext?.isCharacterTable && selectedTableContext.isHeaderRow)
+  const editorNoteCollapseSummaryValue = editorNoteCollapseSummary(editor)
+  const allEditorNotesCollapsed =
+    editorNoteCollapseSummaryValue.total > 0 &&
+    editorNoteCollapseSummaryValue.collapsed === editorNoteCollapseSummaryValue.total
+  const toggleAllNotesLabel = allEditorNotesCollapsed ? 'Espandi tutte le note' : 'Collassa tutte le note'
 
   const draftsWithCurrentEditorContent = useCallback(() => {
     const currentDrafts = { ...draftsRef.current }
@@ -1068,6 +1101,23 @@ function App() {
     }
     chain.focus().clearNodes().setParagraph().run()
   }
+
+  const setCurrentBlockAsHeading = useCallback((level: 1 | 2 | 3) => {
+    if (!editor) return
+    setTheaterMenuOpen(false)
+    setTheaterMenuPosition(undefined)
+    const label = level === 1 ? 'Atto' : level === 2 ? 'Scena' : 'Sezione'
+    const shouldInsertLabel =
+      editor.state.selection.empty &&
+      editor.state.selection.$from.parent.isTextblock &&
+      editor.state.selection.$from.parent.textContent.trim() === ''
+    const chain = editor.chain().focus().setHeading({ level })
+    if (shouldInsertLabel) {
+      chain.insertContent(label).run()
+      return
+    }
+    chain.run()
+  }, [editor])
 
   const focusOutlineItem = (item: OutlineItem) => {
     if (!editor || item.position === undefined) return
@@ -1126,21 +1176,10 @@ function App() {
       editorHadFocusBeforeWindowBlurRef.current = editor.view.hasFocus()
       if (editor.view.hasFocus()) lastEditorSelectionRef.current = editor.state.selection.from
     }
-    const restoreEditorFocus = () => {
-      if (!editorHadFocusBeforeWindowBlurRef.current) return
-      const position = lastEditorSelectionRef.current
-      if (position === undefined) return
-      window.requestAnimationFrame(() => {
-        const safePosition = Math.max(1, Math.min(position, editor.state.doc.content.size))
-        editor.chain().focus(safePosition).setTextSelection(safePosition).run()
-      })
-    }
 
     window.addEventListener('blur', rememberEditorFocus)
-    window.addEventListener('focus', restoreEditorFocus)
     return () => {
       window.removeEventListener('blur', rememberEditorFocus)
-      window.removeEventListener('focus', restoreEditorFocus)
     }
   }, [activeAppDocument, editor])
 
@@ -1394,6 +1433,63 @@ function App() {
     setFullscreenIndex(fullscreenIndexAtEditorPosition(editor, performanceBlocks))
     setFullscreen(true)
   }
+
+  const focusEditorBlockFromFullscreen = useCallback((block: PerformanceBlock | undefined) => {
+    if (!editor || !block) return false
+
+    if (block.type === 'dialogue') {
+      const match = nodeMatchByAttr(editor.state.doc, 'scriptDialogue', 'id', block.id)
+      if (!match) return false
+      const transaction = editor.state.tr
+        .setSelection(NodeSelection.create(editor.state.doc, match.position))
+        .scrollIntoView()
+      editor.view.dispatch(transaction)
+      lastEditorSelectionRef.current = match.position
+      editor.view.focus()
+      const textarea = editor.view.dom.querySelector<HTMLTextAreaElement>(`[data-dialogue-id="${block.id}"] textarea`)
+      if (!textarea) return false
+      textarea.focus()
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+      textarea.scrollIntoView({ block: 'center', inline: 'nearest' })
+      return true
+    }
+
+    if (block.type === 'media' && block.cueId) {
+      const match = chipMatchByRef(editor.state.doc, 'cue', block.cueId)
+      if (!match) return false
+      editor.chain().focus().setNodeSelection(match.position).scrollIntoView().run()
+      lastEditorSelectionRef.current = match.position
+      return true
+    }
+
+    return false
+  }, [editor])
+
+  const closeFullscreenAndRestoreEditor = () => {
+    const block = performanceBlocks[fullscreenIndex]
+    fullscreenReturnBlockRef.current = block
+    setFullscreen(false)
+  }
+
+  useEffect(() => {
+    if (isFullscreen || !editor || !fullscreenReturnBlockRef.current) return
+    let cancelled = false
+    let attempts = 0
+    const restore = () => {
+      if (cancelled) return
+      const restored = focusEditorBlockFromFullscreen(fullscreenReturnBlockRef.current)
+      attempts += 1
+      if (restored || attempts >= 18) {
+        fullscreenReturnBlockRef.current = undefined
+        return
+      }
+      window.requestAnimationFrame(restore)
+    }
+    window.requestAnimationFrame(restore)
+    return () => {
+      cancelled = true
+    }
+  }, [editor, focusEditorBlockFromFullscreen, isFullscreen])
 
   const activateProject = (nextProject: typeof project) => {
     nextProject = normalizeProject(nextProject)
@@ -2104,27 +2200,6 @@ function App() {
     setSelectedNoteTypeId(noteType.id)
   }
 
-  const insertCharactersSection = () => {
-    if (!editor || !activeFile) return
-    const rows = (activeCharacters.length > 0 ? activeCharacters : [{ id: 'personaggio-1', name: 'PERSONAGGIO 1' }])
-      .map((character) => charactersTableRow([character.name, 'Da assegnare', 'In scena', '']))
-    editor
-      .chain()
-      .focus()
-      .insertContent([
-        {
-          type: 'table',
-          attrs: { 'data-character-table': 'true' },
-          content: [
-            charactersTableRow(['Personaggio', 'Attore', 'Presenza', 'Note'], true),
-            ...rows,
-          ],
-        },
-        { type: 'paragraph' },
-      ])
-      .run()
-  }
-
   const dialogueCharacters = useMemo(
     () => activeCharacters.length > 0
       ? activeCharacters
@@ -2185,6 +2260,21 @@ function App() {
     setTableMenuOpen(true)
   }
 
+  const toggleTableInsertMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (tableInsertMenuOpen) {
+      setTableInsertMenuOpen(false)
+      setTableInsertMenuPosition(undefined)
+      return
+    }
+    const rect = event.currentTarget.getBoundingClientRect()
+    setTableInsertSize({ rows: 3, cols: 3 })
+    setTableInsertMenuPosition({
+      top: rect.bottom + 4,
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 236)),
+    })
+    setTableInsertMenuOpen(true)
+  }
+
   const syncTableContextFromTarget = (target: EventTarget | null) => {
     const element = target instanceof HTMLElement ? target : null
     setTableContextActive(Boolean(element?.closest('table')))
@@ -2192,13 +2282,23 @@ function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!editor || editorEditingDisabled || !event.altKey || event.key.toLowerCase() !== 'b') return
-      event.preventDefault()
-      insertActorDialogueForCharacter(dialogueCharacters[0])
+      if (!editor || editorEditingDisabled || !event.altKey || event.ctrlKey || event.metaKey) return
+      const key = event.key.toLowerCase()
+      if (!event.shiftKey && (key === '1' || key === '2' || key === '3')) {
+        event.preventDefault()
+        setCurrentBlockAsHeading(Number(key) as 1 | 2 | 3)
+        return
+      }
+      if (event.shiftKey && /^[1-9]$/.test(key)) {
+        const character = dialogueCharacters[Number(key) - 1]
+        if (!character) return
+        event.preventDefault()
+        insertActorDialogueForCharacter(character)
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [dialogueCharacters, editor, editorEditingDisabled, insertActorDialogueForCharacter])
+  }, [dialogueCharacters, editor, editorEditingDisabled, insertActorDialogueForCharacter, setCurrentBlockAsHeading])
 
   const showBookmarkDialog = () => {
     if (!editor || !activeFile) return
@@ -2234,6 +2334,48 @@ function App() {
     showStatus(`Bookmark inserito: ${title}`)
   }
 
+  const toggleAllEditorNotes = () => {
+    if (!editor || editorEditingDisabled) return
+    const summary = editorNoteCollapseSummary(editor)
+    if (summary.total === 0) {
+      showStatus('Nessuna nota nel file attivo')
+      return
+    }
+
+    const nextCollapsed = summary.collapsed !== summary.total
+    const updatedNoteIds: string[] = []
+    const transaction = editor.state.tr
+    editor.state.doc.descendants((node, position) => {
+      if (node.type.name !== 'scriptNote') return
+      const attrs: Record<string, unknown> = { ...node.attrs, collapsed: nextCollapsed }
+      const noteId = String(attrs.refId ?? '')
+      if (noteId) updatedNoteIds.push(noteId)
+      transaction.setNodeMarkup(position, undefined, attrs)
+    })
+    if (!transaction.docChanged) return
+
+    editor.view.dispatch(transaction)
+    const now = new Date().toISOString()
+    setProject((current) => ({
+      ...current,
+      notes: current.notes.map((note) =>
+        updatedNoteIds.includes(note.id)
+          ? { ...note, collapsed: nextCollapsed, updatedAt: now }
+          : note,
+      ),
+    }))
+    showStatus(nextCollapsed ? 'Note collassate' : 'Note espanse')
+  }
+
+  const insertEditorTable = (rows: number, cols: number) => {
+    if (!editor || editorEditingDisabled) return
+    editor.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run()
+    setTableInsertMenuOpen(false)
+    setTableInsertMenuPosition(undefined)
+    setTableContextActive(true)
+    showStatus(`Tabella ${rows} x ${cols} inserita`)
+  }
+
   const addCurrentTableRow = () => {
     if (!editor || !selectionIsInsideNode(editor, 'table')) {
       showStatus('Posiziona il cursore nella tabella personaggi')
@@ -2248,6 +2390,11 @@ function App() {
       showStatus('Posiziona il cursore nella tabella personaggi')
       return
     }
+    const tableContext = currentTableContext(editor)
+    if (tableContext.isCharacterTable && tableContext.isHeaderRow) {
+      showStatus('La riga intestazione della tabella personaggi non può essere eliminata')
+      return
+    }
     editor.chain().focus().deleteRow().run()
     showStatus('Riga tabella eliminata')
   }
@@ -2255,6 +2402,10 @@ function App() {
   const deleteCurrentTable = () => {
     if (!editor || !selectionIsInsideNode(editor, 'table')) {
       showStatus('Posiziona il cursore nella tabella personaggi')
+      return
+    }
+    if (currentTableContext(editor).isCharacterTable) {
+      showStatus('La tabella personaggi non può essere eliminata')
       return
     }
     editor.chain().focus().deleteTable().run()
@@ -2562,7 +2713,7 @@ function App() {
         projectRootPath={project.rootPath}
         executedCueIds={executedCueIds}
         onCueExecuted={(cueId) => setExecutedCueIds((current) => current.includes(cueId) ? current : [...current, cueId])}
-        onClose={() => setFullscreen(false)}
+        onClose={closeFullscreenAndRestoreEditor}
         onNext={() => setFullscreenIndex((index) => Math.min(index + 1, performanceBlocks.length - 1))}
         onPrevious={() => setFullscreenIndex((index) => Math.max(index - 1, 0))}
         onHome={() => setFullscreenIndex(0)}
@@ -2987,6 +3138,63 @@ function App() {
               >
                 <Bookmark size={15} />
               </button>
+              <span className="toolbar-inline-divider" aria-hidden="true" />
+              <button
+                type="button"
+                title={toggleAllNotesLabel}
+                aria-label={toggleAllNotesLabel}
+                onClick={toggleAllEditorNotes}
+                disabled={editorEditingDisabled || editorNoteCollapseSummaryValue.total === 0}
+              >
+                {allEditorNotesCollapsed ? <BookOpen size={15} /> : <PanelTopClose size={15} />}
+              </button>
+              <div className="toolbar-menu table-insert-toolbar-menu" ref={tableInsertMenuRef}>
+                <button
+                  type="button"
+                  className="toolbar-menu-trigger icon-only table-insert-menu-trigger"
+                  title="Inserisci tabella"
+                  aria-label="Inserisci tabella"
+                  aria-haspopup="menu"
+                  aria-expanded={tableInsertMenuOpen}
+                  onClick={toggleTableInsertMenu}
+                  disabled={editorEditingDisabled}
+                >
+                  <Table2 size={15} />
+                </button>
+                {tableInsertMenuOpen ? (
+                  <div
+                    className="toolbar-menu-popover table-insert-popover floating"
+                    role="menu"
+                    style={tableInsertMenuPosition}
+                  >
+                    <div className="table-insert-size">
+                      {tableInsertSize.rows} x {tableInsertSize.cols}
+                    </div>
+                    <div className="table-insert-picker" role="grid" aria-label="Dimensione tabella">
+                      {Array.from({ length: 8 }, (_, rowIndex) =>
+                        Array.from({ length: 8 }, (_, colIndex) => {
+                          const rows = rowIndex + 1
+                          const cols = colIndex + 1
+                          const selected = rows <= tableInsertSize.rows && cols <= tableInsertSize.cols
+                          return (
+                            <button
+                              type="button"
+                              key={`${rows}-${cols}`}
+                              role="gridcell"
+                              className={selected ? 'selected' : ''}
+                              title={`Inserisci tabella ${rows} x ${cols}`}
+                              aria-label={`Inserisci tabella ${rows} x ${cols}`}
+                              onMouseEnter={() => setTableInsertSize({ rows, cols })}
+                              onFocus={() => setTableInsertSize({ rows, cols })}
+                              onClick={() => insertEditorTable(rows, cols)}
+                            />
+                          )
+                        }),
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
             <span className="toolbar-divider" aria-hidden="true" />
             <div className="toolbar-menu" ref={theaterMenuRef}>
@@ -3015,42 +3223,33 @@ function App() {
                         role="menuitem"
                         className={toolbarState.heading1 ? 'active' : ''}
                         disabled={editorEditingDisabled}
-                        onClick={() => {
-                          setTheaterMenuOpen(false)
-                          setTheaterMenuPosition(undefined)
-                          editor?.chain().focus().toggleHeading({ level: 1 }).run()
-                        }}
+                        onClick={() => setCurrentBlockAsHeading(1)}
                       >
                         <Heading1 size={14} />
-                        Atto
+                        <span className="menu-item-label">Atto</span>
+                        <kbd>Alt+1</kbd>
                       </button>
                       <button
                         type="button"
                         role="menuitem"
                         className={toolbarState.heading2 ? 'active' : ''}
                         disabled={editorEditingDisabled}
-                        onClick={() => {
-                          setTheaterMenuOpen(false)
-                          setTheaterMenuPosition(undefined)
-                          editor?.chain().focus().toggleHeading({ level: 2 }).run()
-                        }}
+                        onClick={() => setCurrentBlockAsHeading(2)}
                       >
                         <Heading2 size={14} />
-                        Scena
+                        <span className="menu-item-label">Scena</span>
+                        <kbd>Alt+2</kbd>
                       </button>
                       <button
                         type="button"
                         role="menuitem"
                         className={toolbarState.heading3 ? 'active' : ''}
                         disabled={editorEditingDisabled}
-                        onClick={() => {
-                          setTheaterMenuOpen(false)
-                          setTheaterMenuPosition(undefined)
-                          editor?.chain().focus().toggleHeading({ level: 3 }).run()
-                        }}
+                        onClick={() => setCurrentBlockAsHeading(3)}
                       >
                         <Heading3 size={14} />
-                        Sezione
+                        <span className="menu-item-label">Sezione</span>
+                        <kbd>Alt+3</kbd>
                       </button>
                     </div>
                   </div>
@@ -3087,20 +3286,7 @@ function App() {
                       <ChevronRight size={14} />
                     </div>
                     <div className="theater-submenu-panel" role="menu" aria-label="Battuta">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setTheaterMenuOpen(false)
-                          setTheaterMenuPosition(undefined)
-                          insertCharactersSection()
-                        }}
-                        disabled={editorEditingDisabled}
-                      >
-                        <User size={14} />
-                        Personaggi
-                      </button>
-                      {dialogueCharacters.map((character) => (
+                      {dialogueCharacters.map((character, index) => (
                         <button
                           type="button"
                           role="menuitem"
@@ -3109,7 +3295,8 @@ function App() {
                           onClick={() => insertActorDialogueForCharacter(character)}
                         >
                           <Quote size={14} />
-                          {character.name}
+                          <span className="menu-item-label">{character.name}</span>
+                          {index < 9 ? <kbd>Alt+Shift+{index + 1}</kbd> : null}
                         </button>
                       ))}
                     </div>
@@ -3189,7 +3376,7 @@ function App() {
                         setTableMenuPosition(undefined)
                         deleteCurrentTableRow()
                       }}
-                      disabled={editorEditingDisabled}
+                      disabled={editorEditingDisabled || selectedCharacterTableHeaderRow}
                     >
                       <PanelTopClose size={14} />
                       Elimina riga
@@ -3202,7 +3389,7 @@ function App() {
                         setTableMenuPosition(undefined)
                         deleteCurrentTable()
                       }}
-                      disabled={editorEditingDisabled}
+                      disabled={editorEditingDisabled || selectedCharacterTable}
                     >
                       <Trash2 size={14} />
                       Elimina tabella
@@ -4465,19 +4652,6 @@ const mergeNoteTypes = (current: NoteType[], missing: NoteType[]) => {
   return requiredNoteTypes.map((noteType) => byId.get(noteType.id) ?? noteType)
 }
 
-const charactersTableRow = (cells: string[], header = false): TiptapJsonNode => ({
-  type: 'tableRow',
-  content: cells.map((cell) => ({
-    type: header ? 'tableHeader' : 'tableCell',
-    content: [
-      {
-        type: 'paragraph',
-        content: [{ type: 'text', text: cell }],
-      },
-    ],
-  })),
-})
-
 const isProject = (value: unknown): value is Project => {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<Project>
@@ -4637,6 +4811,49 @@ const convertMarkdownTableAroundSelection = (view: EditorView) => {
   const from = paragraphs[startIndex].position
   const to = paragraphs[endIndex].position + paragraphs[endIndex].node.nodeSize
   view.dispatch(view.state.tr.replaceRange(from, to, slice).scrollIntoView())
+  return true
+}
+
+const convertCharacterColonToDialogue = (
+  view: EditorView,
+  from: number,
+  to: number,
+  characters: CharacterOption[],
+  sceneId: string,
+) => {
+  if (from !== to) return false
+  const { $from } = view.state.selection
+  const paragraph = $from.parent
+  if (paragraph.type.name !== 'paragraph') return false
+
+  const textBefore = paragraph.textBetween(0, $from.parentOffset, ' ', ' ').trim()
+  const textAfter = paragraph.textBetween($from.parentOffset, paragraph.content.size, ' ', ' ').trim()
+  if (!textBefore || textAfter) return false
+
+  const character = characters.find((item) => normalizeCharacterName(item.name) === normalizeCharacterName(textBefore))
+  if (!character) return false
+
+  const nodeType = view.state.schema.nodes.scriptDialogue
+  if (!nodeType) return false
+
+  const dialogueId = `battuta-${crypto.randomUUID().slice(0, 8)}`
+  const paragraphStart = $from.before($from.depth)
+  const paragraphEnd = paragraphStart + paragraph.nodeSize
+  const dialogueNode = nodeType.create({
+    id: dialogueId,
+    characterId: character.id,
+    character: character.name,
+    text: '',
+    sceneId,
+  })
+  const transaction = view.state.tr.replaceWith(paragraphStart, paragraphEnd, dialogueNode)
+  transaction.setSelection(NodeSelection.create(transaction.doc, paragraphStart))
+  transaction.scrollIntoView()
+  view.dispatch(transaction)
+  window.requestAnimationFrame(() => {
+    const textarea = view.dom.querySelector<HTMLTextAreaElement>(`[data-dialogue-id="${dialogueId}"] textarea`)
+    textarea?.focus()
+  })
   return true
 }
 
@@ -5023,19 +5240,117 @@ const syncBookmarkState = (
 
 const fullscreenIndexAtEditorPosition = (editor: Editor | null, performanceBlocks: PerformanceBlock[]) => {
   if (!editor || performanceBlocks.length === 0) return 0
-  const selectionPosition = editor.state.selection.from
-  let index = 0
-  let currentIndex = 0
-  editor.state.doc.descendants((node, position) => {
-    if (position > selectionPosition) return false
-    if (node.type.name !== 'paragraph') return
+  const selectedDialogueId = selectedScriptDialogueId(editor)
+  if (selectedDialogueId) {
+    const selectedIndex = performanceBlocks.findIndex((block) => block.id === selectedDialogueId)
+    if (selectedIndex >= 0) return selectedIndex
+  }
 
-    const text = node.textContent?.trim() ?? ''
-    if (!text) return
-    currentIndex = Math.min(index, performanceBlocks.length - 1)
-    index += 1
-  })
-  return currentIndex
+  const blockStart = editorSelectionBlockStart(editor)
+  const currentLine = editorSourceLineUntilPosition(editor, blockStart)
+  const blocks = parseScriptBlocks(editorJsonToMarkdown(editor.getJSON()))
+  const currentBlock = blockAtSourceLine(blocks, currentLine)
+  const targetBlock =
+    scopedFullscreenBlockAtOrAfterLine(blocks, currentLine, currentBlock) ??
+    blocks.find((block) => isFullscreenBlock(block.type) && (block.sourceLine ?? 0) >= currentLine)
+
+  if (targetBlock) {
+    const targetIndex = performanceBlocks.findIndex((block) =>
+      block.position === targetBlock.position &&
+      block.sourceLine === targetBlock.sourceLine &&
+      block.type === targetBlock.type,
+    )
+    if (targetIndex >= 0) return targetIndex
+  }
+
+  const markdownBeforeCurrentBlock = editorMarkdownUntilPosition(editor, blockStart)
+  const fullscreenBlocksBeforeCurrentBlock = parseScriptBlocks(markdownBeforeCurrentBlock).filter((block) =>
+    isFullscreenBlock(block.type)
+  )
+  return Math.min(fullscreenBlocksBeforeCurrentBlock.length, performanceBlocks.length - 1)
+}
+
+const selectedScriptDialogueId = (editor: Editor) => {
+  const selection = editor.state.selection
+  const selectedNode = selection instanceof NodeSelection ? selection.node : undefined
+  if (selectedNode?.type.name === 'scriptDialogue') return String(selectedNode.attrs.id ?? '')
+  const nodeAtSelection = editor.state.doc.nodeAt(selection.from)
+  if (nodeAtSelection?.type.name === 'scriptDialogue') return String(nodeAtSelection.attrs.id ?? '')
+  return ''
+}
+
+const blockAtSourceLine = (blocks: PerformanceBlock[], sourceLine: number) => {
+  const containing = blocks.find((block) =>
+    (block.sourceLine ?? -1) <= sourceLine && (block.endLine ?? block.sourceLine ?? -1) >= sourceLine,
+  )
+  if (containing) return containing
+  return [...blocks].reverse().find((block) => (block.sourceLine ?? -1) < sourceLine)
+}
+
+const scopedFullscreenBlockAtOrAfterLine = (
+  blocks: PerformanceBlock[],
+  sourceLine: number,
+  currentBlock: PerformanceBlock | undefined,
+) => {
+  if (currentBlock && isFullscreenBlock(currentBlock.type)) return currentBlock
+
+  const scopeBlock = currentBlock && isHeadingScopeBlock(currentBlock)
+    ? currentBlock
+    : [...blocks].reverse().find((block) =>
+      isHeadingScopeBlock(block) && (block.sourceLine ?? -1) <= sourceLine,
+    )
+  const scopeEndLine = scopeBlock ? headingScopeEndLine(blocks, scopeBlock) : Number.POSITIVE_INFINITY
+
+  return blocks.find((block) =>
+    isFullscreenBlock(block.type) &&
+    (block.sourceLine ?? 0) >= sourceLine &&
+    (block.sourceLine ?? 0) < scopeEndLine,
+  )
+}
+
+const isHeadingScopeBlock = (block: PerformanceBlock) =>
+  block.type === 'title' || block.type === 'scene' || block.type === 'section'
+
+const headingScopeRank = (block: PerformanceBlock) => {
+  if (block.type === 'title') return 1
+  if (block.type === 'scene') return 2
+  return block.headingLevel ?? 3
+}
+
+const headingScopeEndLine = (blocks: PerformanceBlock[], scopeBlock: PerformanceBlock) => {
+  const scopeRank = headingScopeRank(scopeBlock)
+  const scopeLine = scopeBlock.sourceLine ?? 0
+  const nextPeer = blocks.find((block) =>
+    isHeadingScopeBlock(block) &&
+    (block.sourceLine ?? 0) > scopeLine &&
+    headingScopeRank(block) <= scopeRank,
+  )
+  return nextPeer?.sourceLine ?? Number.POSITIVE_INFINITY
+}
+
+const editorSelectionBlockStart = (editor: Editor) => {
+  const { doc, selection } = editor.state
+  const position = Math.max(0, Math.min(selection.from, doc.content.size))
+  const nodeAtSelection = doc.nodeAt(position)
+  if (nodeAtSelection?.isBlock) return position
+
+  const { $from } = selection
+  for (let depth = $from.depth; depth > 0; depth -= 1) {
+    const node = $from.node(depth)
+    if (node.isBlock) return $from.before(depth)
+  }
+
+  return position
+}
+
+const editorSourceLineUntilPosition = (editor: Editor, position: number) => {
+  const markdown = editorMarkdownUntilPosition(editor, position)
+  return markdown ? markdown.split('\n').length : 0
+}
+
+const editorMarkdownUntilPosition = (editor: Editor, position: number) => {
+  const boundedPosition = Math.max(0, Math.min(position, editor.state.doc.content.size))
+  return editorJsonToMarkdown(editor.state.doc.cut(0, boundedPosition).toJSON() as TiptapJsonNode)
 }
 
 const validateScriptForFullscreen = (markdown: string, project: Project): ScriptValidationIssue[] => {
@@ -5441,6 +5756,54 @@ const selectionIsInsideNode = (editor: Editor, nodeType: string) => {
   return false
 }
 
+const currentTableContext = (editor: Editor) => {
+  const { $from } = editor.state.selection
+  let tableNode: ProseMirrorNode | undefined
+  let rowNode: ProseMirrorNode | undefined
+  for (let depth = $from.depth; depth > 0; depth -= 1) {
+    const node = $from.node(depth)
+    if (!rowNode && node.type.name === 'tableRow') rowNode = node
+    if (!tableNode && node.type.name === 'table') tableNode = node
+  }
+  const isHeaderRow = Boolean(rowNode && tableRowIsHeader(rowNode))
+  const isCharacterTable = Boolean(tableNode && tableIsCharacterTable(tableNode))
+  return { tableNode, rowNode, isHeaderRow, isCharacterTable }
+}
+
+const tableRowIsHeader = (row: ProseMirrorNode) => {
+  if (row.childCount === 0) return false
+  for (let index = 0; index < row.childCount; index += 1) {
+    if (row.child(index).type.name !== 'tableHeader') return false
+  }
+  return true
+}
+
+const tableIsCharacterTable = (table: ProseMirrorNode) => {
+  if (table.childCount === 0) return false
+  const cells = tableRowTexts(table.child(0)).map(normalizeTableHeaderText)
+  return (
+    cells[0] === 'personaggio' &&
+    (cells[1] === 'attore' || cells[1] === 'interprete') &&
+    cells[2] === 'presenza' &&
+    cells[3] === 'note'
+  )
+}
+
+const tableRowTexts = (row: ProseMirrorNode) => {
+  const cells: string[] = []
+  for (let index = 0; index < row.childCount; index += 1) {
+    cells.push(row.child(index).textContent.trim())
+  }
+  return cells
+}
+
+const normalizeTableHeaderText = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+
 const bookmarkTitleFromSelection = (editor: Editor) => {
   const { from, to } = editor.state.selection
   const selectedText = editor.state.doc.textBetween(from, to, ' ').trim()
@@ -5485,6 +5848,18 @@ const bookmarkItemIdAtPosition = (items: BookmarkItem[], position: number) => {
     activeId = item.id
   }
   return activeId
+}
+
+const editorNoteCollapseSummary = (editor: Editor | null) => {
+  const summary = { total: 0, collapsed: 0 }
+  editor?.state.doc.descendants((node) => {
+    if (node.type.name !== 'scriptNote') return
+    summary.total += 1
+    if (node.attrs.collapsed === true || node.attrs.collapsed === 'true') {
+      summary.collapsed += 1
+    }
+  })
+  return summary
 }
 
 const sameOutlineItems = (left: OutlineItem[], right: OutlineItem[]) =>
@@ -5672,6 +6047,21 @@ const nodeMatchByRef = (doc: ProseMirrorDocNode, nodeType: string, refId: string
   let match: ScriptNodeMatch | undefined
   doc.descendants((node, pos) => {
     if (match || node.type.name !== nodeType || node.attrs.refId !== refId) return
+    match = { position: pos, nodeSize: node.nodeSize, attrs: node.attrs, node }
+  })
+  return match
+}
+
+const nodeMatchByAttr = (
+  doc: ProseMirrorDocNode,
+  nodeType: string,
+  attrName: string,
+  attrValue: string,
+): ScriptNodeMatch | undefined => {
+  if (!attrValue) return undefined
+  let match: ScriptNodeMatch | undefined
+  doc.descendants((node, pos) => {
+    if (match || node.type.name !== nodeType || String(node.attrs[attrName] ?? '') !== attrValue) return
     match = { position: pos, nodeSize: node.nodeSize, attrs: node.attrs, node }
   })
   return match

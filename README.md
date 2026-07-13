@@ -40,14 +40,20 @@ Implementato:
 9. outline del file attivo;
 10. bookmark inline;
 11. note di regia inline, colorate e collassabili;
-12. cue audio, musica, immagine e video;
-13. controlli inline per cue audio/musica;
-14. inspector laterale dedicato ai cue;
-15. riapertura automatica dell'ultimo progetto nella versione desktop;
-16. validazione tipografica e formale prima della modalità schermo intero;
-17. modalità schermo intero con step battuta/cue;
-18. export PDF completo e pulito;
-19. aggiornamenti automatici tramite GitHub Releases.
+12. collasso o espansione globale delle note;
+13. oggetti battuta collegati alla tabella personaggi;
+14. conversione automatica `Personaggio:` in oggetto battuta quando il personaggio è presente in tabella;
+15. inserimento toolbar di Atto, Scena, Sezione, note, battute, tabelle ed export;
+16. scorciatoie per struttura e battute;
+17. cue audio, musica, immagine e video;
+18. controlli inline per cue audio/musica;
+19. inspector laterale dedicato ai cue;
+20. riapertura automatica dell'ultimo progetto nella versione desktop;
+21. validazione tipografica e formale prima della modalità schermo intero;
+22. sincronizzazione tra posizione editor e modalità schermo intero;
+23. modalità schermo intero con step battuta/cue;
+24. export PDF completo e pulito;
+25. aggiornamenti automatici tramite GitHub Releases.
 
 ## Sviluppo
 
@@ -111,12 +117,15 @@ La versione desktop registra il percorso dell'ultimo progetto aperto nel data di
 Prima di entrare in modalità schermo intero l'app esegue controlli tipografici e formali sul file attivo:
 
 1. formato battute `**PERSONAGGIO**: Battuta`;
-2. struttura H2 per atti e H3 per scene, sinossi e personaggi;
-3. nomi personaggio potenzialmente incoerenti;
-4. battute senza personaggio;
-5. paragrafi non collegati a note, citazioni, cue o sezioni strutturate.
+2. oggetti battuta collegati alla tabella personaggi;
+3. struttura H2 per atti e H3 per scene, sinossi e personaggi;
+4. nomi personaggio potenzialmente incoerenti;
+5. battute senza personaggio;
+6. paragrafi non collegati a note, citazioni, cue o sezioni strutturate.
 
 Le anomalie vengono mostrate in un pannello sotto l'editor. Ogni item conserva la riga sorgente, il tipo di errore e un frammento evidenziato; il click sull'item sposta il cursore nel punto corrispondente.
+
+La modalità schermo intero viene avviata dalla battuta o dalla sezione in cui si trova il cursore. All'uscita, l'app riporta il focus nell'editor sullo step visualizzato.
 
 ## Documenti applicativi
 

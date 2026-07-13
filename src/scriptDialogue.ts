@@ -1,4 +1,5 @@
 import { mergeAttributes, Node as TiptapNode } from '@tiptap/core'
+import { NodeSelection } from '@tiptap/pm/state'
 
 type ScriptDialogueAttrs = {
   id: string
@@ -94,6 +95,7 @@ export const ScriptDialogue = TiptapNode.create({
       const characterMenu = document.createElement('div')
       const body = document.createElement('textarea')
       let characterMenuOpen = false
+      let resizeFrame = 0
       const closeCharacterMenuOnOutsideClick = (event: PointerEvent) => {
         if (!characterMenuOpen || characterDropdown.contains(event.target as Node)) return
         setCharacterMenuOpen(false)
@@ -134,6 +136,22 @@ export const ScriptDialogue = TiptapNode.create({
         body.style.height = `${Math.max(38, body.scrollHeight)}px`
       }
 
+      const scheduleResize = () => {
+        if (resizeFrame) window.cancelAnimationFrame(resizeFrame)
+        resizeFrame = window.requestAnimationFrame(() => {
+          resizeFrame = 0
+          resize()
+        })
+      }
+
+      const selectDialogueNode = () => {
+        const position = typeof getPos === 'function' ? getPos() : undefined
+        if (typeof position !== 'number') return
+        const selection = NodeSelection.create(editor.state.doc, position)
+        if (editor.state.selection.eq(selection)) return
+        editor.view.dispatch(editor.state.tr.setSelection(selection))
+      }
+
       const setCharacterMenuOpen = (open: boolean) => {
         characterMenuOpen = open
         characterDropdown.dataset.open = String(open)
@@ -166,12 +184,13 @@ export const ScriptDialogue = TiptapNode.create({
         characterLabel.textContent = attrs.character || 'PERSONAGGIO'
         renderOptions()
         body.value = attrs.text
-        resize()
+        scheduleResize()
       }
 
       characterButton.addEventListener('click', (event) => {
         event.preventDefault()
         event.stopPropagation()
+        selectDialogueNode()
         setCharacterMenuOpen(!characterMenuOpen)
       })
 
@@ -189,12 +208,19 @@ export const ScriptDialogue = TiptapNode.create({
       })
 
       body.addEventListener('input', () => {
-        resize()
+        selectDialogueNode()
+        scheduleResize()
         updateAttrs({ text: body.value })
       })
+      body.addEventListener('focus', selectDialogueNode)
+      body.addEventListener('pointerdown', selectDialogueNode)
+      body.addEventListener('click', selectDialogueNode)
 
       window.addEventListener('stagedesk-characters-updated', render)
       window.addEventListener('pointerdown', closeCharacterMenuOnOutsideClick)
+      window.addEventListener('resize', scheduleResize)
+      const resizeObserver = 'ResizeObserver' in window ? new ResizeObserver(scheduleResize) : undefined
+      resizeObserver?.observe(dom)
       render()
 
       return {
@@ -210,8 +236,11 @@ export const ScriptDialogue = TiptapNode.create({
           return Boolean(target?.closest('button, textarea, .script-note-type-menu'))
         },
         destroy() {
+          if (resizeFrame) window.cancelAnimationFrame(resizeFrame)
+          resizeObserver?.disconnect()
           window.removeEventListener('stagedesk-characters-updated', render)
           window.removeEventListener('pointerdown', closeCharacterMenuOnOutsideClick)
+          window.removeEventListener('resize', scheduleResize)
         },
       }
     }

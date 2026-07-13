@@ -31,6 +31,8 @@ La schermata principale è divisa in tre zone:
 
 L'editor supporta titoli, paragrafi, grassetto, corsivo, elenchi, citazioni, tabelle, link e separatori.
 
+Il documento può contenere anche oggetti battuta. Gli oggetti battuta mantengono separati personaggio e testo, sono collegati alla tabella personaggi del copione e vengono usati per la modalità schermo intero.
+
 Per una battuta usa questo formato:
 
 `**MIRANDOLINA**: A pranzo, che cosa comanda?`
@@ -41,9 +43,30 @@ Per una battuta usa questo formato:
 
 I link Markdown come `[sito](https://esempio.it)` vengono visualizzati come collegamenti cliccabili e aperti nel browser predefinito del sistema.
 
+Se digiti i due punti dopo il nome di un personaggio presente nella tabella personaggi, StageDesk Pro converte automaticamente la riga in un oggetto battuta.
+
+Dal menu con le maschere puoi inserire rapidamente Atto, Scena, Sezione, note di regia, battute dei personaggi ed export. I comandi Atto, Scena e Sezione applicano lo stile alla riga corrente, al testo selezionato o inseriscono il titolo base quando la riga è vuota.
+
+Scorciatoie utili:
+
+| Scorciatoia | Azione |
+| --- | --- |
+| Alt+1 | Atto |
+| Alt+2 | Scena |
+| Alt+3 | Sezione |
+| Alt+Shift+1..9 | Battuta del personaggio corrispondente |
+
 ## Note di regia
 
 Le note di regia sono blocchi colorati inseriti direttamente nel testo. Ogni nota può essere modificata, collassata, eliminata e classificata per tipo, ad esempio movimento, tono, luce, audio, video, immagine o personaggi in scena.
+
+Puoi collassare o espandere tutte le note con il pulsante dedicato nella toolbar. Dal menu del tipo nota puoi anche scegliere un colore predefinito.
+
+## Tabelle
+
+Puoi inserire tabelle dalla toolbar scegliendo righe e colonne come in un editor di testo. La prima riga viene impostata come intestazione.
+
+La tabella personaggi è protetta: non è possibile eliminare la riga di intestazione o l'intera tabella. Le righe dei personaggi possono invece essere aggiunte o rimosse.
 
 ## Cue multimediali
 

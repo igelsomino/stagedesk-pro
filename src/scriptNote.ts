@@ -37,6 +37,18 @@ const noteTypes = [
   { id: 'general', label: 'Nota generale', color: 'cyan' },
 ]
 
+const noteColors = [
+  { id: 'cyan', label: 'Ciano' },
+  { id: 'blue', label: 'Blu' },
+  { id: 'green', label: 'Verde' },
+  { id: 'purple', label: 'Viola' },
+  { id: 'yellow', label: 'Giallo' },
+  { id: 'orange', label: 'Arancio' },
+  { id: 'red', label: 'Rosso' },
+  { id: 'gray', label: 'Grigio' },
+  { id: 'brown', label: 'Marrone' },
+]
+
 export const ScriptNote = TiptapNode.create({
   name: 'scriptNote',
   group: 'block',
@@ -112,10 +124,17 @@ export const ScriptNote = TiptapNode.create({
       const typeLabel = document.createElement('span')
       const typeIcon = document.createElement('span')
       const typeMenu = document.createElement('div')
+      const typeMenuSeparator = document.createElement('div')
+      const colorSubmenu = document.createElement('div')
+      const colorButton = document.createElement('button')
+      const colorLabel = document.createElement('span')
+      const colorIcon = document.createElement('span')
+      const colorPanel = document.createElement('div')
       const deleteButton = document.createElement('button')
       const body = document.createElement('div')
       const contentTextarea = document.createElement('textarea')
       let typeMenuOpen = false
+      let colorMenuOpen = false
       const closeTypeMenuOnOutsideClick = (event: PointerEvent) => {
         if (!typeMenuOpen || typeDropdown.contains(event.target as Node)) return
         setTypeMenuOpen(false)
@@ -154,6 +173,36 @@ export const ScriptNote = TiptapNode.create({
         option.textContent = noteType.label
         typeMenu.append(option)
       }
+      typeMenuSeparator.className = 'script-note-type-separator'
+      typeMenuSeparator.setAttribute('role', 'separator')
+      colorSubmenu.className = 'script-note-color-submenu'
+      colorButton.type = 'button'
+      colorButton.className = 'script-note-color-trigger'
+      colorButton.setAttribute('role', 'menuitem')
+      colorButton.setAttribute('aria-haspopup', 'menu')
+      colorButton.setAttribute('aria-expanded', 'false')
+      colorLabel.textContent = 'Colore'
+      colorIcon.className = 'script-note-color-icon'
+      colorButton.append(colorLabel, colorIcon)
+      colorPanel.className = 'script-note-color-panel'
+      colorPanel.setAttribute('role', 'menu')
+      for (const noteColor of noteColors) {
+        const option = document.createElement('button')
+        const swatch = document.createElement('span')
+        const label = document.createElement('span')
+        option.type = 'button'
+        option.className = 'script-note-color-option'
+        option.dataset.noteColor = noteColor.id
+        option.setAttribute('role', 'menuitem')
+        option.setAttribute('aria-label', `Colore ${noteColor.label}`)
+        option.title = noteColor.label
+        swatch.className = `script-note-color-swatch ${noteColor.id}`
+        label.textContent = noteColor.label
+        option.append(swatch, label)
+        colorPanel.append(option)
+      }
+      colorSubmenu.append(colorButton, colorPanel)
+      typeMenu.append(typeMenuSeparator, colorSubmenu)
       typeDropdown.append(typeButton, typeMenu)
       deleteButton.type = 'button'
       deleteButton.className = 'script-note-delete'
@@ -189,6 +238,13 @@ export const ScriptNote = TiptapNode.create({
         typeMenuOpen = open
         typeDropdown.dataset.open = String(open)
         typeButton.setAttribute('aria-expanded', String(open))
+        if (!open) setColorMenuOpen(false)
+      }
+
+      const setColorMenuOpen = (open: boolean) => {
+        colorMenuOpen = open
+        colorSubmenu.dataset.open = String(open)
+        colorButton.setAttribute('aria-expanded', String(open))
       }
 
       const render = () => {
@@ -200,9 +256,12 @@ export const ScriptNote = TiptapNode.create({
         collapseButton.setAttribute('aria-label', collapseButton.title)
         titleInput.value = attrs.title
         typeLabel.textContent = selectedType?.label ?? attrs.type
-        for (const option of Array.from(typeMenu.children)) {
+        for (const option of Array.from(typeMenu.querySelectorAll<HTMLElement>('.script-note-type-option'))) {
           const item = option as HTMLElement
           item.dataset.active = String(item.dataset.noteTypeId === attrs.type)
+        }
+        for (const option of Array.from(colorPanel.querySelectorAll<HTMLElement>('.script-note-color-option'))) {
+          option.dataset.active = String(option.dataset.noteColor === attrs.color)
         }
         contentTextarea.value = attrs.content
         resizeTextarea()
@@ -230,6 +289,11 @@ export const ScriptNote = TiptapNode.create({
         event.stopPropagation()
         setTypeMenuOpen(!typeMenuOpen)
       })
+      colorButton.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        setColorMenuOpen(!colorMenuOpen)
+      })
       typeMenu.addEventListener('click', (event) => {
         const option = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>('.script-note-type-option')
         if (!option) return
@@ -239,6 +303,14 @@ export const ScriptNote = TiptapNode.create({
         if (!noteType) return
         setTypeMenuOpen(false)
         updateAttrs({ type: noteType.id, color: noteType.color })
+      })
+      colorPanel.addEventListener('click', (event) => {
+        const option = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>('.script-note-color-option')
+        if (!option?.dataset.noteColor) return
+        event.preventDefault()
+        event.stopPropagation()
+        setTypeMenuOpen(false)
+        updateAttrs({ color: option.dataset.noteColor })
       })
       const writePointerDragPayload = (event: PointerEvent | MouseEvent) => {
         const target = event.target as HTMLElement | null

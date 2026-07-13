@@ -116,6 +116,8 @@ export type ScriptBlock = {
   headingLevel?: number
   tableRows?: { cells: string[]; header?: boolean }[]
   position: number
+  sourceLine?: number
+  endLine?: number
 }
 
 export type FullscreenState = {

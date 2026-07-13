@@ -214,6 +214,16 @@ describe('markdown serialization', () => {
     expect(blocks[1]).toMatchObject({ text: 'Personaggi', headingLevel: 3 })
   })
 
+  it('keeps source line metadata for fullscreen section sync', () => {
+    const blocks = parseScriptBlocks('## Scena 1\n\n### Sezione\n\n**ATTORE**: Battuta')
+
+    expect(blocks.map((block) => [block.type, block.sourceLine, block.endLine])).toEqual([
+      ['scene', 0, 0],
+      ['section', 2, 2],
+      ['dialogue', 4, 4],
+    ])
+  })
+
   it('parses markdown tables with rows and columns for fullscreen rendering', () => {
     const blocks = parseScriptBlocks([
       '### Personaggi',
@@ -229,6 +239,23 @@ describe('markdown serialization', () => {
       { cells: ['REGISTA', 'Mario Rossi', 'In scena'] },
       { cells: ['ATTORE', 'Laura Bianchi', 'In scena'] },
     ])
+  })
+
+  it('parses empty markdown tables as table blocks instead of dialogue', () => {
+    const blocks = parseScriptBlocks([
+      '|  |  |  |',
+      '| --- | --- | --- |',
+      '|  |  |  |',
+    ].join('\n'))
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({
+      type: 'table',
+      tableRows: [
+        { cells: ['', '', ''], header: true },
+        { cells: ['', '', ''] },
+      ],
+    })
   })
 
   it('parses inline character dialogue from bold name syntax', () => {
@@ -250,6 +277,19 @@ describe('markdown serialization', () => {
       type: 'dialogue',
       characterId: 'mirandolina',
       text: '**MIRANDOLINA**: A pranzo?',
+    })
+  })
+
+  it('parses editor battuta markers as fullscreen dialogue by stable id', () => {
+    const blocks = parseScriptBlocks('[BATTUTA: CAVALIERE] {#battuta-123 characterId="cavaliere" text="Vi ringrazio." sceneId="scena-1"}')
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({
+      id: 'battuta-123',
+      type: 'dialogue',
+      characterId: 'cavaliere',
+      sceneId: 'scena-1',
+      text: '**CAVALIERE**: Vi ringrazio.',
     })
   })
 
