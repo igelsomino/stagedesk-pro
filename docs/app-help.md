@@ -81,6 +81,14 @@ I cue sono chip inseriti nel copione e collegati ai media del progetto. Sono dis
 
 I cue audio e musicali hanno controlli nel chip: play/pausa, stop quando il cue è in esecuzione e indicatore equalizzatore.
 
+Nella colonna Cue puoi scegliere tra tre filtri:
+
+- **Contestuali**: mostra solo i cue presenti nel blocco corrente dell'editor;
+- **Scena**: mostra tutti i cue della scena corrente;
+- **Tutte**: mostra tutti i cue del file attivo.
+
+Se il filtro Contestuali non trova cue nel blocco corrente, la lista resta vuota. Oltre cinque risultati vengono distribuiti su più pagine.
+
 ## Raccolta media
 
 La raccolta media è organizzata in suoni, musiche, immagini e video. Puoi importare file, creare cartelle, rinominare elementi e spostare media tra cartelle.

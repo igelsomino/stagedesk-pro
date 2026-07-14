@@ -1,6 +1,6 @@
 import type { AuthError, OAuthResponse, Provider, Session, User } from '@supabase/supabase-js'
 import { isTauri } from '@tauri-apps/api/core'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, MouseEvent, ReactNode } from 'react'
 import { Chrome, Cloud, Github, LoaderCircle, LogIn, LogOut, ShieldCheck, UserRound } from 'lucide-react'
 import {
@@ -15,6 +15,7 @@ import {
   type UserProfile,
 } from './auth'
 import { AuthContext, useAuth } from './authContext'
+import { diagnosticLog } from './diagnostics'
 
 type AuthGateProps = {
   children: ReactNode
@@ -128,6 +129,10 @@ export function AuthGate({ children }: AuthGateProps) {
 
   const user = session?.user ?? null
   const profileComplete = isProfileComplete(profile)
+  const sessionRef = useRef<Session | null>(session)
+  const userRef = useRef<User | null>(user)
+  sessionRef.current = session
+  userRef.current = user
 
   useEffect(() => {
     if (authConfigError) {
@@ -165,7 +170,11 @@ export function AuthGate({ children }: AuthGateProps) {
 
     void loadSession()
 
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      diagnosticLog('auth-state-change', {
+        event,
+        userId: nextSession?.user.id,
+      })
       if (!nextSession) {
         setSession(null)
         setProfile(null)
@@ -223,15 +232,19 @@ export function AuthGate({ children }: AuthGateProps) {
   }, [])
 
   useEffect(() => {
-    if (!session || !user) return
+    const currentSession = sessionRef.current
+    const currentUser = userRef.current
+    const userId = currentUser?.id ?? ''
+    if (!currentSession || !currentUser || !userId) return
     let active = true
+    diagnosticLog('profile-load-start', { userId })
     setProfileLoading(true)
     setProfile(null)
     setMessage('')
 
     const loadValidatedProfile = async () => {
-      const validSession = await validatedSession(session)
-      if (!validSession || validSession.user.id !== user.id) return undefined
+      const validSession = await validatedSession(currentSession)
+      if (!validSession || validSession.user.id !== userId) return undefined
       return loadProfile(validSession.user)
     }
 
@@ -239,14 +252,17 @@ export function AuthGate({ children }: AuthGateProps) {
       .then((loadedProfile) => {
         if (!active) return
         if (loadedProfile === undefined) {
+          diagnosticLog('profile-load-invalid-session', { userId })
           setSession(null)
           setProfile(null)
           setMessage('Sessione non più valida. Accedi di nuovo.')
           return
         }
+        diagnosticLog('profile-load-complete', { userId, complete: isProfileComplete(loadedProfile) })
         setProfile(loadedProfile)
       })
       .catch((error: Error) => {
+        diagnosticLog('profile-load-error', { userId, message: error.message })
         if (active) setMessage(`Profilo non disponibile: ${error.message}`)
       })
       .finally(() => {
@@ -256,7 +272,7 @@ export function AuthGate({ children }: AuthGateProps) {
     return () => {
       active = false
     }
-  }, [session, user])
+  }, [user?.id])
 
   const authState = useMemo<AuthState>(() => ({
     session,

@@ -1000,14 +1000,56 @@ body.stagedesk-pointer-dragging * {
   background: var(--background-primary);
 }
 
-.file-tabbar {
+.file-tabbar-shell {
+  position: relative;
   display: flex;
-  align-items: flex-end;
-  overflow-x: auto;
-  overflow-y: hidden;
+  min-width: 0;
   min-height: 35px;
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-tertiary);
+}
+
+.file-tabbar {
+  display: flex;
+  align-items: flex-end;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.file-tabbar::-webkit-scrollbar {
+  display: none;
+}
+
+.file-tab-scroll-button {
+  z-index: 2;
+  display: inline-grid;
+  flex: 0 0 30px;
+  place-items: center;
+  width: 30px;
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--background-secondary) 92%, transparent);
+  color: var(--text-muted);
+}
+
+.file-tab-scroll-button:hover,
+.file-tab-scroll-button:focus-visible {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.file-tab-scroll-button-left {
+  border-right: 1px solid var(--background-modifier-border);
+}
+
+.file-tab-scroll-button-right {
+  border-left: 1px solid var(--background-modifier-border);
 }
 
 .file-tab {
@@ -2802,6 +2844,30 @@ body.stagedesk-pointer-dragging * {
   gap: 3px;
 }
 
+.cue-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 0 4px;
+  color: var(--text-faint);
+  font-size: 0.72rem;
+}
+
+.cue-pagination-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.cue-pagination .icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+}
+
 .note-card {
   display: grid;
   grid-template-columns: 12px minmax(0, 1fr);
@@ -3247,6 +3313,8 @@ button.danger:hover {
 }
 
 .project-picker-list {
+  position: relative;
+  z-index: 2;
   display: grid;
   gap: 6px;
   max-height: 306px;
@@ -3259,7 +3327,10 @@ button.danger:hover {
   grid-template-columns: minmax(0, 1fr) 32px;
   align-items: stretch;
   gap: 0;
-  isolation: isolate;
+}
+
+.project-picker-row.menu-open {
+  z-index: 4;
 }
 
 .project-picker-open {
@@ -3318,7 +3389,7 @@ button.danger:hover {
 
 .project-picker-menu {
   position: absolute;
-  z-index: 120;
+  z-index: 20;
   top: 6px;
   right: 38px;
   display: grid;
@@ -3365,6 +3436,8 @@ button.danger:hover {
 }
 
 .project-picker-pagination {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3711,7 +3784,7 @@ button.danger:hover {
   justify-content: flex-end;
   gap: 6px;
   max-width: min(560px, calc(100vw - 32px));
-  opacity: 0.38;
+  opacity: 0.78;
   transition: opacity 140ms ease;
 }
 
@@ -3724,32 +3797,60 @@ button.danger:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  padding: 4px 8px;
-  background: rgba(16, 16, 16, 0.66);
-  color: rgba(255, 255, 255, 0.72);
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  border-radius: 7px;
+  padding: 4px 9px;
+  background: rgba(28, 28, 28, 0.94);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.62), 0 0 0 1px rgba(0, 0, 0, 0.24) inset;
+  color: rgba(255, 255, 255, 0.86);
   backdrop-filter: blur(8px);
   font-size: 0.72rem;
+  transition: transform 90ms ease, border-color 90ms ease, background 90ms ease, box-shadow 90ms ease;
 }
 
 .fullscreen-shortcuts button:hover {
-  border-color: rgba(233, 84, 32, 0.62);
-  background: rgba(233, 84, 32, 0.18);
+  border-color: rgba(255, 126, 68, 0.82);
+  background: rgba(80, 38, 25, 0.94);
+  color: #ffffff;
+}
+
+.fullscreen-shortcuts button.is-pressed {
+  transform: translateY(2px);
+  border-color: #ff7e44;
+  background: #713317;
+  box-shadow: 0 0 0 1px rgba(255, 126, 68, 0.42), 0 0 14px rgba(233, 84, 32, 0.24) inset;
   color: #ffffff;
 }
 
 .fullscreen-shortcuts kbd {
-  min-width: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 23px;
+  min-height: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
   border-radius: 5px;
-  padding: 1px 5px;
-  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 6px;
+  background: #292929;
   color: #ffffff;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.68rem;
   font-weight: 800;
+  box-shadow: 0 2px 0 #080808, 0 1px 0 rgba(255, 255, 255, 0.08) inset;
+  transition: transform 90ms ease, box-shadow 90ms ease, background 90ms ease;
+}
+
+.fullscreen-shortcuts kbd.shortcut-key-icon {
+  width: 23px;
+  padding: 0;
+}
+
+.fullscreen-shortcuts button.is-pressed kbd {
+  transform: translateY(1px);
+  border-color: #ffb08b;
+  background: #a94b21;
+  box-shadow: 0 0 0 #080808, 0 1px 0 rgba(255, 255, 255, 0.2) inset;
 }
 
 progress {

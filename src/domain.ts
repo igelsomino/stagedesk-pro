@@ -1,5 +1,8 @@
 export type NodeKind = 'folder' | 'markdown'
 
+export const SCRIPT_ROOT_PATH = '/copioni'
+export const LEGACY_SCRIPT_ROOT_PATH = '/copione'
+
 export type ProjectTreeNode = {
   id: string
   name: string

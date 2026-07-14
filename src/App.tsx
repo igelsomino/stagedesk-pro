@@ -37,6 +37,7 @@ import {
   History,
   Images,
   Italic,
+  ChevronLeft,
   List,
   ListOrdered,
   ListTree,
@@ -54,6 +55,8 @@ import {
   PanelTopClose,
   Rows3,
   Search,
+  SkipBack,
+  SkipForward,
   Square,
   Table2,
   Trash2,
@@ -78,6 +81,7 @@ import './App.css'
 import { appDocumentContent, fetchAppDocumentContent, getAppDocument, isAppDocumentPath } from './appDocs'
 import { supabase } from './auth'
 import { useAuth } from './authContext'
+import { SCRIPT_ROOT_PATH } from './domain'
 import type { DirectorNote, MediaAsset, MediaCue, NotePanelMode, NoteType, Project, ProjectTreeNode } from './domain'
 import { blankProject } from './defaultProject'
 import {
@@ -98,6 +102,7 @@ import { ScriptDialogue } from './scriptDialogue'
 import { ScriptNote } from './scriptNote'
 import { browserProjectStorage, readBrowserMediaAssetObjectUrl } from './storage'
 import type { ProjectEntry } from './storage'
+import { diagnosticLog } from './diagnostics'
 
 const storage = browserProjectStorage
 const MEDIA_PATH_DND_TYPE = 'application/x-stagedesk-media-path'
@@ -117,8 +122,13 @@ const STOP_EDITOR_PLAYBACK_EVENT = 'stagedesk-stop-editor-playback'
 const UI_STATE_STORAGE_KEY = 'stagedesk-pro.ui-state'
 const WINDOW_STATE_STORAGE_KEY = 'stagedesk-pro.window-state'
 const PLAYBACK_LOG_STORAGE_KEY = 'stagedesk-pro.playback-log'
+const PLAYBACK_LOG_VERSION = 2
+const PLAYBACK_SESSION_ID = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+  ? crypto.randomUUID()
+  : `playback-${Date.now()}-${Math.random().toString(36).slice(2)}`
 const PUBLISHED_SCRIPT_BUCKET = 'published-scripts'
 const SHARED_SCRIPT_NOTE_TYPES = ['movement', 'position', 'characters', 'tone'] as const
+const CUE_PAGE_SIZE = 5
 const STORE_TAB_PATH = 'web://stagedesk-store'
 const STORE_URL = 'https://stagedesk-pro.aigconsulting.it/store/'
 type EditorCueState = 'playing' | 'paused' | 'stopped'
@@ -183,6 +193,9 @@ type StopPreviewPlaybackDetail = {
   sourceId?: string
 }
 type PlaybackLogEntry = {
+  version?: number
+  sessionId?: string
+  repeatCount?: number
   timestamp: string
   scope: 'preview' | 'editor' | 'fullscreen' | 'native'
   action: string
@@ -194,6 +207,7 @@ type PlaybackLogEntry = {
 type PlaybackLogWindow = Window & {
   __STAGEDESK_PLAYBACK_LOGS__?: PlaybackLogEntry[]
 }
+type PreviewStopReason = 'user' | 'global-playback-switch' | 'component-unmount'
 type StagedeskDragPayload = {
   type: string
   value: string
@@ -274,16 +288,21 @@ function App() {
   const initialNoteTypeId = defaultNoteType(project.noteTypes)?.id ?? ''
   const [activePath, setActivePath] = useState(initialPath)
   const [openTabs, setOpenTabs] = useState<string[]>(initialPath ? [initialPath] : [])
+  const fileTabbarRef = useRef<HTMLDivElement>(null)
+  const [fileTabOverflow, setFileTabOverflow] = useState({ left: false, right: false })
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [selectedScriptPath, setSelectedScriptPath] = useState(activePath)
   const [selectedMediaPath, setSelectedMediaPath] = useState(project.media[0]?.path ?? '/media')
   const [expandedPaths, setExpandedPaths] = useState<string[]>([
-    '/copione',
+    SCRIPT_ROOT_PATH,
     '/media',
     ...project.media.map((asset) => asset.path),
   ])
   const [leftTab, setLeftTab] = useState<'outline' | 'script' | 'media' | 'bookmarks'>('outline')
   const [noteMode, setNoteMode] = useState<NotePanelMode>('context')
+  const [cuePage, setCuePage] = useState(0)
+  const cuePageRef = useRef(cuePage)
+  cuePageRef.current = cuePage
   const [, setSelectedNoteId] = useState(project.notes[0]?.id ?? '')
   const [selectedNoteTypeId, setSelectedNoteTypeId] = useState(initialNoteTypeId)
   const [selectedCueId, setSelectedCueId] = useState(project.cues[0]?.id ?? '')
@@ -314,7 +333,7 @@ function App() {
   const [scriptDialog, setScriptDialog] = useState<ScriptActionDialog | undefined>()
   const [publishDialogOpen, setPublishDialogOpen] = useState(false)
   const [publishState, setPublishState] = useState<PublishState>({ status: 'idle' })
-  const [shareIndicator, setShareIndicator] = useState<ShareIndicatorState>({ status: 'disabled' })
+  const [shareIndicators, setShareIndicators] = useState<Record<string, ShareIndicatorState>>({})
   const [theaterMenuOpen, setTheaterMenuOpen] = useState(false)
   const [theaterMenuPosition, setTheaterMenuPosition] = useState<{ top: number; left: number } | undefined>()
   const [tableMenuOpen, setTableMenuOpen] = useState(false)
@@ -324,6 +343,7 @@ function App() {
   const [tableInsertSize, setTableInsertSize] = useState({ rows: 3, cols: 3 })
   const [appMenuOpen, setAppMenuOpen] = useState(false)
   const [appMenuPosition, setAppMenuPosition] = useState<{ top: number; left: number } | undefined>()
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false)
   const [projectPickerEntries, setProjectPickerEntries] = useState<ProjectEntry[]>([])
   const [storeLoading, setStoreLoading] = useState(false)
   const [toolbarState, setToolbarState] = useState<ToolbarState>(emptyToolbarState)
@@ -338,6 +358,7 @@ function App() {
   )
   const [activeBookmarkId, setActiveBookmarkId] = useState('')
   const [editorCueRefIds, setEditorCueRefIds] = useState<string[]>([])
+  const [currentEditorCueRefIds, setCurrentEditorCueRefIds] = useState<string[]>([])
 
   const markdownFiles = useMemo(() => flattenMarkdownFiles(project.scripts), [project.scripts])
   const activeFile = useMemo(() => findMarkdownNode(project.scripts, activePath), [activePath, project.scripts])
@@ -376,7 +397,7 @@ function App() {
   )
   const activePerformanceBlocks = isFullscreen && fullscreenBlocks.length > 0 ? fullscreenBlocks : performanceBlocks
   const currentBlock = activePerformanceBlocks[fullscreenIndex] ?? activePerformanceBlocks[0]
-  const currentScene = activeEditorSceneId || currentBlock?.sceneId
+  const currentScene = isFullscreen ? currentBlock?.sceneId ?? activeEditorSceneId : activeEditorSceneId
   const selectedNoteType =
     project.noteTypes.find((noteType) => noteType.id === selectedNoteTypeId) ?? defaultNoteType(project.noteTypes)
   const noteMenuTypes = useMemo(() => {
@@ -402,6 +423,7 @@ function App() {
   const selectedMediaPathRef = useRef(selectedMediaPath)
   const expandedPathsRef = useRef(expandedPaths)
   const leftTabRef = useRef(leftTab)
+  const appLifecycleStateRef = useRef<Record<string, unknown>>({})
   const cueDropActionsRef = useRef({
     insertExistingCue: (_cue: MediaCue, _position: number) => {},
     createCueFromAsset: (_asset: MediaAsset, _position: number) => {},
@@ -417,6 +439,21 @@ function App() {
   leftTabRef.current = leftTab
   activeCharactersRef.current = activeCharacters
   currentSceneRef.current = currentScene
+  appLifecycleStateRef.current = {
+    projectId: project.id,
+    activePath,
+    openTabs,
+    leftTab,
+    selectedScriptPath,
+    selectedMediaPath,
+    noteMode,
+    currentScene,
+  }
+
+  useEffect(() => {
+    diagnosticLog('app-mounted', appLifecycleStateRef.current)
+    return () => diagnosticLog('app-unmounted', appLifecycleStateRef.current)
+  }, [])
   const lastEditorSelectionRef = useRef<number | undefined>(undefined)
   const editorAudioRef = useRef<HTMLAudioElement | null>(null)
   const editorAudioTimersRef = useRef<number[]>([])
@@ -438,6 +475,10 @@ function App() {
   )
   const chipInspectorRef = useRef({ notes: fileNotes, cues: fileCues })
 
+  const setShareIndicatorForPath = useCallback((path: string, state: ShareIndicatorState) => {
+    setShareIndicators((current) => ({ ...current, [path]: state }))
+  }, [])
+
   const showStatus = useCallback((message: string, duration = 3600) => {
     setStorageStatus(message)
     setToastMessage(message)
@@ -450,7 +491,7 @@ function App() {
 
   const persistUiStateNow = useCallback((selection = lastEditorSelectionRef.current) => {
     if (!startupProjectReadyRef.current) return
-    savePersistedUiState({
+    const state = {
       projectId: projectRef.current.id,
       activePath: activePathRef.current,
       openTabs: openTabsRef.current,
@@ -459,8 +500,16 @@ function App() {
       expandedPaths: expandedPathsRef.current,
       leftTab: leftTabRef.current,
       editorSelection: selection,
-    })
+    }
+    savePersistedUiState(state)
+    diagnosticLog('ui-state-persisted', state)
   }, [])
+
+  const selectLeftTab = useCallback((nextTab: PersistedUiState['leftTab']) => {
+    leftTabRef.current = nextTab
+    setLeftTab(nextTab)
+    persistUiStateNow()
+  }, [persistUiStateNow])
 
   const saveProjectFolderQueued = useCallback((nextProject: Project) => {
     if (!desktopStorageReady || !startupProjectReady) return Promise.resolve<string | undefined>(undefined)
@@ -481,12 +530,11 @@ function App() {
   useEffect(() => {
     let active = true
     if (!user || !activeFile || activeAppDocument || !activeShareStoragePath) {
-      setShareIndicator({ status: 'disabled' })
       return undefined
     }
 
     const checkSharedFile = async () => {
-      setShareIndicator({ status: 'checking' })
+      setShareIndicatorForPath(activeFile.path, { status: 'checking' })
       try {
         const folderPath = `${user.id}/${project.id}`
         const fileName = `${slug(activeFile.path)}.json`
@@ -497,12 +545,12 @@ function App() {
         if (!active) return
         const shared = Boolean(data?.some((item) => item.name === fileName))
         const { data: publicUrlData } = supabase.storage.from(PUBLISHED_SCRIPT_BUCKET).getPublicUrl(activeShareStoragePath)
-        setShareIndicator(shared
+        setShareIndicatorForPath(activeFile.path, shared
           ? { status: 'shared', url: publicUrlData.publicUrl }
           : { status: 'not-shared' })
       } catch (error) {
         if (!active) return
-        setShareIndicator({
+        setShareIndicatorForPath(activeFile.path, {
           status: 'error',
           message: publishErrorMessage(error),
         })
@@ -513,7 +561,7 @@ function App() {
     return () => {
       active = false
     }
-  }, [activeAppDocument, activeFile, activeShareStoragePath, project.id, user])
+  }, [activeAppDocument, activeFile, activeShareStoragePath, project.id, setShareIndicatorForPath, user])
 
   useEffect(() => {
     const installedVersion = window.localStorage.getItem(INSTALLED_UPDATE_VERSION_KEY)
@@ -555,6 +603,19 @@ function App() {
   }, [fileCues, selectedCueId])
 
   useEffect(() => {
+    diagnosticLog('ui-selection-state', {
+      activePath,
+      openTabs,
+      leftTab,
+      selectedScriptPath,
+      selectedMediaPath,
+      selectedCueId,
+      noteMode,
+      currentScene,
+    })
+  }, [activePath, currentScene, leftTab, noteMode, openTabs, selectedCueId, selectedMediaPath, selectedScriptPath])
+
+  useEffect(() => {
     draftsRef.current = drafts
   }, [drafts])
 
@@ -578,7 +639,15 @@ function App() {
   ])
 
   useEffect(() => {
-    const persistBeforePageLifecycleChange = () => persistUiStateNow()
+    const persistBeforePageLifecycleChange = (event: Event) => {
+      diagnosticLog(`app-${event.type}`, {
+        visibilityState: document.visibilityState,
+        activePath: activePathRef.current,
+        openTabs: openTabsRef.current,
+        leftTab: leftTabRef.current,
+      })
+      persistUiStateNow()
+    }
     window.addEventListener('blur', persistBeforePageLifecycleChange)
     window.addEventListener('pagehide', persistBeforePageLifecycleChange)
     window.addEventListener('beforeunload', persistBeforePageLifecycleChange)
@@ -977,13 +1046,16 @@ function App() {
 
     const initializeProjectStorage = async () => {
       try {
+        diagnosticLog('project-storage-init-start')
         const path = await storage.projectFolderPath()
+        diagnosticLog('project-storage-current-path', { path })
         if (!cancelled) {
           setStorageStatus(path ? `Cartella progetto: ${compactPath(path)}` : 'Apertura ultimo progetto...')
         }
       } catch (error) {
         if (!cancelled) setStorageStatus(`Storage progetto non disponibile: ${String(error)}`)
       } finally {
+        diagnosticLog('project-storage-init-ready', { cancelled })
         if (!cancelled) setDesktopStorageReady(true)
       }
     }
@@ -999,14 +1071,24 @@ function App() {
     extensions: [StarterKit, linkExtension, tableExtensions, ScriptNote, ScriptDialogue, ScriptChip],
     content: markdownToHtml(activeMarkdown),
     onCreate({ editor: currentEditor }) {
+      diagnosticLog('editor-created', {
+        activePath: activePathRef.current,
+        selection: currentEditor.state.selection.from,
+      })
       setEditorMarkdown(editorJsonToMarkdown(currentEditor.getJSON()))
       syncToolbarState(currentEditor, setToolbarState)
       syncOutlineState(currentEditor, setActiveOutline, setActiveOutlineId)
       syncBookmarkState(currentEditor, setActiveBookmarks, setActiveBookmarkId)
       syncEditorSceneState(currentEditor, setActiveEditorSceneId)
       syncEditorCueRefs(currentEditor, setEditorCueRefIds)
+      syncEditorCueRefsAtSelection(currentEditor, setCurrentEditorCueRefIds)
     },
     onSelectionUpdate({ editor: currentEditor }) {
+      diagnosticLog('editor-selection-update', {
+        activePath: activePathRef.current,
+        selection: currentEditor.state.selection.from,
+        scene: editorSceneIdAtPosition(currentEditor.state.doc, currentEditor.state.selection.from),
+      })
       lastEditorSelectionRef.current = currentEditor.state.selection.from
       persistUiStateNow(currentEditor.state.selection.from)
       syncToolbarState(currentEditor, setToolbarState)
@@ -1014,8 +1096,14 @@ function App() {
       syncBookmarkState(currentEditor, setActiveBookmarks, setActiveBookmarkId)
       syncEditorSceneState(currentEditor, setActiveEditorSceneId)
       syncEditorCueRefs(currentEditor, setEditorCueRefIds)
+      syncEditorCueRefsAtSelection(currentEditor, setCurrentEditorCueRefIds)
     },
     onTransaction({ editor: currentEditor }) {
+      diagnosticLog('editor-transaction', {
+        activePath: activePathRef.current,
+        selection: currentEditor.state.selection.from,
+        docSize: currentEditor.state.doc.content.size,
+      })
       setEditorMarkdown((current) => {
         const next = editorJsonToMarkdown(currentEditor.getJSON())
         return current === next ? current : next
@@ -1025,6 +1113,7 @@ function App() {
       syncBookmarkState(currentEditor, setActiveBookmarks, setActiveBookmarkId)
       syncEditorSceneState(currentEditor, setActiveEditorSceneId)
       syncEditorCueRefs(currentEditor, setEditorCueRefIds)
+      syncEditorCueRefsAtSelection(currentEditor, setCurrentEditorCueRefIds)
     },
     editorProps: {
       attributes: {
@@ -1200,13 +1289,23 @@ function App() {
 
   const persistDraftsNow = useCallback(async () => {
     const currentDrafts = draftsWithCurrentEditorContent()
-    if (Object.keys(currentDrafts).length === 0) return projectRef.current
+    diagnosticLog('draft-persist-start', {
+      projectId: projectRef.current.id,
+      activePath: activePathRef.current,
+      draftPaths: Object.keys(currentDrafts),
+      openTabs: openTabsRef.current,
+    })
+    if (Object.keys(currentDrafts).length === 0) {
+      diagnosticLog('draft-persist-skipped', { reason: 'no-drafts' })
+      return projectRef.current
+    }
 
     const nextProject = applyDraftsToProject(projectRef.current, currentDrafts)
     projectRef.current = nextProject
     projectScriptsRef.current = nextProject.scripts
     setProject(nextProject)
     setDrafts({})
+    draftsRef.current = {}
     storage.save(nextProject)
 
     try {
@@ -1214,10 +1313,36 @@ function App() {
       if (path) setStorageStatus(`Cartella progetto salvata: ${compactPath(path)}`)
     } catch (error) {
       setStorageStatus(`Salvataggio progetto non riuscito: ${String(error)}`)
+      diagnosticLog('draft-persist-error', { message: String(error) })
     }
+
+    diagnosticLog('draft-persist-complete', {
+      projectId: nextProject.id,
+      activePath: activePathRef.current,
+      openTabs: openTabsRef.current,
+    })
 
     return nextProject
   }, [draftsWithCurrentEditorContent, saveProjectFolderQueued])
+
+  // During pagehide/beforeunload, network and Tauri IPC requests are not reliable.
+  // Keep a synchronous recovery copy so a reload cannot discard the current editor.
+  const persistDraftsSynchronously = useCallback(() => {
+    const currentDrafts = draftsWithCurrentEditorContent()
+    if (Object.keys(currentDrafts).length === 0) return projectRef.current
+
+    const nextProject = applyDraftsToProject(projectRef.current, currentDrafts)
+    projectRef.current = nextProject
+    projectScriptsRef.current = nextProject.scripts
+    storage.save(nextProject)
+    diagnosticLog('draft-persist-sync', {
+      projectId: nextProject.id,
+      activePath: activePathRef.current,
+      draftPaths: Object.keys(currentDrafts),
+      openTabs: openTabsRef.current,
+    })
+    return nextProject
+  }, [draftsWithCurrentEditorContent])
 
   const setCurrentBlockAsParagraph = () => {
     if (!editor) return
@@ -1275,6 +1400,8 @@ function App() {
         syncOutlineState(editor, setActiveOutline, setActiveOutlineId)
         syncBookmarkState(editor, setActiveBookmarks, setActiveBookmarkId)
         syncEditorSceneState(editor, setActiveEditorSceneId)
+        syncEditorCueRefs(editor, setEditorCueRefIds)
+        syncEditorCueRefsAtSelection(editor, setCurrentEditorCueRefIds)
       })
     }
 
@@ -1283,12 +1410,16 @@ function App() {
     editorElement.addEventListener('mouseup', syncAfterEditorEvent)
     editorElement.addEventListener('keyup', syncAfterEditorEvent)
     editorElement.addEventListener('focus', syncAfterEditorEvent)
+    editor.on('selectionUpdate', syncAfterEditorEvent)
+    editor.on('transaction', syncAfterEditorEvent)
 
     return () => {
       editorElement.removeEventListener('click', syncAfterEditorEvent)
       editorElement.removeEventListener('mouseup', syncAfterEditorEvent)
       editorElement.removeEventListener('keyup', syncAfterEditorEvent)
       editorElement.removeEventListener('focus', syncAfterEditorEvent)
+      editor.off('selectionUpdate', syncAfterEditorEvent)
+      editor.off('transaction', syncAfterEditorEvent)
     }
   }, [editor])
 
@@ -1322,6 +1453,8 @@ function App() {
       setActiveBookmarks([])
       setActiveBookmarkId('')
       setEditorCueRefIds([])
+      setCurrentEditorCueRefIds([])
+      setActiveEditorSceneId('')
       return
     }
 
@@ -1332,6 +1465,8 @@ function App() {
       syncOutlineState(editor, setActiveOutline, setActiveOutlineId)
       syncBookmarkState(editor, setActiveBookmarks, setActiveBookmarkId)
       syncEditorCueRefs(editor, setEditorCueRefIds)
+      syncEditorCueRefsAtSelection(editor, setCurrentEditorCueRefIds)
+      syncEditorSceneState(editor, setActiveEditorSceneId)
       return
     }
 
@@ -1343,6 +1478,8 @@ function App() {
       setActiveBookmarks([])
       setActiveBookmarkId('')
       setEditorCueRefIds([])
+      setCurrentEditorCueRefIds([])
+      setActiveEditorSceneId('')
       return
     }
 
@@ -1363,7 +1500,17 @@ function App() {
     syncOutlineState(editor, setActiveOutline, setActiveOutlineId)
     syncBookmarkState(editor, setActiveBookmarks, setActiveBookmarkId)
     syncEditorCueRefs(editor, setEditorCueRefIds)
+    syncEditorCueRefsAtSelection(editor, setCurrentEditorCueRefIds)
+    syncEditorSceneState(editor, setActiveEditorSceneId)
   }, [activeAppDocument, activeAppDocumentMarkdown, activeFilePath, activeStoreTab, editor, project.id])
+
+  useEffect(() => {
+    if (!editor || activeAppDocument || activeStoreTab || !activeFilePath) {
+      setActiveEditorSceneId('')
+      return
+    }
+    syncEditorSceneState(editor, setActiveEditorSceneId)
+  }, [activeAppDocument, activeFilePath, activeStoreTab, editor])
 
   useEffect(() => {
     if (!editor || !activeFilePath) return
@@ -1405,25 +1552,32 @@ function App() {
   useEffect(() => {
     if (!project.settings.autosave) return
 
-    const flushDrafts = () => {
-      void persistDraftsNow()
-    }
-
     const flushWhenHidden = () => {
-      if (document.visibilityState === 'hidden') flushDrafts()
+      if (document.visibilityState === 'hidden') void persistDraftsNow()
     }
 
-    window.addEventListener('blur', flushDrafts)
-    window.addEventListener('pagehide', flushDrafts)
-    window.addEventListener('beforeunload', flushDrafts)
     document.addEventListener('visibilitychange', flushWhenHidden)
     return () => {
-      window.removeEventListener('blur', flushDrafts)
-      window.removeEventListener('pagehide', flushDrafts)
-      window.removeEventListener('beforeunload', flushDrafts)
       document.removeEventListener('visibilitychange', flushWhenHidden)
     }
   }, [persistDraftsNow, project.settings.autosave])
+
+  useEffect(() => {
+    if (!project.settings.autosave) return
+
+    const persistOnPageExit = (event: Event) => {
+      if (event.type === 'pagehide' || event.type === 'beforeunload') {
+        persistDraftsSynchronously()
+      }
+    }
+
+    window.addEventListener('pagehide', persistOnPageExit)
+    window.addEventListener('beforeunload', persistOnPageExit)
+    return () => {
+      window.removeEventListener('pagehide', persistOnPageExit)
+      window.removeEventListener('beforeunload', persistOnPageExit)
+    }
+  }, [persistDraftsSynchronously, project.settings.autosave])
 
   useEffect(() => {
     if (!project.settings.autosave) return
@@ -1652,26 +1806,52 @@ function App() {
         ? savedUiState.selectedScriptPath
         : nextPath && !isAppDocumentPath(nextPath)
           ? nextPath
-          : markdownPaths[0] ?? '/copione'
+          : markdownPaths[0] ?? SCRIPT_ROOT_PATH
     const mediaPath =
       savedUiState?.selectedMediaPath && (savedUiState.selectedMediaPath === '/media' || findTreeNode(nextProject.media, savedUiState.selectedMediaPath))
         ? savedUiState.selectedMediaPath
         : nextProject.media[0]?.path ?? '/media'
+    diagnosticLog('project-activate', {
+      projectId: nextProject.id,
+      projectName: nextProject.name,
+      rootPath: nextProject.rootPath,
+      savedUiState: savedUiState
+        ? {
+            activePath: savedUiState.activePath,
+            openTabs: savedUiState.openTabs,
+            selectedScriptPath: savedUiState.selectedScriptPath,
+            selectedMediaPath: savedUiState.selectedMediaPath,
+            leftTab: savedUiState.leftTab,
+            editorSelection: savedUiState.editorSelection,
+          }
+        : undefined,
+      resolved: { activePath: nextPath, openTabs: validOpenTabs, scriptPath, mediaPath },
+    })
     const savedExpandedPaths =
-      savedUiState?.expandedPaths.filter((path) => path === '/copione' || path === '/media' || findTreeNode(nextProject.scripts, path) || findTreeNode(nextProject.media, path)) ?? []
+      savedUiState?.expandedPaths.filter((path) => path === SCRIPT_ROOT_PATH || path === '/media' || findTreeNode(nextProject.scripts, path) || findTreeNode(nextProject.media, path)) ?? []
     pendingEditorSelectionRef.current = savedUiState?.activePath === nextPath ? savedUiState.editorSelection : undefined
     setProject(nextProject)
     setDrafts({})
+    const resolvedOpenTabs = validOpenTabs.length > 0 ? validOpenTabs : nextPath ? [nextPath] : []
+    const resolvedExpandedPaths = uniqueValues([SCRIPT_ROOT_PATH, '/media', ...savedExpandedPaths, ...nextProject.media.map((asset) => asset.path)])
+    const resolvedLeftTab = savedUiState?.leftTab ?? leftTabRef.current
+    activePathRef.current = nextPath
+    openTabsRef.current = resolvedOpenTabs
+    selectedScriptPathRef.current = scriptPath
+    selectedMediaPathRef.current = mediaPath
+    expandedPathsRef.current = resolvedExpandedPaths
+    leftTabRef.current = resolvedLeftTab
     setActivePath(nextPath)
-    setOpenTabs(validOpenTabs.length > 0 ? validOpenTabs : nextPath ? [nextPath] : [])
+    setOpenTabs(resolvedOpenTabs)
     setSelectedScriptPath(scriptPath)
     setSelectedMediaPath(mediaPath)
-    setExpandedPaths(uniqueValues(['/copione', '/media', ...savedExpandedPaths, ...nextProject.media.map((asset) => asset.path)]))
-    if (savedUiState?.leftTab) setLeftTab(savedUiState.leftTab)
+    setExpandedPaths(resolvedExpandedPaths)
+    setLeftTab(resolvedLeftTab)
     setSelectedNoteId(nextProject.notes[0]?.id ?? '')
     setSelectedNoteTypeId(defaultNoteType(nextProject.noteTypes)?.id ?? '')
     setSelectedCueId(nextProject.cues[0]?.id ?? '')
     setSearch('')
+    setShareIndicators({})
     setFullscreenIndex(0)
     setExecutedCueIds([])
   }
@@ -1682,6 +1862,15 @@ function App() {
     let cancelled = false
 
     storage.openLastProjectFolder()
+      .then((opened) => {
+        diagnosticLog('open-last-project-result', {
+          cancelled,
+          found: Boolean(opened?.project),
+          path: opened?.path,
+          projectId: opened?.project?.id,
+        })
+        return opened
+      })
       .then((opened) => {
         if (cancelled) return
         if (opened?.project && isProject(opened.project)) {
@@ -1773,16 +1962,15 @@ function App() {
       return
     }
 
+    setProjectPickerOpen(true)
     storage.listProjectFolders()
       .then((entries) => {
-        if (entries.length > 0) {
-          setProjectPickerEntries(entries)
-          return
-        }
-
-        return openProjectFolder()
+        setProjectPickerEntries(entries)
       })
-      .catch((error) => setStorageStatus(`Apertura progetto non riuscita: ${String(error)}`))
+      .catch((error) => {
+        setProjectPickerEntries([])
+        setStorageStatus(`Elenco progetti non disponibile: ${String(error)}`)
+      })
   }
 
   const openProjectFolder = (path?: string) =>
@@ -1844,25 +2032,75 @@ function App() {
   }
 
   const openMarkdownTab = (path: string) => {
-    setOpenTabs((current) => (current.includes(path) ? current : [...current, path]))
+    diagnosticLog('tab-open-script', { path, previousActivePath: activePathRef.current, openTabs: openTabsRef.current })
+    const nextTabs = openTabsRef.current.includes(path) ? openTabsRef.current : [...openTabsRef.current, path]
+    openTabsRef.current = nextTabs
+    activePathRef.current = path
+    selectedScriptPathRef.current = path
+    setOpenTabs(nextTabs)
     setActivePath(path)
     setSelectedScriptPath(path)
+    persistUiStateNow()
   }
 
   const openAppDocumentTab = (path: string) => {
     if (!isAppDocumentPath(path)) return
-    setOpenTabs((current) => (current.includes(path) ? current : [...current, path]))
+    diagnosticLog('tab-open-document', { path, previousActivePath: activePathRef.current, openTabs: openTabsRef.current })
+    const nextTabs = openTabsRef.current.includes(path) ? openTabsRef.current : [...openTabsRef.current, path]
+    openTabsRef.current = nextTabs
+    activePathRef.current = path
+    setOpenTabs(nextTabs)
     setActivePath(path)
+    persistUiStateNow()
   }
 
   const openStoreTab = () => {
+    diagnosticLog('tab-open-store', { previousActivePath: activePathRef.current, openTabs: openTabsRef.current })
+    setProjectPickerOpen(false)
     setProjectPickerEntries([])
     setStoreLoading(true)
-    setOpenTabs((current) => (current.includes(STORE_TAB_PATH) ? current : [...current, STORE_TAB_PATH]))
+    const nextTabs = openTabsRef.current.includes(STORE_TAB_PATH) ? openTabsRef.current : [...openTabsRef.current, STORE_TAB_PATH]
+    openTabsRef.current = nextTabs
+    activePathRef.current = STORE_TAB_PATH
+    setOpenTabs(nextTabs)
     setActivePath(STORE_TAB_PATH)
+    persistUiStateNow()
   }
 
+  const updateFileTabOverflow = () => {
+    const element = fileTabbarRef.current
+    if (!element) return
+    const maxScroll = Math.max(0, element.scrollWidth - element.clientWidth)
+    setFileTabOverflow({
+      left: element.scrollLeft > 1,
+      right: element.scrollLeft < maxScroll - 1,
+    })
+  }
+
+  const scrollFileTabs = (direction: -1 | 1) => {
+    fileTabbarRef.current?.scrollBy({
+      left: direction * Math.max(180, fileTabbarRef.current.clientWidth * 0.7),
+      behavior: 'smooth',
+    })
+  }
+
+  useEffect(() => {
+    const element = fileTabbarRef.current
+    if (!element) return
+
+    updateFileTabOverflow()
+    element.addEventListener('scroll', updateFileTabOverflow, { passive: true })
+    const observer = new ResizeObserver(updateFileTabOverflow)
+    observer.observe(element)
+
+    return () => {
+      element.removeEventListener('scroll', updateFileTabOverflow)
+      observer.disconnect()
+    }
+  }, [activePath, openTabs, project.scripts, storeLoading])
+
   const closeMarkdownTab = (path: string) => {
+    diagnosticLog('tab-close-request', { path, activePath: activePathRef.current, openTabs: openTabsRef.current })
     const tabFile = findMarkdownNode(project.scripts, path)
     if (
       scriptPathHasUnsavedChanges(path) &&
@@ -1873,16 +2111,24 @@ function App() {
 
     if (scriptPathHasUnsavedChanges(path)) discardUnsavedPath(path)
 
-    setOpenTabs((current) => {
-      const nextTabs = current.filter((item) => item !== path)
-      if (activePath === path) {
-        const closedIndex = current.indexOf(path)
-        const fallbackPath = nextTabs[Math.max(0, closedIndex - 1)] ?? nextTabs[0] ?? ''
-        setActivePath(fallbackPath)
-        if (fallbackPath && !isAppDocumentPath(fallbackPath) && fallbackPath !== STORE_TAB_PATH) setSelectedScriptPath(fallbackPath)
+    const currentTabs = openTabsRef.current
+    const nextTabs = currentTabs.filter((item) => item !== path)
+    let nextActivePath = activePathRef.current
+    let nextSelectedScriptPath = selectedScriptPathRef.current
+    if (nextActivePath === path) {
+      const closedIndex = currentTabs.indexOf(path)
+      nextActivePath = nextTabs[Math.max(0, closedIndex - 1)] ?? nextTabs[0] ?? ''
+      if (nextActivePath && !isAppDocumentPath(nextActivePath) && nextActivePath !== STORE_TAB_PATH) {
+        nextSelectedScriptPath = nextActivePath
       }
-      return nextTabs
-    })
+    }
+    openTabsRef.current = nextTabs
+    activePathRef.current = nextActivePath
+    selectedScriptPathRef.current = nextSelectedScriptPath
+    setOpenTabs(nextTabs)
+    setActivePath(nextActivePath)
+    setSelectedScriptPath(nextSelectedScriptPath)
+    persistUiStateNow()
   }
 
   const buildActiveExtendedMarkdown = () => {
@@ -1907,7 +2153,7 @@ function App() {
 
   const createFileWithName = (name: string) => {
     const safeName = name.endsWith('.md') ? name : `${name}.md`
-    const folderPath = selectedScriptNode?.kind === 'folder' ? selectedScriptNode.path : parentPath(selectedScriptPath) || '/copione'
+    const folderPath = selectedScriptNode?.kind === 'folder' ? selectedScriptNode.path : parentPath(selectedScriptPath) || SCRIPT_ROOT_PATH
     const path = childPath(folderPath, safeName)
     const file: ProjectTreeNode = {
       id: crypto.randomUUID(),
@@ -1935,7 +2181,7 @@ function App() {
   }
 
   const createFolderWithName = (name: string) => {
-    const folderPath = selectedScriptNode?.kind === 'folder' ? selectedScriptNode.path : parentPath(selectedScriptPath) || '/copione'
+    const folderPath = selectedScriptNode?.kind === 'folder' ? selectedScriptNode.path : parentPath(selectedScriptPath) || SCRIPT_ROOT_PATH
     const folder: ProjectTreeNode = {
       id: crypto.randomUUID(),
       name,
@@ -1950,7 +2196,7 @@ function App() {
   }
 
   const renameSelectedScriptNode = () => {
-    if (!selectedScriptNode || selectedScriptNode.path === '/copione') return
+    if (!selectedScriptNode || selectedScriptNode.path === SCRIPT_ROOT_PATH) return
     setScriptDialog({
       kind: 'rename',
       title: 'Rinomina selezione',
@@ -1963,8 +2209,8 @@ function App() {
 
   const renameScriptNodeWithName = (targetPath: string, name: string) => {
     const nodeToRename = findTreeNode(project.scripts, targetPath)
-    if (!nodeToRename || nodeToRename.path === '/copione') return
-    const nextPath = childPath(parentPath(nodeToRename.path) || '/copione', name)
+    if (!nodeToRename || nodeToRename.path === SCRIPT_ROOT_PATH) return
+    const nextPath = childPath(parentPath(nodeToRename.path) || SCRIPT_ROOT_PATH, name)
     persistProject({
       ...project,
       scripts: updateTreeNode(project.scripts, nodeToRename.path, (node) =>
@@ -1986,7 +2232,7 @@ function App() {
   }
 
   const deleteSelectedScriptNode = () => {
-    if (!selectedScriptNode || selectedScriptNode.path === '/copione') {
+    if (!selectedScriptNode || selectedScriptNode.path === SCRIPT_ROOT_PATH) {
       return
     }
 
@@ -2005,7 +2251,7 @@ function App() {
 
   const deleteScriptNodeConfirmed = (targetPath: string) => {
     const nodeToDelete = findTreeNode(project.scripts, targetPath)
-    if (!nodeToDelete || nodeToDelete.path === '/copione') {
+    if (!nodeToDelete || nodeToDelete.path === SCRIPT_ROOT_PATH) {
       return
     }
 
@@ -2016,7 +2262,7 @@ function App() {
         : activePath
     persistProject({ ...project, scripts })
     setActivePath(nextPath)
-    setSelectedScriptPath(nextPath || '/copione')
+    setSelectedScriptPath(nextPath || SCRIPT_ROOT_PATH)
     setOpenTabs((current) => {
       const nextTabs = current.filter((path) => path !== nodeToDelete.path && !path.startsWith(`${nodeToDelete.path}/`))
       return nextPath && !nextTabs.includes(nextPath) ? [nextPath, ...nextTabs] : nextTabs
@@ -2025,12 +2271,64 @@ function App() {
   }
 
   const duplicateSelectedScriptNode = () => {
-    if (!selectedScriptNode || selectedScriptNode.path === '/copione') return
-    const parent = parentPath(selectedScriptNode.path) || '/copione'
+    if (!selectedScriptNode || selectedScriptNode.path === SCRIPT_ROOT_PATH) return
+    const parent = parentPath(selectedScriptNode.path) || SCRIPT_ROOT_PATH
     const copyName = duplicateName(selectedScriptNode.name)
-    const copy = cloneTreeNode(selectedScriptNode, childPath(parent, copyName), copyName)
+    const copyPath = childPath(parent, copyName)
+    let copy = cloneTreeNode(selectedScriptNode, copyPath, copyName)
+    const sourceFiles = flattenMarkdownFiles([selectedScriptNode])
+    const copiedFiles = flattenMarkdownFiles([copy])
+    const copiedNotes: DirectorNote[] = []
+    const copiedCues: MediaCue[] = []
+
+    for (const sourceFile of sourceFiles) {
+      const targetPath = sourceFile.path === selectedScriptNode.path
+        ? copyPath
+        : sourceFile.path.replace(`${selectedScriptNode.path}/`, `${copyPath}/`)
+      const targetFile = copiedFiles.find((file) => file.path === targetPath)
+      if (!targetFile) continue
+
+      const noteIds = new Map<string, string>()
+      for (const note of project.notes.filter((item) => item.filePath === sourceFile.path)) {
+        const id = duplicateScriptEntityId(note.id)
+        noteIds.set(note.id, id)
+        copiedNotes.push({
+          ...note,
+          id,
+          filePath: targetPath,
+          anchorId: duplicateScriptEntityId(note.anchorId),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+      }
+
+      const cueIds = new Map<string, string>()
+      for (const cue of project.cues.filter((item) => item.filePath === sourceFile.path)) {
+        const id = duplicateScriptEntityId(cue.id)
+        cueIds.set(cue.id, id)
+        copiedCues.push({
+          ...cue,
+          id,
+          filePath: targetPath,
+          anchorId: duplicateScriptEntityId(cue.anchorId),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+      }
+
+      const sourceContent = draftsRef.current[sourceFile.path] ?? sourceFile.content ?? ''
+      const content = remapScriptReferenceIds(sourceContent, noteIds, cueIds)
+      copy = updateTreeNode([copy], targetPath, (node) => ({ ...node, content, dirty: false }))[0]
+    }
+
     const scripts = insertTreeChild(project.scripts, parent, copy)
-    persistProject({ ...project, scripts })
+    const nextProject = {
+      ...project,
+      scripts,
+      notes: [...project.notes, ...copiedNotes],
+      cues: [...project.cues, ...copiedCues],
+    }
+    persistProject(nextProject)
     setSelectedScriptPath(copy.path)
     if (copy.kind === 'markdown') openMarkdownTab(copy.path)
     expandPath(parent)
@@ -2799,20 +3097,54 @@ function App() {
     createCueFromAsset: (asset, position) => insertCue(asset, position),
   }
 
-  const sceneCueIds = new Set(currentScene ? fileCues.filter((cue) => cue.sceneId === currentScene).map((cue) => cue.id) : [])
-  const filteredCues = fileCues
-    .filter((cue) => {
-      if (noteMode === 'all') return true
-      if (noteMode === 'scene') return currentScene ? cue.sceneId === currentScene : false
-      if (!currentScene || sceneCueIds.size === 0) return true
-      return sceneCueIds.has(cue.id)
-    })
-    .filter((cue) => (search ? `${cue.title} ${cue.src} ${cue.description}`.toLowerCase().includes(search.toLowerCase()) : true))
+  const filteredCues = useMemo(
+    () => fileCues
+      .filter((cue) => {
+        if (noteMode === 'all') return true
+        if (noteMode === 'scene') return currentScene ? sceneIdsMatch(cue.sceneId, currentScene) : false
+        return currentEditorCueRefIds.includes(cue.id)
+      })
+      .filter((cue) => (search ? `${cue.title} ${cue.src} ${cue.description}`.toLowerCase().includes(search.toLowerCase()) : true)),
+    [currentEditorCueRefIds, currentScene, fileCues, noteMode, search],
+  )
 
   useEffect(() => {
-    if (filteredCues.length === 0 || filteredCues.some((cue) => cue.id === selectedCueId)) return
-    setSelectedCueId(filteredCues[0].id)
+    if (filteredCues.length === 0) {
+      setCuePage(0)
+      return
+    }
+
+    const selectedIndex = filteredCues.findIndex((cue) => cue.id === selectedCueId)
+    if (selectedIndex < 0) {
+      setSelectedCueId(filteredCues[0].id)
+      setCuePage(0)
+      return
+    }
+
+    const selectedPage = Math.floor(selectedIndex / CUE_PAGE_SIZE)
+    if (selectedPage !== cuePageRef.current) setCuePage(selectedPage)
   }, [filteredCues, selectedCueId])
+
+  const cuePageCount = Math.max(1, Math.ceil(filteredCues.length / CUE_PAGE_SIZE))
+  const cuePageStart = Math.min(cuePage, cuePageCount - 1) * CUE_PAGE_SIZE
+  const paginatedCues = filteredCues.slice(cuePageStart, cuePageStart + CUE_PAGE_SIZE)
+
+  useEffect(() => {
+    setCuePage(0)
+  }, [activePath, currentScene, noteMode, search])
+
+  useEffect(() => {
+    diagnosticLog('cue-filter-state', {
+      activePath,
+      mode: noteMode,
+      currentScene,
+      fileCueIds: fileCues.map((cue) => cue.id),
+      fileCueScenes: fileCues.map((cue) => ({ id: cue.id, sceneId: cue.sceneId })),
+      contextualCueIds: currentEditorCueRefIds,
+      filteredCueIds: filteredCues.map((cue) => cue.id),
+      selectedCueId,
+    })
+  }, [activePath, currentEditorCueRefIds, currentScene, fileCues, filteredCues, noteMode, selectedCueId])
 
   const visibleSelectedCue = filteredCues.find((cue) => cue.id === selectedCueId)
   const visibleSelectedCueAsset = visibleSelectedCue ? findTreeNode(project.media, visibleSelectedCue.src) : undefined
@@ -2821,7 +3153,7 @@ function App() {
     try {
       const markdown = buildActiveExtendedMarkdown() ?? ''
       await persistDraftsNow()
-      const baseName = stripMarkdownExtension(activeFile?.name ?? 'copione')
+    const baseName = stripMarkdownExtension(activeFile?.name ?? 'la locandiera')
       const fileName = mode === 'clean' ? `${baseName}.pulito.pdf` : `${baseName}.completo.pdf`
       const title = mode === 'clean' ? `${baseName} - pulito` : `${baseName} - completo`
       const result = await downloadPdf(fileName, markdown, title, mode)
@@ -2851,7 +3183,12 @@ function App() {
     setTheaterMenuOpen(false)
     setTheaterMenuPosition(undefined)
     setPublishDialogOpen(true)
-    setPublishState((current) => current.status === 'idle' ? current : { ...current, error: undefined })
+    const shareState = activeFile ? shareIndicators[activeFile.path] : undefined
+    setPublishState(
+      shareState?.status === 'shared' && shareState.url
+        ? { status: 'published', url: shareState.url, storagePath: activeShareStoragePath }
+        : { status: 'idle' },
+    )
   }
 
   const publishScriptJson = async (mode: 'publish' | 'update' = 'publish') => {
@@ -2892,11 +3229,12 @@ function App() {
         storagePath,
         publishedAt: payload.publishedAt,
       })
-      setShareIndicator({ status: 'shared', url })
-      showStatus(mode === 'update' ? 'Condivisione aggiornata' : 'Copione condiviso')
+      setShareIndicatorForPath(activeFile.path, { status: 'shared', url })
+      showStatus(mode === 'update' ? 'Condivisione aggiornata' : 'File condiviso')
     } catch (error) {
       const message = publishErrorMessage(error)
       setPublishState((current) => ({ ...current, status: 'error', error: message }))
+      setShareIndicatorForPath(activeFile.path, { status: 'error', message })
       showStatus(`Condivisione non riuscita: ${message}`, 12000)
     }
   }
@@ -2909,11 +3247,12 @@ function App() {
       const { error } = await supabase.storage.from(PUBLISHED_SCRIPT_BUCKET).remove([storagePath])
       if (error) throw error
       setPublishState({ status: 'idle' })
-      setShareIndicator({ status: 'not-shared' })
+      setShareIndicatorForPath(activeFile.path, { status: 'not-shared' })
       showStatus('Condivisione interrotta')
     } catch (error) {
       const message = publishErrorMessage(error)
       setPublishState((current) => ({ ...current, status: 'error', error: message }))
+      setShareIndicatorForPath(activeFile.path, { status: 'error', message })
       showStatus(`Interruzione condivisione non riuscita: ${message}`, 12000)
     }
   }
@@ -2984,7 +3323,6 @@ function App() {
           <h1>{project.name}</h1>
           <div className="topbar-meta">
             <p className="storage-status">{storageStatus}</p>
-            <ShareStatusIndicator state={shareIndicator} />
           </div>
         </div>
         <div className="topbar-actions">
@@ -3103,7 +3441,7 @@ function App() {
               className={leftTab === 'outline' ? 'active' : ''}
               title="Indice documento"
               aria-label="Indice documento"
-              onClick={() => setLeftTab('outline')}
+              onClick={() => selectLeftTab('outline')}
             >
               <ListTree size={16} />
               <span className="sr-only">Indice documento</span>
@@ -3113,7 +3451,7 @@ function App() {
               className={leftTab === 'script' ? 'active' : ''}
               title="Copioni"
               aria-label="Copioni"
-              onClick={() => setLeftTab('script')}
+              onClick={() => selectLeftTab('script')}
             >
               <BookOpen size={16} />
               <span className="sr-only">Copioni</span>
@@ -3123,7 +3461,7 @@ function App() {
               className={leftTab === 'media' ? 'active' : ''}
               title="Media"
               aria-label="Media"
-              onClick={() => setLeftTab('media')}
+              onClick={() => selectLeftTab('media')}
             >
               <Images size={16} />
               <span className="sr-only">Media</span>
@@ -3133,7 +3471,7 @@ function App() {
               className={leftTab === 'bookmarks' ? 'active' : ''}
               title="Bookmark"
               aria-label="Bookmark"
-              onClick={() => setLeftTab('bookmarks')}
+              onClick={() => selectLeftTab('bookmarks')}
             >
               <Bookmark size={16} />
               <span className="sr-only">Bookmark</span>
@@ -3248,50 +3586,78 @@ function App() {
         </aside>
 
         <section className="editor-column">
-          <div className="file-tabbar">
-            {openTabs.length > 0 ? (
-              openTabs.map((path) => {
-                const tabFile = findMarkdownNode(project.scripts, path)
-                const isStoreTab = path === STORE_TAB_PATH
-                const tabTitle = tabFile?.name ?? getAppDocument(path)?.title ?? (isStoreTab ? 'Store' : path.split('/').pop())
-                return (
-                  <button
-                    type="button"
-                    key={path}
-                    className={path === activePath ? fileTabClass(tabFile, true, isAppDocumentPath(path) || isStoreTab) : fileTabClass(tabFile, false, isAppDocumentPath(path) || isStoreTab)}
-                    onClick={() => {
-                      setActivePath(path)
-                      if (!isAppDocumentPath(path) && !isStoreTab) setSelectedScriptPath(path)
-                    }}
-                  >
-                    {isStoreTab && storeLoading ? <RefreshCw size={13} className="file-tab-loading spin-icon" aria-hidden="true" /> : null}
-                    <span className="file-tab-name">{tabTitle}</span>
-                    {tabFile?.dirty ? <span className="dirty-dot" aria-label="modificato" /> : null}
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      className="file-tab-close"
-                      aria-label={`Chiudi ${tabTitle}`}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        closeMarkdownTab(path)
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault()
-                          event.stopPropagation()
-                          closeMarkdownTab(path)
-                        }
+          <div className="file-tabbar-shell">
+            {fileTabOverflow.left ? (
+              <button
+                type="button"
+                className="file-tab-scroll-button file-tab-scroll-button-left"
+                aria-label="Mostra tab precedenti"
+                title="Mostra tab precedenti"
+                onClick={() => scrollFileTabs(-1)}
+              >
+                <ChevronLeft size={15} />
+              </button>
+            ) : null}
+            <div className="file-tabbar" ref={fileTabbarRef}>
+              {openTabs.length > 0 ? (
+                openTabs.map((path) => {
+                  const tabFile = findMarkdownNode(project.scripts, path)
+                  const isStoreTab = path === STORE_TAB_PATH
+                  const tabTitle = tabFile?.name ?? getAppDocument(path)?.title ?? (isStoreTab ? 'Store' : path.split('/').pop())
+                  return (
+                    <button
+                      type="button"
+                      key={path}
+                      className={path === activePath ? fileTabClass(tabFile, true, isAppDocumentPath(path) || isStoreTab) : fileTabClass(tabFile, false, isAppDocumentPath(path) || isStoreTab)}
+                      onClick={() => {
+                        activePathRef.current = path
+                        if (!isAppDocumentPath(path) && !isStoreTab) selectedScriptPathRef.current = path
+                        setActivePath(path)
+                        if (!isAppDocumentPath(path) && !isStoreTab) setSelectedScriptPath(path)
+                        persistUiStateNow()
                       }}
                     >
-                      <X size={13} />
-                    </span>
-                  </button>
-                )
-              })
-            ) : (
-              <button type="button" className="file-tab active">Nessun file</button>
-            )}
+                      {isStoreTab && storeLoading ? <RefreshCw size={13} className="file-tab-loading spin-icon" aria-hidden="true" /> : null}
+                      <span className="file-tab-name">{stripMarkdownExtension(tabTitle ?? '')}</span>
+                      {tabFile ? <ShareStatusIndicator state={shareIndicators[path] ?? { status: 'disabled' }} /> : null}
+                      {tabFile?.dirty ? <span className="dirty-dot" aria-label="modificato" /> : null}
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        className="file-tab-close"
+                        aria-label={`Chiudi ${tabTitle}`}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          closeMarkdownTab(path)
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            closeMarkdownTab(path)
+                          }
+                        }}
+                      >
+                        <X size={13} />
+                      </span>
+                    </button>
+                  )
+                })
+              ) : (
+                <button type="button" className="file-tab active">Nessun file</button>
+              )}
+            </div>
+            {fileTabOverflow.right ? (
+              <button
+                type="button"
+                className="file-tab-scroll-button file-tab-scroll-button-right"
+                aria-label="Mostra tab successivi"
+                title="Mostra tab successivi"
+                onClick={() => scrollFileTabs(1)}
+              >
+                <ChevronRight size={15} />
+              </button>
+            ) : null}
           </div>
           {activeStoreTab ? (
             <div className="store-tab-view" data-loading={storeLoading}>
@@ -3731,7 +4097,7 @@ function App() {
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cerca cue" />
           </label>
           <div className="note-list">
-            {filteredCues.map((cue) => (
+            {paginatedCues.map((cue) => (
               <button
                 type="button"
                 key={cue.id}
@@ -3764,6 +4130,33 @@ function App() {
               </button>
             ))}
           </div>
+          {cuePageCount > 1 ? (
+            <div className="cue-pagination" aria-label="Paginazione cue">
+              <span>{cuePageStart + 1}-{Math.min(cuePageStart + CUE_PAGE_SIZE, filteredCues.length)} di {filteredCues.length}</span>
+              <div className="cue-pagination-actions">
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Cue precedenti"
+                  title="Cue precedenti"
+                  disabled={cuePage === 0}
+                  onClick={() => setCuePage((current) => Math.max(0, current - 1))}
+                >
+                  <ChevronLeft size={15} />
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Cue successivi"
+                  title="Cue successivi"
+                  disabled={cuePage >= cuePageCount - 1}
+                  onClick={() => setCuePage((current) => Math.min(cuePageCount - 1, current + 1))}
+                >
+                  <ChevronRight size={15} />
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {visibleSelectedCue ? (
             <section className="note-editor cue-editor">
@@ -3839,7 +4232,9 @@ function App() {
             </section>
           ) : (
             <p className="empty-state">
-              {filteredCues.length === 0 ? 'Nessun cue nel filtro corrente.' : 'Nessun cue selezionato.'}
+              {filteredCues.length === 0
+                ? noteMode === 'context' ? 'Nessun cue contestuale nel blocco corrente.' : 'Nessun cue nel filtro corrente.'
+                : 'Nessun cue selezionato.'}
             </p>
           )}
         </aside>
@@ -3852,12 +4247,16 @@ function App() {
           onConfirm={submitScriptDialog}
         />
       ) : null}
-      {projectPickerEntries.length > 0 ? (
+      {projectPickerOpen ? (
         <ProjectPickerModal
           entries={projectPickerEntries}
-          onCancel={() => setProjectPickerEntries([])}
+          onCancel={() => {
+            setProjectPickerOpen(false)
+            setProjectPickerEntries([])
+          }}
           onImport={openStoreTab}
           onOpen={(entry) => {
+            setProjectPickerOpen(false)
             setProjectPickerEntries([])
             void openProjectFolder(entry.path)
           }}
@@ -3995,8 +4394,8 @@ function PublishScriptModal({
         <div className="publish-modal-header">
           <div>
             <span className="publish-kicker">StageDesk Share</span>
-            <h2 id="publish-script-title">Condividi copione</h2>
-            <p>Prepara il copione per le app attori con personaggi, scene e battute del file attivo.</p>
+            <h2 id="publish-script-title">Condividi file</h2>
+            <p>Prepara il file attivo per le app attori con personaggi, scene e battute.</p>
           </div>
           <button type="button" className="publish-close" aria-label="Chiudi" onClick={onClose}>
             <X size={16} />
@@ -4014,10 +4413,10 @@ function PublishScriptModal({
             <span>
               {state.status === 'published' && state.publishedAt
                 ? `Ultima versione: ${formatDateTime(state.publishedAt)}`
-                : state.status === 'error'
+              : state.status === 'error'
                   ? state.error
               : state.status === 'idle'
-                ? 'Il copione non risulta condiviso in questa sessione.'
+                ? 'Il file non risulta condiviso in questa sessione.'
                 : 'Attendere il completamento dell’operazione.'}
             </span>
           </div>
@@ -4200,6 +4599,19 @@ function ProjectPickerModal({
   useEffect(() => {
     if (page >= pageCount) setPage(pageCount - 1)
   }, [page, pageCount])
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (renameEntry) return
+      if (openMenuPath) {
+        setOpenMenuPath('')
+        return
+      }
+      onCancel()
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [onCancel, openMenuPath, renameEntry])
   const submitRename = () => {
     if (!renameEntry) return
     onRename(renameEntry, renameValue)
@@ -4214,7 +4626,13 @@ function ProjectPickerModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="project-picker-title"
-        onMouseDown={(event) => event.stopPropagation()}
+        onMouseDown={(event) => {
+          const target = event.target
+          if (target instanceof Element && !target.closest('.project-picker-menu, .project-picker-more')) {
+            setOpenMenuPath('')
+          }
+          event.stopPropagation()
+        }}
       >
         <div className="project-picker-header">
           <h2 id="project-picker-title">Apri progetto</h2>
@@ -4230,7 +4648,7 @@ function ProjectPickerModal({
         </label>
         <div className="project-picker-list">
           {pageEntries.map((entry) => (
-            <div className="project-picker-row" key={entry.path}>
+            <div className={`project-picker-row${openMenuPath === entry.path ? ' menu-open' : ''}`} key={entry.path}>
               <button type="button" className="project-picker-open" onClick={() => onOpen(entry)}>
                 <FolderOpen size={15} />
                 <span>
@@ -4382,8 +4800,8 @@ function DocumentOutlineTree({
   if (items.length === 0) return <p className="empty-state">Nessun titolo nel file attivo.</p>
 
   return (
-    <div className="document-outline" aria-label={`Indice di ${activeFileName}`}>
-      <div className="outline-file-name">{activeFileName}</div>
+    <div className="document-outline" aria-label={`Indice di ${stripMarkdownExtension(activeFileName)}`}>
+      <div className="outline-file-name">{stripMarkdownExtension(activeFileName)}</div>
       <ul className="tree outline-tree">
         {items.map((item) => (
           <li key={item.id}>
@@ -4418,8 +4836,8 @@ function BookmarkTree({
   if (items.length === 0) return <p className="empty-state">Nessun bookmark nel file attivo.</p>
 
   return (
-    <div className="document-outline" aria-label={`Bookmark di ${activeFileName}`}>
-      <div className="outline-file-name">{activeFileName}</div>
+    <div className="document-outline" aria-label={`Bookmark di ${stripMarkdownExtension(activeFileName)}`}>
+      <div className="outline-file-name">{stripMarkdownExtension(activeFileName)}</div>
       <ul className="tree outline-tree bookmark-tree">
         {items.map((item) => (
           <li key={item.id}>
@@ -4477,7 +4895,7 @@ function ScriptExplorerTree({
               <span className="node-icon" aria-hidden="true">
                 {isFolder ? <Folder size={15} /> : <FileText size={15} />}
               </span>
-              <span className="node-name">{node.name}</span>
+              <span className="node-name">{node.kind === 'markdown' ? stripMarkdownExtension(node.name) : node.name}</span>
               {node.dirty ? <em>modificato</em> : null}
             </button>
             {node.children && isExpanded ? (
@@ -4713,20 +5131,31 @@ function PreviewMediaControls({
   const [status, setStatus] = useState('Anteprima pronta')
   const isNativeAudio = shouldUseNativeAudioPlayback() && isAudioCue(cue)
   const label = cue.title || cue.src
+  const previewLifecycleRef = useRef({ cue, isNativeAudio, previewId: previewIdRef.current })
+  previewLifecycleRef.current = { cue, isNativeAudio, previewId: previewIdRef.current }
 
   const setPreviewStatus = useCallback((message: string) => {
     setStatus(message)
     onStatus(message)
   }, [onStatus])
 
-  const stopPreview = useCallback((silent = false, updateState = true) => {
-    playbackLog('preview', 'stop-requested', cue, { silent, updateState, backend: playbackBackendName(isNativeAudio) })
+  const stopPreview = useCallback((silent = false, updateState = true, reason: PreviewStopReason = 'user') => {
+    const media = cue.type === 'video' ? videoRef.current : audioRef.current
+    const hasActivePlayback = previewOwnsNativeAudioRef.current || Boolean(media && !media.paused)
+    if (reason !== 'global-playback-switch' || state !== 'idle' || hasActivePlayback) {
+      playbackLog('preview', reason === 'component-unmount' ? 'cleanup-stop' : 'stop-requested', cue, {
+        silent,
+        updateState,
+        reason,
+        previewId: previewIdRef.current,
+        backend: playbackBackendName(isNativeAudio),
+      })
+    }
     clearAudioTimers(timersRef)
     if (isNativeAudio && previewOwnsNativeAudioRef.current) {
       previewOwnsNativeAudioRef.current = false
       void stopNativeAudioAsset()
     }
-    const media = cue.type === 'video' ? videoRef.current : audioRef.current
     if (media) {
       media.onended = null
       media.pause()
@@ -4740,7 +5169,7 @@ function PreviewMediaControls({
       setState('idle')
       if (!silent) setPreviewStatus(`Anteprima fermata: ${label}`)
     }
-  }, [cue, isNativeAudio, label, setPreviewStatus])
+  }, [cue, isNativeAudio, label, setPreviewStatus, state])
   const stopPreviewRef = useRef(stopPreview)
 
   useEffect(() => {
@@ -4766,10 +5195,24 @@ function PreviewMediaControls({
   }, [cue, isNativeAudio, label, setPreviewStatus])
 
   useEffect(() => {
+    const mounted = previewLifecycleRef.current
+    playbackLog('preview', 'mounted', mounted.cue, {
+      previewId: mounted.previewId,
+      backend: playbackBackendName(mounted.isNativeAudio),
+    })
+    return () => {
+      playbackLog('preview', 'unmounted', mounted.cue, {
+        previewId: mounted.previewId,
+        backend: playbackBackendName(mounted.isNativeAudio),
+      })
+    }
+  }, [])
+
+  useEffect(() => {
     const stopOnGlobalRequest = (event: Event) => {
       const detail = (event as CustomEvent<StopPreviewPlaybackDetail>).detail
       if (detail?.sourceId === previewIdRef.current) return
-      stopPreviewRef.current(true)
+      stopPreviewRef.current(true, true, 'global-playback-switch')
     }
     window.addEventListener(STOP_PREVIEW_PLAYBACK_EVENT, stopOnGlobalRequest)
     return () => {
@@ -4779,7 +5222,7 @@ function PreviewMediaControls({
 
   useEffect(() => {
     return () => {
-      stopPreviewRef.current(true, false)
+      stopPreviewRef.current(true, false, 'component-unmount')
     }
   }, [assetUrl, cue.id])
 
@@ -5207,6 +5650,37 @@ const cloneTreeNode = <T extends TreeItem<T>>(node: T, path: string, name: strin
     path,
     children: node.children ? cloneChildren(node.children, node.path, path) : undefined,
   }
+}
+
+const duplicateScriptEntityId = (id: string) => `${id}-copy-${crypto.randomUUID().slice(0, 8)}`
+
+const remapScriptReferenceIds = (
+  markdown: string,
+  noteIds: Map<string, string>,
+  cueIds: Map<string, string>,
+) => {
+  const replaceIds = (value: string, patterns: RegExp[], ids: Map<string, string>) =>
+    patterns.reduce(
+      (current, pattern) => current.replace(pattern, (_match, prefix: string, id: string) => `${prefix}${ids.get(id) ?? id}`),
+      value,
+    )
+
+  const withNotes = replaceIds(
+    markdown,
+    [
+      /(::regia\{[^}]*\bid=")([^"]+)(?=")/g,
+      /(\[NOTA:[^\n]*\{#)([^\s}]+)/g,
+    ],
+    noteIds,
+  )
+  return replaceIds(
+    withNotes,
+    [
+      /(::media\{[^}]*\bid=")([^"]+)(?=")/g,
+      /(\[CUE[^\n]*\{#)([^\s}]+)/g,
+    ],
+    cueIds,
+  )
 }
 
 const duplicateName = (name: string) => {
@@ -5667,7 +6141,7 @@ const isFullscreenBlock = (type: string) =>
 const markerRefIdsFromMarkdown = (markdown: string, kind: 'cue' | 'note') => {
   const ids = new Set<string>()
   const directiveName = kind === 'cue' ? 'media' : 'regia'
-  const directivePattern = new RegExp(`::${directiveName}\\\\{([^}]*)\\\\}`, 'g')
+  const directivePattern = new RegExp(`::${directiveName}\\{([^}]*)\\}`, 'g')
   for (const match of markdown.matchAll(directivePattern)) {
     const id = readDirectiveAttr(match[1], 'id')
     if (id) ids.add(id)
@@ -5883,6 +6357,40 @@ const syncEditorCueRefs = (
     const next = uniqueValues(ids)
     return arraysEqual(current, next) ? current : next
   })
+}
+
+const cueRefsAtEditorSelection = (editor: Editor) => {
+  const { selection } = editor.state
+  const { $from } = selection
+  let block: ProseMirrorNode | undefined
+
+  for (let depth = $from.depth; depth > 0; depth -= 1) {
+    const candidate = $from.node(depth)
+    if (candidate.isBlock) {
+      block = candidate
+      break
+    }
+  }
+
+  if (!block && selection instanceof NodeSelection && selection.node?.isBlock) {
+    block = selection.node
+  }
+
+  const ids: string[] = []
+  block?.descendants((node) => {
+    if (node.type.name === 'scriptChip' && node.attrs.kind === 'cue' && node.attrs.refId) {
+      ids.push(String(node.attrs.refId))
+    }
+  })
+  return uniqueValues(ids)
+}
+
+const syncEditorCueRefsAtSelection = (
+  editor: Editor,
+  setIds: Dispatch<SetStateAction<string[]>>,
+) => {
+  const next = cueRefsAtEditorSelection(editor)
+  setIds((current) => arraysEqual(current, next) ? current : next)
 }
 
 const syncBookmarkState = (
@@ -6371,6 +6879,17 @@ const validationSearchText = (value: string) =>
 const syncEditorSceneState = (editor: Editor, setActiveSceneId: Dispatch<SetStateAction<string>>) => {
   const sceneId = editorSceneIdAtPosition(editor.state.doc, editor.state.selection.from)
   setActiveSceneId((current) => (current === sceneId ? current : sceneId))
+}
+
+function sceneIdsMatch(left: string | undefined, right: string | undefined) {
+  if (!left || !right) return false
+  if (left === right) return true
+  const sceneKey = (value: string) => {
+    const normalized = normalizeSectionTitle(value)
+    const sceneIndex = normalized.indexOf('scena-')
+    return sceneIndex >= 0 ? normalized.slice(sceneIndex) : normalized
+  }
+  return sceneKey(left) === sceneKey(right)
 }
 
 const editorSceneIdAtPosition = (doc: ProseMirrorDocNode, selectionPosition: number) => {
@@ -6873,6 +7392,7 @@ function FullscreenView({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const audioTimersRef = useRef<number[]>([])
+  const shortcutFeedbackTimerRef = useRef<number | undefined>(undefined)
   const activePlaybackRef = useRef<{ cueId: string; assetUrl: string; type: 'audio' | 'video'; token: number } | undefined>(undefined)
   const playingCueRef = useRef<MediaCue | undefined>(undefined)
   const onCueExecutedRef = useRef(onCueExecuted)
@@ -6880,6 +7400,7 @@ function FullscreenView({
   const [playbackToken, setPlaybackToken] = useState(0)
   const [mediaStatus, setMediaStatus] = useState('Pronto')
   const [nativeAudioPaused, setNativeAudioPaused] = useState(false)
+  const [pressedShortcut, setPressedShortcut] = useState('')
   const stepCue = block?.cueId ? cues.find((cue) => cue.id === block.cueId) : undefined
   const stepAsset = stepCue ? findTreeNode(media, stepCue.src) : undefined
   const stepAssetUrl = stepAsset ? mediaAssetUrl(stepAsset, projectRootPath) : undefined
@@ -7182,12 +7703,29 @@ function FullscreenView({
     setMediaStatus(`Riavvio cue: ${cue.title || cue.src}`)
   }
 
+  const showShortcutFeedback = (shortcut: string) => {
+    setPressedShortcut(shortcut)
+    if (shortcutFeedbackTimerRef.current) window.clearTimeout(shortcutFeedbackTimerRef.current)
+    shortcutFeedbackTimerRef.current = window.setTimeout(() => {
+      setPressedShortcut('')
+      shortcutFeedbackTimerRef.current = undefined
+    }, 180)
+  }
+
   useEffect(() => {
     const handleWindowKeyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
       const handledKeys = ['arrowright', 'arrowleft', 'home', 'end', 'escape', ' ', 's', 'r']
       if (!handledKeys.includes(key)) return
       event.preventDefault()
+      const shortcut = key === 'arrowleft'
+        ? 'previous'
+        : key === 'arrowright'
+          ? 'next'
+          : key === ' '
+            ? 'space'
+            : key
+      showShortcutFeedback(shortcut)
       if (event.key === 'ArrowRight') onNext()
       if (event.key === 'ArrowLeft') onPrevious()
       if (event.key === 'Home') onHome()
@@ -7202,6 +7740,23 @@ function FullscreenView({
     window.addEventListener('keydown', handleWindowKeyDown)
     return () => window.removeEventListener('keydown', handleWindowKeyDown)
   })
+
+  const simulateFullscreenShortcut = (key: string, code = key) => {
+    const shortcut = key === 'ArrowLeft'
+      ? 'previous'
+      : key === 'ArrowRight'
+        ? 'next'
+        : code === 'Space'
+          ? 'space'
+          : key.toLowerCase()
+    showShortcutFeedback(shortcut)
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key,
+      code,
+      bubbles: true,
+      cancelable: true,
+    }))
+  }
 
   return (
     <div className="fullscreen-view" tabIndex={0}>
@@ -7247,25 +7802,25 @@ function FullscreenView({
         <small>{index + 1} / {total}</small>
       </div>
       <div className="fullscreen-shortcuts" aria-label="Scorciatoie fullscreen">
-        <button type="button" onClick={onPrevious} title="Freccia sinistra">
-          <kbd>←</kbd><span>Precedente</span>
+        <button type="button" className={pressedShortcut === 'previous' ? 'is-pressed' : ''} onClick={() => simulateFullscreenShortcut('ArrowLeft')} title="Battuta precedente">
+          <kbd className="shortcut-key-icon"><SkipBack size={13} strokeWidth={2.6} aria-hidden="true" /></kbd><span>Precedente</span>
         </button>
-        <button type="button" onClick={onNext} title="Freccia destra">
-          <kbd>→</kbd><span>Avanti</span>
+        <button type="button" className={pressedShortcut === 'next' ? 'is-pressed' : ''} onClick={() => simulateFullscreenShortcut('ArrowRight')} title="Battuta successiva">
+          <kbd className="shortcut-key-icon"><SkipForward size={13} strokeWidth={2.6} aria-hidden="true" /></kbd><span>Avanti</span>
         </button>
-        <button type="button" onClick={togglePlayback} title="Spazio">
+        <button type="button" className={pressedShortcut === 'space' ? 'is-pressed' : ''} onClick={() => simulateFullscreenShortcut(' ', 'Space')} title="Spazio">
           <kbd>Spazio</kbd><span>Play/Pausa</span>
         </button>
-        <button type="button" onClick={stopPlayback} title="S">
+        <button type="button" className={pressedShortcut === 's' ? 'is-pressed' : ''} onClick={() => simulateFullscreenShortcut('s')} title="S">
           <kbd>S</kbd><span>Stop</span>
         </button>
-        <button type="button" onClick={restartPlayback} title="R">
+        <button type="button" className={pressedShortcut === 'r' ? 'is-pressed' : ''} onClick={() => simulateFullscreenShortcut('r')} title="R">
           <kbd>R</kbd><span>Riavvia</span>
         </button>
-        <button type="button" onClick={onHome} title="Home">
+        <button type="button" className={pressedShortcut === 'home' ? 'is-pressed' : ''} onClick={() => simulateFullscreenShortcut('Home')} title="Home">
           <kbd>Home</kbd><span>Prima</span>
         </button>
-        <button type="button" onClick={onEnd} title="Fine">
+        <button type="button" className={pressedShortcut === 'end' ? 'is-pressed' : ''} onClick={() => simulateFullscreenShortcut('End')} title="Fine">
           <kbd>Fine</kbd><span>Ultima</span>
         </button>
       </div>
@@ -7553,16 +8108,42 @@ const playbackLog = (
   details?: Record<string, unknown>,
 ) => {
   if (typeof window === 'undefined') return
+  const timestamp = new Date().toISOString()
+  const page = {
+    visibilityState: document.visibilityState,
+    hasFocus: document.hasFocus(),
+    readyState: document.readyState,
+    url: window.location.href,
+  }
   const entry: PlaybackLogEntry = {
-    timestamp: new Date().toISOString(),
+    version: PLAYBACK_LOG_VERSION,
+    sessionId: PLAYBACK_SESSION_ID,
+    timestamp,
     scope,
     action,
     cueId: cue?.id,
     cueType: cue?.type,
     label: cue?.title || cue?.src,
-    details: sanitizePlaybackDetails(details),
+    details: sanitizePlaybackDetails({
+      ...details,
+      logVersion: PLAYBACK_LOG_VERSION,
+      sessionId: PLAYBACK_SESSION_ID,
+      page,
+    }),
   }
   const logs = [...readPlaybackLogs(), entry].slice(-200)
+  const previous = logs.length > 1 ? logs[logs.length - 2] : undefined
+  const isDuplicate = previous &&
+    previous.scope === entry.scope &&
+    previous.action === entry.action &&
+    previous.cueId === entry.cueId &&
+    previous.details?.reason === entry.details?.reason &&
+    previous.details?.previewId === entry.details?.previewId &&
+    Date.parse(entry.timestamp) - Date.parse(previous.timestamp) < 1000
+  if (isDuplicate) {
+    const repeatCount = (previous.repeatCount ?? 1) + 1
+    logs.splice(logs.length - 2, 2, { ...entry, repeatCount })
+  }
   writePlaybackLogs(logs)
   try {
     document.documentElement.setAttribute('data-stagedesk-playback-log', JSON.stringify(logs.slice(-20)))

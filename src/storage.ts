@@ -1,4 +1,5 @@
 import { defaultProject } from './defaultProject'
+import { LEGACY_SCRIPT_ROOT_PATH, SCRIPT_ROOT_PATH } from './domain'
 import type { MediaAsset, Project, ProjectTreeNode } from './domain'
 
 type ProjectOpenResult = {
@@ -265,22 +266,78 @@ const loadLocalRecoveryProject = (): Project | undefined => {
 
 const normalizeProject = (project: Project): Project => ({
   ...project,
-  scripts: normalizeScriptTree(project.scripts),
+  ...normalizeLegacySampleProject(project),
 })
+
+const normalizeLegacySampleProject = (project: Project) => {
+  const normalizedScripts = normalizeScriptTree(project.scripts)
+  const root = normalizedScripts[0]
+  const firstFile = root?.kind === 'folder' ? root.children?.[0] : undefined
+  const isLegacySample =
+    project.name === 'La locandiera' &&
+    firstFile?.kind === 'markdown' &&
+    firstFile.path === `${SCRIPT_ROOT_PATH}/atto-1.md` &&
+    firstFile.content?.includes('AVVISO IMPORTANTE')
+  const sampleFilePath = `${SCRIPT_ROOT_PATH}/atto-1.md`
+  const renamedSampleFilePath = `${SCRIPT_ROOT_PATH}/la locandiera.md`
+  const scripts = isLegacySample
+    ? renameLegacySampleFile(normalizedScripts)
+    : normalizedScripts
+  const normalizeFilePath = (path: string) => {
+    const normalizedPath = normalizeScriptPath(path)
+    return isLegacySample && normalizedPath === sampleFilePath
+      ? renamedSampleFilePath
+      : normalizedPath
+  }
+
+  return {
+    name: isLegacySample ? 'Goldoni' : project.name,
+    scripts,
+    notes: project.notes.map((note) => ({ ...note, filePath: normalizeFilePath(note.filePath) })),
+    cues: project.cues.map((cue) => ({ ...cue, filePath: normalizeFilePath(cue.filePath) })),
+  }
+}
 
 const normalizeProjectOpenResult = (result: ProjectOpenResult | undefined) =>
   result ? { ...result, project: normalizeProject(result.project) } : undefined
 
 const normalizeScriptTree = (nodes: ProjectTreeNode[]): ProjectTreeNode[] =>
   nodes.map((node) => {
+    const path = normalizeScriptPath(node.path)
+    const name = path === SCRIPT_ROOT_PATH && node.kind === 'folder' ? 'copioni' : node.name
     if (node.kind === 'markdown') {
       const content = node.content ? removeCharacterTableIdColumn(node.content) : node.content
-      return content === node.content ? node : { ...node, content }
+      return path === node.path && name === node.name && content === node.content
+        ? node
+        : { ...node, name, path, content }
     }
 
     return {
       ...node,
+      name,
+      path,
       children: node.children ? normalizeScriptTree(node.children) : undefined,
+    }
+  })
+
+const normalizeScriptPath = (path: string) => {
+  if (path === LEGACY_SCRIPT_ROOT_PATH) return SCRIPT_ROOT_PATH
+  if (path.startsWith(`${LEGACY_SCRIPT_ROOT_PATH}/`)) {
+    return `${SCRIPT_ROOT_PATH}${path.slice(LEGACY_SCRIPT_ROOT_PATH.length)}`
+  }
+  return path
+}
+
+const renameLegacySampleFile = (nodes: ProjectTreeNode[]) =>
+  nodes.map((node) => {
+    if (node.kind !== 'folder' || node.path !== SCRIPT_ROOT_PATH) return node
+    return {
+      ...node,
+      children: node.children?.map((child) =>
+        child.kind === 'markdown' && child.path === `${SCRIPT_ROOT_PATH}/atto-1.md`
+          ? { ...child, name: 'la locandiera.md', path: `${SCRIPT_ROOT_PATH}/la locandiera.md` }
+          : child,
+      ),
     }
   })
 

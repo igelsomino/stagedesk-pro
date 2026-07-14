@@ -1,3 +1,4 @@
+import { SCRIPT_ROOT_PATH } from './domain'
 import type { DirectorNote, MediaAsset, MediaCue, NoteType, Project } from './domain'
 
 const now = () => new Date().toISOString()
@@ -15,7 +16,7 @@ const noteTypes: NoteType[] = [
   { id: 'general', label: 'Nota generale', color: 'cyan' },
 ]
 
-const filePath = '/copione/atto-1.md'
+const filePath = `${SCRIPT_ROOT_PATH}/la locandiera.md`
 const sceneId = 'atto-i-scena-xv'
 
 const demoNoteContent: Record<string, string> = {
@@ -329,7 +330,7 @@ const baseSettings = {
   fullscreenCueReplayPolicy: 'forward-only' as const,
 }
 
-export const defaultProject = (name = 'La locandiera'): Project => ({
+export const defaultProject = (name = 'Goldoni'): Project => ({
   id: crypto.randomUUID(),
   name,
   rootPath: '/progetto',
@@ -347,13 +348,13 @@ export const defaultProject = (name = 'La locandiera'): Project => ({
   scripts: [
     {
       id: crypto.randomUUID(),
-      name: 'copione',
-      path: '/copione',
+      name: 'copioni',
+      path: SCRIPT_ROOT_PATH,
       kind: 'folder',
       children: [
         {
           id: crypto.randomUUID(),
-          name: 'atto-1.md',
+          name: 'la locandiera.md',
           path: filePath,
           kind: 'markdown',
           content: demoScriptContent(),
@@ -382,13 +383,13 @@ export const blankProject = (name = 'Nuovo progetto'): Project => ({
   scripts: [
     {
       id: crypto.randomUUID(),
-      name: 'copione',
-      path: '/copione',
+      name: 'copioni',
+      path: SCRIPT_ROOT_PATH,
       kind: 'folder',
       children: [
         {
           id: crypto.randomUUID(),
-          name: 'atto-1.md',
+          name: 'la locandiera.md',
           path: filePath,
           kind: 'markdown',
           content: blankScriptContent(name),

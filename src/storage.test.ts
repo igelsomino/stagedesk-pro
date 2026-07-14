@@ -43,7 +43,7 @@ describe('browser project storage recovery', () => {
     const folderProject = { ...blankProject('Progetto reale'), rootPath: '/Users/test/Progetto reale' }
     browserProjectStorage.save(folderProject)
 
-    expect(browserProjectStorage.load().name).toBe('La locandiera')
+    expect(browserProjectStorage.load().name).toBe('Goldoni')
   })
 
   it('removes the legacy ID column from recovered character tables', () => {
@@ -68,5 +68,29 @@ describe('browser project storage recovery', () => {
     expect(recoveredScript).toContain('| CAVALIERE | Da assegnare | In scena | Resiste, poi si lascia incuriosire. |')
     expect(recoveredScript).not.toContain('| ID | Personaggio | Interprete | Presenza | Note |')
     expect(recoveredScript).not.toContain('| mirandolina | MIRANDOLINA |')
+  })
+
+  it('migrates legacy script paths to the copioni root', () => {
+    const project = defaultProject()
+    const root = project.scripts[0]
+    if (!root || !root.children?.[0]) throw new Error('Missing sample script tree')
+    project.name = 'La locandiera'
+    root.name = 'copione'
+    root.path = '/copione'
+    root.children[0].name = 'atto-1.md'
+    root.children[0].path = '/copione/atto-1.md'
+    project.notes = project.notes.map((note) => ({ ...note, filePath: '/copione/atto-1.md' }))
+    project.cues = project.cues.map((cue) => ({ ...cue, filePath: '/copione/atto-1.md' }))
+
+    browserProjectStorage.save(project)
+
+    const migratedProject = browserProjectStorage.load()
+    expect(migratedProject.name).toBe('Goldoni')
+    expect(migratedProject.scripts[0]?.name).toBe('copioni')
+    expect(migratedProject.scripts[0]?.path).toBe('/copioni')
+    expect(migratedProject.scripts[0]?.children?.[0]?.name).toBe('la locandiera.md')
+    expect(migratedProject.scripts[0]?.children?.[0]?.path).toBe('/copioni/la locandiera.md')
+    expect(migratedProject.notes.every((note) => note.filePath.startsWith('/copioni/'))).toBe(true)
+    expect(migratedProject.cues.every((cue) => cue.filePath.startsWith('/copioni/'))).toBe(true)
   })
 })

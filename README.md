@@ -58,7 +58,10 @@ Implementato:
 27. modalità schermo intero con step battuta/cue;
 28. export PDF completo e pulito, con conservazione delle note operative nel pulito;
 29. condivisione strutturata del copione per future app attori, con battute, personaggi e note operative;
-30. aggiornamenti automatici tramite GitHub Releases.
+30. inspector cue con filtri Contestuali, Scena e Tutte;
+31. paginazione della lista cue con cinque elementi per pagina;
+32. aggiornamenti automatici tramite GitHub Releases;
+33. diagnostica persistente per eventi di lifecycle, focus, refresh, stato editor e riproduzione media.
 
 ## Sviluppo
 
@@ -118,6 +121,16 @@ I salvataggi automatici verso la cartella progetto sono serializzati per evitare
 La versione desktop registra il percorso dell'ultimo progetto aperto nel data directory dell'app e lo riapre al successivo avvio. L'autosave verso cartella progetto resta sospeso finché il controllo iniziale dell'ultimo progetto non è concluso, evitando che il progetto dimostrativo venga scritto accidentalmente sulla cartella di lavoro.
 
 La dialog di apertura progetti usa l'elenco delle cartelle progetto disponibili, supporta ricerca, paginazione, rinomina ed eliminazione, e permette l'apertura dello Store pubblico in un tab dedicato dell'editor.
+
+## Filtri cue
+
+La colonna Cue distingue tre ambiti:
+
+1. **Contestuali**: mostra soltanto i cue presenti nel blocco corrente dell'editor; se il blocco non contiene cue, la lista resta vuota.
+2. **Scena**: mostra tutti i cue associati alla scena corrente.
+3. **Tutte**: mostra tutti i cue del file attivo.
+
+Quando i risultati sono più di cinque, la lista viene suddivisa in pagine.
 
 ## Controllo copione
 

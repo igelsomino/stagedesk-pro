@@ -31,14 +31,47 @@ type MediaNode = {
 }
 
 let currentProjectPath: string | undefined
+let currentProjectPathReady: Promise<void> | undefined
 
 const projectsRoot = path.resolve(process.cwd(), 'projects')
+const tauriTargetRoot = path.resolve(process.cwd(), 'src-tauri', 'target')
+const currentProjectPathFile = path.join(projectsRoot, '.last-opened-project')
+
+const restoreCurrentProjectPath = async () => {
+  if (currentProjectPathReady) {
+    await currentProjectPathReady
+    return
+  }
+
+  currentProjectPathReady = (async () => {
+    try {
+      const savedPath = (await fs.readFile(currentProjectPathFile, 'utf8')).trim()
+      const resolvedPath = resolveProjectPath(savedPath)
+      await fs.access(path.join(resolvedPath, 'project.json'))
+      currentProjectPath = resolvedPath
+    } catch {
+      currentProjectPath = undefined
+    }
+  })()
+
+  await currentProjectPathReady
+}
+
+const rememberCurrentProjectPath = async (projectPath?: string) => {
+  await fs.mkdir(projectsRoot, { recursive: true })
+  if (projectPath) {
+    await fs.writeFile(currentProjectPathFile, projectPath, 'utf8')
+    return
+  }
+  await fs.rm(currentProjectPathFile, { force: true })
+}
 
 const projectStorageApi = (): Plugin => ({
   name: 'project-storage-api',
   configureServer(server: ViteDevServer) {
     server.middlewares.use('/__project-storage', async (req: IncomingMessage, res: ServerResponse) => {
       try {
+        await restoreCurrentProjectPath()
         const url = new URL(req.url ?? '/', 'http://localhost')
 
         if (req.method === 'GET' && url.pathname === '/current') {
@@ -78,6 +111,7 @@ const projectStorageApi = (): Plugin => ({
           const projectPath = path.join(projectsRoot, safeFolderName(String(body.projectName ?? project.name)))
           await writeProject(projectPath, project)
           currentProjectPath = projectPath
+          await rememberCurrentProjectPath(currentProjectPath)
           sendJson(res, projectPath)
           return
         }
@@ -87,6 +121,7 @@ const projectStorageApi = (): Plugin => ({
           const projectPath = resolveProjectPath(String(body.projectPath ?? ''))
           const project = await readProject(projectPath)
           currentProjectPath = projectPath
+          await rememberCurrentProjectPath(currentProjectPath)
           sendJson(res, { project, path: projectPath })
           return
         }
@@ -97,6 +132,10 @@ const projectStorageApi = (): Plugin => ({
           const projectName = String(body.projectName ?? '').trim()
           if (!projectName) throw new Error('Nome progetto mancante')
           const renamed = await renameProjectFolder(projectPath, projectName)
+          if (currentProjectPath === projectPath) {
+            currentProjectPath = renamed.path
+            await rememberCurrentProjectPath(currentProjectPath)
+          }
           sendJson(res, renamed)
           return
         }
@@ -105,6 +144,10 @@ const projectStorageApi = (): Plugin => ({
           const body = await readJsonBody(req)
           const projectPath = resolveProjectPath(String(body.projectPath ?? ''))
           await deleteProjectFolder(projectPath)
+          if (currentProjectPath === projectPath) {
+            currentProjectPath = undefined
+            await rememberCurrentProjectPath()
+          }
           sendJson(res, { ok: true })
           return
         }
@@ -421,5 +464,10 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    watch: {
+      // The local project service writes user documents below this directory.
+      // Those writes must not trigger Vite HMR/reloads while the app is unfocused.
+      ignored: [projectsRoot, tauriTargetRoot],
+    },
   },
 })

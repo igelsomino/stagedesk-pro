@@ -46,6 +46,17 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.17
+
+> Aggiornamento dedicato alla chiarezza dei filtri cue, alla stabilità dell'editor e alla diagnostica.
+
+- Ridefinito il filtro **Contestuali**: mostra esclusivamente i cue presenti nel blocco corrente dell'editor e non ricade più automaticamente sui cue della scena o dell'intero file.
+- Confermato il comportamento distinto dei filtri **Scena** e **Tutte**: rispettivamente cue della scena corrente e cue dell'intero file attivo.
+- Aggiunto un messaggio esplicito quando il blocco corrente non contiene cue contestuali.
+- La lista dei cue viene paginata oltre cinque risultati, con navigazione tramite icone.
+- Aggiunti ai log diagnostici i riferimenti dei cue contestuali e gli eventi di lifecycle, focus, refresh e riproduzione media.
+- Corretto il reset dei riferimenti contestuali quando si passa a Store o a un tab senza file attivo.
+
 ## Versione 1.0.16
 
 > Aggiornamento dedicato a gestione progetti, Store, condivisione strutturata e finiture UI.

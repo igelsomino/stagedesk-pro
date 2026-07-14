@@ -6,14 +6,16 @@ const flattenMedia = (assets: MediaAsset[]): MediaAsset[] =>
   assets.flatMap((asset) => [asset, ...flattenMedia(asset.children ?? [])])
 
 describe('default project', () => {
-  it('starts from La locandiera with real sample media assets', () => {
+  it('starts from Goldoni with the La locandiera sample file and real sample media assets', () => {
     const project = defaultProject()
     const mediaAssets = flattenMedia(project.media)
     const mediaPaths = mediaAssets.map((asset) => asset.path)
     const mediaSourcePaths = mediaAssets.map((asset) => asset.sourcePath).filter(Boolean)
     const script = project.scripts[0]?.children?.[0]?.content ?? ''
 
-    expect(project.name).toBe('La locandiera')
+    expect(project.name).toBe('Goldoni')
+    expect(project.scripts[0]?.name).toBe('copioni')
+    expect(project.scripts[0]?.children?.[0]?.name).toBe('la locandiera.md')
     expect(mediaPaths).toEqual(expect.arrayContaining([
       '/media/suoni/doorbell-ding-dong.mp3',
       '/media/suoni/gunshot.mp3',
@@ -48,6 +50,7 @@ describe('default project', () => {
     const script = project.scripts[0]?.children?.[0]?.content ?? ''
 
     expect(project.name).toBe('Prova regia')
+    expect(project.scripts[0]?.name).toBe('copioni')
     expect(project.notes).toEqual([])
     expect(project.cues).toEqual([])
     expect(project.characters).toEqual([{ id: 'personaggio-1', name: 'PERSONAGGIO 1' }])
