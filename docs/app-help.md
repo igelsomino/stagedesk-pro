@@ -15,7 +15,11 @@ Link utili:
 
 Usa il pulsante Nuovo per creare un progetto. L'app chiede il nome e prepara un copione iniziale minimale con titolo, Atto 1, Scena 1 e una prima battuta modificabile.
 
-Usa Apri progetti per rientrare in un progetto già creato. Il salvataggio è automatico.
+Usa Apri progetto per rientrare in un progetto già creato. La dialog permette di cercare il progetto, scorrere la lista a pagine, aprirlo con un click, rinominarlo o eliminarlo dal menu con i tre puntini verticali.
+
+Il pulsante Importa nella stessa dialog apre lo Store in un tab dello spazio editor. Lo Store è predisposto per contenuti importabili e, nella versione corrente, mostra una pagina pubblica "Under Construction".
+
+Il salvataggio è automatico.
 
 Nella versione desktop l'app riapre automaticamente l'ultimo progetto usato. Se non trova un progetto precedente, mostra il file di esempio iniziale.
 
@@ -122,7 +126,7 @@ I nomi numerati con la stessa base, ad esempio "Personaggio 1" e "Personaggio 2"
 Il menu Export genera un PDF del file attivo:
 
 - completo, con note e cue;
-- pulito, senza marcatori visuali.
+- pulito, senza marcatori visuali ma con le note operative di movimento, posizione, personaggi in scena e tono.
 
 Alla fine dell'export l'app mostra dove è stato salvato il file e, quando possibile, un comando per aprirlo.
 
@@ -130,7 +134,9 @@ Alla fine dell'export l'app mostra dove è stato salvato il file e, quando possi
 
 Dal menu con le maschere puoi aprire Condividi. La dialog prepara e carica su Supabase Storage il copione attivo, pensato per le future app Android e iOS dedicate agli attori.
 
-Il file condiviso contiene i personaggi e le relative battute con identificativi, scena e riga sorgente. Dalla stessa dialog puoi aggiornare l'ultima versione condivisa, interrompere la condivisione eliminando il file, copiare il link o condividerlo tramite QR code.
+Il file condiviso contiene i personaggi, le relative battute con identificativi, scena e riga sorgente, e le note operative di movimento, posizione, personaggi in scena e tono. Dalla stessa dialog puoi aggiornare l'ultima versione condivisa, interrompere la condivisione eliminando il file, copiare il link o condividerlo tramite QR code.
+
+Quando il file attivo è condiviso, la schermata principale mostra un'icona di stato vicino alle informazioni di salvataggio.
 
 Nelle app attori, dopo l'accesso con Google, GitHub o Azure, l'utente potrà selezionare il proprio personaggio e visualizzare o nascondere le proprie battute per studiare la parte.
 

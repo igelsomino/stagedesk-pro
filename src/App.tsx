@@ -325,6 +325,7 @@ function App() {
   const [appMenuOpen, setAppMenuOpen] = useState(false)
   const [appMenuPosition, setAppMenuPosition] = useState<{ top: number; left: number } | undefined>()
   const [projectPickerEntries, setProjectPickerEntries] = useState<ProjectEntry[]>([])
+  const [storeLoading, setStoreLoading] = useState(false)
   const [toolbarState, setToolbarState] = useState<ToolbarState>(emptyToolbarState)
   const [tableContextActive, setTableContextActive] = useState(false)
   const [activeEditorSceneId, setActiveEditorSceneId] = useState('')
@@ -1808,8 +1809,8 @@ function App() {
       .then(setProjectPickerEntries)
       .catch((error) => setStorageStatus(`Aggiornamento lista progetti non riuscito: ${String(error)}`))
 
-  const renameProjectEntry = (entry: ProjectEntry) => {
-    const nextName = prompt('Nuovo nome progetto', entry.name)?.trim()
+  const renameProjectEntry = (entry: ProjectEntry, name: string) => {
+    const nextName = name.trim()
     if (!nextName || nextName === entry.name) return
     storage.renameProjectFolder(entry.path, nextName)
       .then((renamed) => {
@@ -1856,6 +1857,7 @@ function App() {
 
   const openStoreTab = () => {
     setProjectPickerEntries([])
+    setStoreLoading(true)
     setOpenTabs((current) => (current.includes(STORE_TAB_PATH) ? current : [...current, STORE_TAB_PATH]))
     setActivePath(STORE_TAB_PATH)
   }
@@ -3262,6 +3264,7 @@ function App() {
                       if (!isAppDocumentPath(path) && !isStoreTab) setSelectedScriptPath(path)
                     }}
                   >
+                    {isStoreTab && storeLoading ? <RefreshCw size={13} className="file-tab-loading spin-icon" aria-hidden="true" /> : null}
                     <span className="file-tab-name">{tabTitle}</span>
                     {tabFile?.dirty ? <span className="dirty-dot" aria-label="modificato" /> : null}
                     <span
@@ -3291,8 +3294,14 @@ function App() {
             )}
           </div>
           {activeStoreTab ? (
-            <div className="store-tab-view">
-              <iframe title="StageDesk Store" src={STORE_URL} />
+            <div className="store-tab-view" data-loading={storeLoading}>
+              {storeLoading ? (
+                <div className="store-loading" role="status">
+                  <RefreshCw size={18} className="spin-icon" />
+                  <span>Caricamento store...</span>
+                </div>
+              ) : null}
+              <iframe title="StageDesk Store" src={STORE_URL} onLoad={() => setStoreLoading(false)} />
             </div>
           ) : (
             <>
@@ -3852,7 +3861,7 @@ function App() {
             setProjectPickerEntries([])
             void openProjectFolder(entry.path)
           }}
-          onRename={(entry) => renameProjectEntry(entry)}
+          onRename={(entry, name) => renameProjectEntry(entry, name)}
           onDelete={(entry) => deleteProjectEntry(entry)}
         />
       ) : null}
@@ -4165,10 +4174,38 @@ function ProjectPickerModal({
   onCancel: () => void
   onImport: () => void
   onOpen: (entry: ProjectEntry) => void
-  onRename: (entry: ProjectEntry) => void
+  onRename: (entry: ProjectEntry, name: string) => void
   onDelete: (entry: ProjectEntry) => void
 }) {
   const [openMenuPath, setOpenMenuPath] = useState('')
+  const [renameEntry, setRenameEntry] = useState<ProjectEntry | undefined>()
+  const [renameValue, setRenameValue] = useState('')
+  const [projectSearch, setProjectSearch] = useState('')
+  const [page, setPage] = useState(0)
+  const pageSize = 6
+  const filteredEntries = useMemo(() => {
+    const query = projectSearch.trim().toLowerCase()
+    if (!query) return entries
+    return entries.filter((entry) =>
+      `${entry.name} ${entry.path}`.toLowerCase().includes(query),
+    )
+  }, [entries, projectSearch])
+  const pageCount = Math.max(1, Math.ceil(filteredEntries.length / pageSize))
+  const currentPage = Math.min(page, pageCount - 1)
+  const pageEntries = filteredEntries.slice(currentPage * pageSize, (currentPage + 1) * pageSize)
+  useEffect(() => {
+    setPage(0)
+    setOpenMenuPath('')
+  }, [projectSearch])
+  useEffect(() => {
+    if (page >= pageCount) setPage(pageCount - 1)
+  }, [page, pageCount])
+  const submitRename = () => {
+    if (!renameEntry) return
+    onRename(renameEntry, renameValue)
+    setRenameEntry(undefined)
+    setRenameValue('')
+  }
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onCancel}>
@@ -4181,9 +4218,18 @@ function ProjectPickerModal({
       >
         <div className="project-picker-header">
           <h2 id="project-picker-title">Apri progetto</h2>
+          <p>Clicca su un progetto per aprirlo oppure su Importa per aprire lo store.</p>
         </div>
+        <label className="project-picker-search">
+          <Search size={15} />
+          <input
+            value={projectSearch}
+            onChange={(event) => setProjectSearch(event.target.value)}
+            placeholder="Cerca progetto"
+          />
+        </label>
         <div className="project-picker-list">
-          {entries.map((entry) => (
+          {pageEntries.map((entry) => (
             <div className="project-picker-row" key={entry.path}>
               <button type="button" className="project-picker-open" onClick={() => onOpen(entry)}>
                 <FolderOpen size={15} />
@@ -4211,7 +4257,8 @@ function ProjectPickerModal({
                       role="menuitem"
                       onClick={() => {
                         setOpenMenuPath('')
-                        onRename(entry)
+                        setRenameEntry(entry)
+                        setRenameValue(entry.name)
                       }}
                     >
                       <Pencil size={14} />
@@ -4234,13 +4281,73 @@ function ProjectPickerModal({
               </div>
             </div>
           ))}
+          {pageEntries.length === 0 ? (
+            <p className="project-picker-empty">Nessun progetto trovato.</p>
+          ) : null}
         </div>
+        <div className="project-picker-pagination">
+          <span>
+            {filteredEntries.length === 0
+              ? '0 progetti'
+              : `${(currentPage * pageSize) + 1}-${Math.min((currentPage + 1) * pageSize, filteredEntries.length)} di ${filteredEntries.length}`}
+          </span>
+          <div>
+            <button
+              type="button"
+              aria-label="Pagina precedente"
+              title="Pagina precedente"
+              onClick={() => setPage((current) => Math.max(0, current - 1))}
+              disabled={currentPage === 0}
+            >
+              <ChevronRight size={15} className="project-pagination-prev-icon" />
+            </button>
+            <button
+              type="button"
+              aria-label="Pagina successiva"
+              title="Pagina successiva"
+              onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
+              disabled={currentPage >= pageCount - 1}
+            >
+              <ChevronRight size={15} />
+            </button>
+          </div>
+        </div>
+        {renameEntry ? (
+          <div className="project-rename-panel">
+            <label>
+              <span>Rinomina progetto</span>
+              <input
+                autoFocus
+                value={renameValue}
+                onChange={(event) => setRenameValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') submitRename()
+                  if (event.key === 'Escape') {
+                    setRenameEntry(undefined)
+                    setRenameValue('')
+                  }
+                }}
+              />
+            </label>
+            <div className="project-rename-actions">
+              <button type="button" onClick={() => {
+                setRenameEntry(undefined)
+                setRenameValue('')
+              }}>
+                Annulla
+              </button>
+              <button type="button" className="primary" disabled={!renameValue.trim() || renameValue.trim() === renameEntry.name} onClick={submitRename}>
+                Rinomina
+              </button>
+            </div>
+          </div>
+        ) : null}
         <div className="modal-actions project-picker-footer">
           <button type="button" className="project-import-button" onClick={onImport}>
             <Download size={15} />
             Importa
           </button>
-          <button type="button" onClick={onCancel}>Annulla</button>
+          <button type="button" className="project-cancel-button" onClick={onCancel}>Annulla</button>
         </div>
       </section>
     </div>

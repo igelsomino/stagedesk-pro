@@ -33,29 +33,32 @@ Implementato:
 2. ruoli profilo multipli: regista, autore, altro;
 3. layout a tre colonne con Struttura, Editor e Cue;
 4. creazione e apertura progetti;
-5. salvataggio automatico;
-6. tree file explorer per copioni Markdown;
-7. tree file explorer per raccolta multimediale;
-8. tab multipli per file Markdown e documenti interni;
-9. outline del file attivo;
-10. bookmark inline;
-11. note di regia inline, colorate e collassabili;
-12. collasso o espansione globale delle note;
-13. oggetti battuta collegati alla tabella personaggi;
-14. conversione automatica `Personaggio:` in oggetto battuta quando il personaggio è presente in tabella;
-15. conversione automatica `nota:` in nota generale con focus sul contenuto;
-16. `Cmd/Ctrl+Invio` dalle textarea di note e battute per creare una riga sotto il box;
-17. inserimento toolbar di Atto, Scena, Sezione, note, battute, tabelle ed export;
-18. menu teatrale per struttura, note, battute, export e condivisione;
-19. cue audio, musica, immagine e video;
-20. controlli inline per cue audio/musica;
-21. inspector laterale dedicato ai cue;
-22. riapertura automatica dell'ultimo progetto nella versione desktop;
-23. validazione tipografica e formale prima della modalità schermo intero;
-24. sincronizzazione tra posizione editor e modalità schermo intero;
-25. modalità schermo intero con step battuta/cue;
-26. export PDF completo e pulito;
-27. aggiornamenti automatici tramite GitHub Releases.
+5. ricerca, paginazione, rinomina ed eliminazione nella dialog di apertura progetti;
+6. tab Store importabile dalla dialog progetti;
+7. salvataggio automatico;
+8. tree file explorer per copioni Markdown;
+9. tree file explorer per raccolta multimediale;
+10. tab multipli per file Markdown, Store e documenti interni;
+11. outline del file attivo;
+12. bookmark inline;
+13. note di regia inline, colorate e collassabili;
+14. collasso o espansione globale delle note;
+15. oggetti battuta collegati alla tabella personaggi;
+16. conversione automatica `Personaggio:` in oggetto battuta quando il personaggio è presente in tabella;
+17. conversione automatica `nota:` in nota generale con focus sul contenuto;
+18. `Cmd/Ctrl+Invio` dalle textarea di note e battute per creare una riga sotto il box;
+19. inserimento toolbar di Atto, Scena, Sezione, note, battute, tabelle ed export;
+20. menu teatrale per struttura, note, battute, export e condivisione;
+21. cue audio, musica, immagine e video;
+22. controlli inline per cue audio/musica;
+23. inspector laterale dedicato ai cue;
+24. riapertura automatica dell'ultimo progetto nella versione desktop;
+25. validazione tipografica e formale prima della modalità schermo intero;
+26. sincronizzazione tra posizione editor e modalità schermo intero;
+27. modalità schermo intero con step battuta/cue;
+28. export PDF completo e pulito, con conservazione delle note operative nel pulito;
+29. condivisione strutturata del copione per future app attori, con battute, personaggi e note operative;
+30. aggiornamenti automatici tramite GitHub Releases.
 
 ## Sviluppo
 
@@ -114,6 +117,8 @@ I salvataggi automatici verso la cartella progetto sono serializzati per evitare
 
 La versione desktop registra il percorso dell'ultimo progetto aperto nel data directory dell'app e lo riapre al successivo avvio. L'autosave verso cartella progetto resta sospeso finché il controllo iniziale dell'ultimo progetto non è concluso, evitando che il progetto dimostrativo venga scritto accidentalmente sulla cartella di lavoro.
 
+La dialog di apertura progetti usa l'elenco delle cartelle progetto disponibili, supporta ricerca, paginazione, rinomina ed eliminazione, e permette l'apertura dello Store pubblico in un tab dedicato dell'editor.
+
 ## Controllo copione
 
 Prima di entrare in modalità schermo intero l'app esegue controlli tipografici e formali sul file attivo:
@@ -145,6 +150,17 @@ I documenti visualizzati dal menu utente sono Markdown nel repository:
 2. `docs/version-history.md`: contenuto della voce Novità.
 
 L'app li carica da GitHub all'apertura del tab e usa il fallback compilato solo se la rete o GitHub non sono disponibili. In questo modo correzioni e integrazioni testuali possono essere pubblicate sul repository senza generare nuovi installer.
+
+## Condivisione strutturata
+
+La funzione Condividi genera un payload strutturato destinato alle future app attori. Il payload include:
+
+1. metadati progetto e file;
+2. personaggi ricavati dalla tabella personaggi;
+3. battute con personaggio, scena, testo e riga sorgente;
+4. note operative dei tipi movimento, posizione, personaggi in scena e tono.
+
+Il file viene pubblicato su Supabase Storage nel bucket configurato per la condivisione. La UI mostra link, QR code e stato di condivisione del file attivo.
 
 ## Sicurezza
 

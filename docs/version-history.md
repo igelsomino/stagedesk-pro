@@ -1,5 +1,20 @@
 # Novità
 
+## Versione 1.0.16
+
+> Aggiornamento dedicato a gestione progetti, Store, condivisione strutturata e finiture UI.
+
+- La dialog Apri progetto ora include ricerca, paginazione, apertura rapida, rinomina ed eliminazione dei progetti.
+- Aggiunto il pulsante Importa nella dialog Apri progetto: apre il tab Store nello spazio editor e carica la pagina pubblica `/store/`.
+- Il tab Store mostra un indicatore di caricamento finché la pagina esterna non è pronta.
+- Pubblicata la pagina Store "Under Construction" sul sito pubblico StageDesk Pro.
+- Migliorata la resa grafica della dialog Apri progetto: focus ricerca più discreto, lista compatta, pulsanti di pagina con icone e menu progetto più ordinato.
+- La condivisione del copione include anche le note di movimento, posizione, personaggi in scena e tono.
+- L'export PDF pulito conserva le note di movimento, posizione, personaggi in scena e tono, continuando a rimuovere gli altri marcatori operativi.
+- Aggiunta l'icona di stato condivisione nella schermata principale, senza bordo circolare.
+- Migliorato l'ordinamento del menu Note: Nota generale è sempre in alto, con separatori dedicati.
+- Corretto il testo dei bookmark salvati, evitando che in alcuni casi venisse mostrato il codice del chip.
+
 ## Versione 1.0.15
 
 > Aggiornamento dedicato a stabilita editor, documentazione pubblica e standard del repository.

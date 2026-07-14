@@ -1048,6 +1048,11 @@ body.stagedesk-pointer-dragging * {
   white-space: nowrap;
 }
 
+.file-tab-loading {
+  flex: 0 0 auto;
+  color: var(--text-accent-hover);
+}
+
 .file-tab-close {
   display: inline-grid;
   flex: 0 0 auto;
@@ -3193,18 +3198,58 @@ button.danger:hover {
   text-align: center;
 }
 
+.project-picker-header p {
+  margin: 8px auto 0;
+  max-width: 380px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
 .project-import-button {
-  min-height: 32px;
-  padding: 6px 11px;
+  min-height: 34px;
+  padding: 7px 12px;
   border-color: var(--background-modifier-border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.project-picker-search {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: 0 9px;
   background: var(--background-tertiary);
-  color: var(--text-normal);
+  color: var(--text-muted);
+}
+
+.project-picker-search input {
+  min-height: 34px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.project-picker-search input:focus {
+  box-shadow: none;
+}
+
+.project-picker-search:focus-within {
+  border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--background-modifier-border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
 }
 
 .project-picker-list {
   display: grid;
   gap: 6px;
-  max-height: 320px;
+  max-height: 306px;
   overflow: visible;
 }
 
@@ -3308,12 +3353,124 @@ button.danger:hover {
   color: var(--danger);
 }
 
+.project-picker-empty {
+  display: grid;
+  place-items: center;
+  min-height: 46px;
+  margin: 0;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  color: var(--text-faint);
+  font-size: 0.84rem;
+}
+
+.project-picker-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  margin-top: 10px;
+  color: var(--text-faint);
+  font-size: 0.76rem;
+}
+
+.project-picker-pagination div {
+  display: flex;
+  gap: 6px;
+}
+
+.project-picker-pagination button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-color: var(--background-modifier-border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.project-picker-pagination button:hover:not(:disabled) {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.project-picker-pagination button:disabled {
+  opacity: 0.42;
+}
+
+.project-pagination-prev-icon {
+  transform: rotate(180deg);
+}
+
+.project-rename-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  padding: 12px;
+  background: color-mix(in srgb, var(--background-tertiary) 72%, transparent);
+}
+
+.project-rename-panel label {
+  display: grid;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.project-rename-panel input {
+  min-height: 34px;
+}
+
+.project-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.project-rename-actions button,
+.project-cancel-button {
+  min-height: 34px;
+  padding: 7px 12px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.project-rename-actions .primary {
+  border-color: color-mix(in srgb, var(--interactive-accent) 70%, var(--background-modifier-border));
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.project-rename-actions .primary:disabled {
+  opacity: 0.5;
+}
+
+.project-cancel-button {
+  border-color: var(--background-modifier-border);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.project-cancel-button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
 .project-picker-footer {
   align-items: center;
   justify-content: space-between;
 }
 
 .store-tab-view {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   background: var(--background-primary);
@@ -3325,6 +3482,24 @@ button.danger:hover {
   height: 100%;
   border: 0;
   background: #111;
+}
+
+.store-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  background: color-mix(in srgb, var(--background-primary) 88%, transparent);
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.store-loading svg {
+  justify-self: center;
+  color: var(--text-accent-hover);
 }
 
 .empty-state {

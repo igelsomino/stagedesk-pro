@@ -17,6 +17,8 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 - Accedi con il tuo account e completa il profilo.
 - Crea o apri un progetto.
+- Cerca, rinomina o elimina progetti dalla dialog Apri progetto.
+- Apri lo Store dal pulsante Importa nella dialog Apri progetto.
 - Nella versione desktop viene riaperto automaticamente l'ultimo progetto usato.
 - Scrivi il copione nell'editor centrale.
 - Organizza copioni, media e bookmark dalla colonna Struttura.
@@ -26,6 +28,7 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 - Inserisci Atto, Scena, Sezione, battute e tabelle dalla toolbar teatrale.
 - Usa Cmd+Invio su macOS o Ctrl+Invio su Windows/Linux dentro una nota o battuta per creare una riga sotto il box.
 - Condividi il copione attivo per future app attori, con link copiabile e QR code.
+- La condivisione include personaggi, battute e note operative di movimento, posizione, personaggi in scena e tono.
 - Collassa o espandi tutte le note e assegna colori predefiniti alle note.
 - I media importati vengono salvati nella cartella progetto e restano collegati ai cue.
 - Usa la modalità schermo intero per seguire battute e cue durante l'esecuzione; prima dell'avvio l'app segnala eventuali anomalie tipografiche o formali.
@@ -42,6 +45,20 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 `)
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
+
+## Versione 1.0.16
+
+> Aggiornamento dedicato a gestione progetti, Store, condivisione strutturata e finiture UI.
+
+- La dialog Apri progetto include ricerca, paginazione, apertura rapida, rinomina ed eliminazione dei progetti.
+- Il pulsante Importa apre lo Store in un tab dello spazio editor, con indicatore di caricamento.
+- Pubblicata la pagina Store "Under Construction" sul sito pubblico StageDesk Pro.
+- Migliorata la resa grafica della dialog Apri progetto: focus ricerca più discreto, lista compatta, pulsanti di pagina con icone e menu progetto più ordinato.
+- La condivisione del copione include anche le note di movimento, posizione, personaggi in scena e tono.
+- L'export PDF pulito conserva le note di movimento, posizione, personaggi in scena e tono.
+- Aggiunta l'icona di stato condivisione nella schermata principale, senza bordo circolare.
+- Migliorato l'ordinamento del menu Note: Nota generale è sempre in alto, con separatori dedicati.
+- Corretto il testo dei bookmark salvati, evitando che venisse mostrato il codice del chip.
 
 ## Versione 1.0.15
 
