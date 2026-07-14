@@ -1,4 +1,5 @@
 import { mergeAttributes, Node } from '@tiptap/core'
+import { sanitizeChipLabel } from './chipText'
 
 type CuePlaybackState = {
   id: string
@@ -37,7 +38,7 @@ export const ScriptChip = Node.create({
       },
       label: {
         default: '',
-        parseHTML: (element) => element.getAttribute('data-chip-label') ?? element.textContent ?? '',
+        parseHTML: (element) => sanitizeChipLabel(element.getAttribute('data-chip-label') ?? element.textContent ?? ''),
       },
       refId: {
         default: '',
@@ -59,13 +60,13 @@ export const ScriptChip = Node.create({
       'span',
       mergeAttributes(HTMLAttributes, {
         'data-chip': node.attrs.kind,
-        'data-chip-label': node.attrs.label,
+        'data-chip-label': sanitizeChipLabel(node.attrs.label),
         'data-ref-id': node.attrs.refId,
         'data-chip-color': node.attrs.color,
         contenteditable: 'false',
         draggable: 'false',
       }),
-      node.attrs.label,
+      sanitizeChipLabel(node.attrs.label),
     ]
   },
 
@@ -115,11 +116,12 @@ export const ScriptChip = Node.create({
       }
 
       const render = () => {
+        const safeLabel = sanitizeChipLabel(currentNode.attrs.label)
         dom.dataset.chip = String(currentNode.attrs.kind)
-        dom.dataset.chipLabel = String(currentNode.attrs.label ?? '')
+        dom.dataset.chipLabel = safeLabel
         dom.dataset.refId = String(currentNode.attrs.refId ?? '')
         dom.dataset.chipColor = String(currentNode.attrs.color ?? '')
-        label.textContent = String(currentNode.attrs.label ?? '')
+        label.textContent = safeLabel
         const isPlayableCue =
           currentNode.attrs.kind === 'cue' &&
           (currentNode.attrs.color === 'audio' || currentNode.attrs.color === 'music')

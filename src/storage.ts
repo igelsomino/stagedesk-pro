@@ -23,6 +23,8 @@ export type ProjectStorage = {
   createProjectFolder(project: Project): Promise<string | undefined>
   openProjectFolder(path?: string): Promise<ProjectOpenResult | undefined>
   openLastProjectFolder(): Promise<ProjectOpenResult | undefined>
+  renameProjectFolder(path: string, name: string): Promise<ProjectEntry>
+  deleteProjectFolder(path: string): Promise<void>
   saveProjectFolder(project: Project): Promise<string | undefined>
   writeMediaAsset(targetPath: string, file: File): Promise<void>
   moveMediaAsset(sourcePath: string, targetPath: string): Promise<void>
@@ -118,6 +120,36 @@ export const browserProjectStorage: ProjectStorage = {
     }
 
     return undefined
+  },
+  async renameProjectFolder(path, name) {
+    if (isTauriRuntime()) {
+      const renamed = await invokeIfDesktop<ProjectEntry>('rename_project_folder', { projectPath: path, projectName: name })
+      if (!renamed) throw new Error('Rinomina progetto non disponibile')
+      return renamed
+    }
+    if (isLocalDevRuntime()) {
+      return fetchProjectStorage<ProjectEntry>('/rename-project', {
+        method: 'POST',
+        body: { projectPath: path, projectName: name },
+      })
+    }
+
+    throw new Error('Rinomina progetto non disponibile nel picker browser')
+  },
+  async deleteProjectFolder(path) {
+    if (isTauriRuntime()) {
+      await invokeIfDesktop('delete_project_folder', { projectPath: path })
+      return
+    }
+    if (isLocalDevRuntime()) {
+      await fetchProjectStorage('/delete-project', {
+        method: 'POST',
+        body: { projectPath: path },
+      })
+      return
+    }
+
+    throw new Error('Eliminazione progetto non disponibile nel picker browser')
   },
   async saveProjectFolder(project) {
     if (isTauriRuntime()) {

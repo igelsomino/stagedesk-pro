@@ -1,17 +1,27 @@
 import type { DirectorNote, MediaCue, ProjectTreeNode, ScriptBlock } from './domain'
+import { sanitizeChipLabel } from './chipText'
 
-export const cleanScriptMarkdown = (markdown: string) =>
-  markdown
+type CleanScriptMarkdownOptions = {
+  preserveNoteTypes?: readonly string[]
+}
+
+export const cleanScriptMarkdown = (markdown: string, options: CleanScriptMarkdownOptions = {}) => {
+  const preserveNoteTypes = new Set(options.preserveNoteTypes ?? [])
+  return markdown
     .replace(/::battuta\{([^}]*)\}([\s\S]*?)::/g, (_, attrs: string, content: string) =>
       dialoguePlainLine(attrs, content),
     )
-    .replace(/::regia\{[^}]*\}[\s\S]*?::/g, '')
+    .replace(/::regia\{([^}]*)\}([\s\S]*?)::/g, (match: string, attrs: string) => {
+      const noteType = readAttr(attrs, 'type') ?? 'general'
+      return preserveNoteTypes.has(noteType) ? match : ''
+    })
     .replace(/::media\{[^}]*\}[\s\S]*?::/g, '')
     .replace(/^\[NOTA:[^\]]+\](?:\s+\{[^}]+\})?\s*$/gm, '')
     .replace(/^\[CUE[:\s][^\]]+\](?:\s+\{[^}]+\})?\s*$/gm, '')
     .replace(/\s*\[BOOKMARK:[^\]]+\](?:\s+\{[^}]+\})?/g, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
+}
 
 export const toEditorMarkdown = (markdown: string) =>
   markdown
@@ -538,10 +548,10 @@ const parseChipLine = (line: string) => {
   }
 
   const richCueMatch = line.match(/^\[CUE:?\s*([^\]]+)\](?:\s+\{#([^\s}]+)(?:\s+\.([^}]+))?\})?$/)
-  if (richCueMatch) return { label: richCueMatch[1], refId: richCueMatch[2] ?? '', color: richCueMatch[3] ?? '', type: '', content: '', collapsed: false }
+  if (richCueMatch) return { label: sanitizeChipLabel(richCueMatch[1], 'Cue'), refId: richCueMatch[2] ?? '', color: richCueMatch[3] ?? '', type: '', content: '', collapsed: false }
 
   const bookmarkMatch = line.match(/^\[BOOKMARK:\s*([^\]]+)\](?:\s+\{#([^\s}]+)[^}]*\})?$/)
-  if (bookmarkMatch) return { label: bookmarkMatch[1], refId: bookmarkMatch[2] ?? '', color: 'bookmark', type: '', content: '', collapsed: false }
+  if (bookmarkMatch) return { label: sanitizeChipLabel(bookmarkMatch[1], 'Bookmark'), refId: bookmarkMatch[2] ?? '', color: 'bookmark', type: '', content: '', collapsed: false }
 
   const cueMatch = line.match(/^(.*?)(?:\s+\{#([^\s}]+)\})?$/)
   return { label: cueMatch?.[1] ?? line, refId: cueMatch?.[2] ?? '', color: '', type: '', content: '', collapsed: false }
@@ -561,8 +571,10 @@ const parseDialogueLine = (line: string) => {
   }
 }
 
-const chipHtml = (kind: 'cue' | 'bookmark', label: string, refId = '', color = '') =>
-  `<p><span data-chip="${kind}" data-chip-label="${escapeAttr(label)}" data-ref-id="${escapeAttr(refId)}" data-chip-color="${escapeAttr(color)}" contenteditable="false" draggable="true">${escapeHtml(label)}</span></p>`
+const chipHtml = (kind: 'cue' | 'bookmark', label: string, refId = '', color = '') => {
+  const safeLabel = sanitizeChipLabel(label, kind === 'bookmark' ? 'Bookmark' : 'Cue')
+  return `<p><span data-chip="${kind}" data-chip-label="${escapeAttr(safeLabel)}" data-ref-id="${escapeAttr(refId)}" data-chip-color="${escapeAttr(color)}" contenteditable="false" draggable="true">${escapeHtml(safeLabel)}</span></p>`
+}
 
 const noteBlockHtml = (label: string, refId = '', color = '', type = 'general', content = '', collapsed = false) =>
   `<div data-note-block="true" data-note-type="${escapeAttr(type)}" data-note-color="${escapeAttr(color)}" data-note-title="${escapeAttr(label)}" data-note-content="${escapeAttr(content)}" data-ref-id="${escapeAttr(refId)}" data-note-collapsed="${String(collapsed)}">${escapeHtml(label)}</div>`
@@ -575,9 +587,10 @@ const escapeHtml = (value: string) =>
 
 const renderInlineMarkdown = (value: string) =>
   escapeHtml(value)
-    .replace(/\[BOOKMARK:\s*([^\]]+)\](?:\s+\{#([^\s}]+)[^}]*\})?/g, (_, label: string, refId: string) =>
-      `<span data-chip="bookmark" data-chip-label="${escapeAttr(label)}" data-ref-id="${escapeAttr(refId ?? '')}" data-chip-color="bookmark" contenteditable="false" draggable="true">${label}</span>`,
-    )
+    .replace(/\[BOOKMARK:\s*([^\]]+)\](?:\s+\{#([^\s}]+)[^}]*\})?/g, (_, label: string, refId: string) => {
+      const safeLabel = sanitizeChipLabel(label, 'Bookmark')
+      return `<span data-chip="bookmark" data-chip-label="${escapeAttr(safeLabel)}" data-ref-id="${escapeAttr(refId ?? '')}" data-chip-color="bookmark" contenteditable="false" draggable="true">${escapeHtml(safeLabel)}</span>`
+    })
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, label: string, href: string) =>
       `<a href="${escapeAttr(href)}" target="_blank" rel="noreferrer">${label}</a>`,
     )

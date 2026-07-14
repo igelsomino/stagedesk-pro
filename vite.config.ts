@@ -91,6 +91,24 @@ const projectStorageApi = (): Plugin => ({
           return
         }
 
+        if (req.method === 'POST' && url.pathname === '/rename-project') {
+          const body = await readJsonBody(req)
+          const projectPath = resolveProjectPath(String(body.projectPath ?? ''))
+          const projectName = String(body.projectName ?? '').trim()
+          if (!projectName) throw new Error('Nome progetto mancante')
+          const renamed = await renameProjectFolder(projectPath, projectName)
+          sendJson(res, renamed)
+          return
+        }
+
+        if (req.method === 'POST' && url.pathname === '/delete-project') {
+          const body = await readJsonBody(req)
+          const projectPath = resolveProjectPath(String(body.projectPath ?? ''))
+          await deleteProjectFolder(projectPath)
+          sendJson(res, { ok: true })
+          return
+        }
+
         if (req.method === 'POST' && url.pathname === '/save') {
           const body = await readJsonBody(req)
           if (!currentProjectPath) throw new Error('Nessuna cartella progetto aperta')
@@ -270,6 +288,28 @@ const writeProject = async (projectPath: string, project: StoredProject) => {
   await fs.writeFile(path.join(projectPath, 'project.json'), JSON.stringify(projectWithPath, null, 2))
   await writeScriptTree(projectPath, projectWithPath.scripts ?? [])
   await writeMediaTree(projectPath, projectWithPath.media ?? [])
+}
+
+const renameProjectFolder = async (projectPath: string, projectName: string) => {
+  const project = await readProject(projectPath)
+  const targetPath = path.join(projectsRoot, safeFolderName(projectName))
+  if (targetPath !== projectPath) {
+    try {
+      await fs.access(targetPath)
+      throw new Error('Esiste già un progetto con questo nome')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    await fs.rename(projectPath, targetPath)
+  }
+  await writeProject(targetPath, { ...project, name: projectName, rootPath: targetPath })
+  if (currentProjectPath === projectPath) currentProjectPath = targetPath
+  return { name: projectName, path: targetPath, updatedAt: new Date().toISOString() }
+}
+
+const deleteProjectFolder = async (projectPath: string) => {
+  await fs.rm(projectPath, { recursive: true, force: true })
+  if (currentProjectPath === projectPath) currentProjectPath = undefined
 }
 
 const hydrateScriptFiles = async (root: string, nodes: ScriptNode[]): Promise<ScriptNode[]> =>

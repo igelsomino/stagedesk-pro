@@ -49,16 +49,12 @@ Se digiti `nota:` su una riga vuota, StageDesk Pro inserisce una nota generale e
 
 Quando stai scrivendo dentro la textarea di una battuta o di una nota, usa `Cmd+Invio` su macOS o `Ctrl+Invio` su Windows/Linux per creare una nuova riga sotto il box e continuare a scrivere nell'editor. `Shift+Invio` resta disponibile per andare a capo dentro la textarea.
 
-Dal menu con le maschere puoi inserire rapidamente Atto, Scena, Sezione, note di regia, battute dei personaggi ed export. I comandi Atto, Scena e Sezione applicano lo stile alla riga corrente, al testo selezionato o inseriscono il titolo base quando la riga è vuota.
+Dal menu con le maschere puoi inserire rapidamente Atto, Scena, Sezione, note di regia, battute dei personaggi, export e condivisione. I comandi Atto, Scena e Sezione applicano lo stile alla riga corrente, al testo selezionato o inseriscono il titolo base quando la riga è vuota.
 
 Scorciatoie utili:
 
 | Scorciatoia | Azione |
 | --- | --- |
-| Alt+1 | Atto |
-| Alt+2 | Scena |
-| Alt+3 | Sezione |
-| Alt+Shift+1..9 | Battuta del personaggio corrispondente |
 | Cmd/Ctrl+Invio | Esci dalla textarea di nota o battuta e crea una riga sotto il box |
 
 ## Note di regia
@@ -129,6 +125,14 @@ Il menu Export genera un PDF del file attivo:
 - pulito, senza marcatori visuali.
 
 Alla fine dell'export l'app mostra dove è stato salvato il file e, quando possibile, un comando per aprirlo.
+
+## Condivisione copione
+
+Dal menu con le maschere puoi aprire Condividi. La dialog prepara e carica su Supabase Storage il copione attivo, pensato per le future app Android e iOS dedicate agli attori.
+
+Il file condiviso contiene i personaggi e le relative battute con identificativi, scena e riga sorgente. Dalla stessa dialog puoi aggiornare l'ultima versione condivisa, interrompere la condivisione eliminando il file, copiare il link o condividerlo tramite QR code.
+
+Nelle app attori, dopo l'accesso con Google, GitHub o Azure, l'utente potrà selezionare il proprio personaggio e visualizzare o nascondere le proprie battute per studiare la parte.
 
 ## Aggiornamenti e supporto
 

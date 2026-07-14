@@ -24,8 +24,8 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 - Usa oggetti battuta collegati alla tabella personaggi.
 - Digita \`nota:\` su una riga vuota per inserire una nota generale con focus nel contenuto.
 - Inserisci Atto, Scena, Sezione, battute e tabelle dalla toolbar teatrale.
-- Usa Alt+1, Alt+2, Alt+3 per Atto, Scena e Sezione; usa Alt+Shift+1..9 per le battute dei personaggi.
 - Usa Cmd+Invio su macOS o Ctrl+Invio su Windows/Linux dentro una nota o battuta per creare una riga sotto il box.
+- Condividi il copione attivo per future app attori, con link copiabile e QR code.
 - Collassa o espandi tutte le note e assegna colori predefiniti alle note.
 - I media importati vengono salvati nella cartella progetto e restano collegati ai cue.
 - Usa la modalità schermo intero per seguire battute e cue durante l'esecuzione; prima dell'avvio l'app segnala eventuali anomalie tipografiche o formali.
@@ -55,6 +55,8 @@ const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 - Il player audio nativo applica fade in e fade out anche nella versione desktop.
 - Aggiornati Aiuto, README tecnico e fallback offline dei documenti applicativi.
 - Aggiunti Code of Conduct, guida contributi, licenza, security policy, template issue e template pull request per completare gli standard community del repository GitHub.
+- Aggiunta la dialog Condividi per preparare il copione attivo destinato alle future app attori, con aggiornamento, rimozione, link e QR code.
+- Rimossi gli shortcut da tastiera per Struttura e Battuta dal menu teatrale.
 
 ## Versione 1.0.14
 

@@ -256,6 +256,67 @@ fn open_last_project_folder(
 }
 
 #[tauri::command]
+fn rename_project_folder(
+    app: AppHandle,
+    state: State<CurrentProject>,
+    project_path: String,
+    project_name: String,
+) -> Result<ProjectEntry, String> {
+    let current_path = project_path_in_root(&app, &project_path)?;
+    let project = read_project(&current_path)?;
+    let root = projects_root_path(&app)?;
+    let target_path = root.join(safe_folder_name(&project_name));
+
+    if target_path != current_path {
+        if target_path.exists() {
+            return Err("Esiste già un progetto con questo nome".to_string());
+        }
+        fs::rename(&current_path, &target_path).map_err(|error| error.to_string())?;
+    }
+
+    let mut project = project;
+    if let Some(object) = project.as_object_mut() {
+        object.insert("name".to_string(), Value::String(project_name.clone()));
+        object.insert(
+            "rootPath".to_string(),
+            Value::String(target_path.to_string_lossy().to_string()),
+        );
+    }
+    let project_json = serde_json::to_string_pretty(&project).map_err(|error| error.to_string())?;
+    write_project(&target_path, &project_json, Some(&app))?;
+
+    let mut state_path = state.path.lock().map_err(|error| error.to_string())?;
+    if state_path.as_ref() == Some(&current_path) {
+        *state_path = Some(target_path.clone());
+        write_last_project_path(&app, &target_path)?;
+    }
+
+    Ok(ProjectEntry {
+        name: project_name,
+        path: target_path.to_string_lossy().to_string(),
+        updated_at: project_updated_at(&target_path),
+    })
+}
+
+#[tauri::command]
+fn delete_project_folder(
+    app: AppHandle,
+    state: State<CurrentProject>,
+    project_path: String,
+) -> Result<(), String> {
+    let current_path = project_path_in_root(&app, &project_path)?;
+    fs::remove_dir_all(&current_path).map_err(|error| error.to_string())?;
+
+    let mut state_path = state.path.lock().map_err(|error| error.to_string())?;
+    if state_path.as_ref() == Some(&current_path) {
+        *state_path = None;
+        let _ = fs::remove_file(last_project_file_path(&app)?);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 fn save_project_folder(
     app: AppHandle,
     state: State<CurrentProject>,
@@ -585,6 +646,25 @@ fn projects_root_path(app: &AppHandle) -> Result<PathBuf, String> {
         .join("projects");
     fs::create_dir_all(&root).map_err(|error| error.to_string())?;
     Ok(root)
+}
+
+fn project_path_in_root(app: &AppHandle, project_path: &str) -> Result<PathBuf, String> {
+    let root = fs::canonicalize(projects_root_path(app)?).map_err(|error| error.to_string())?;
+    let path = fs::canonicalize(PathBuf::from(project_path)).map_err(|error| error.to_string())?;
+    if !path.starts_with(&root) || !path.join(PROJECT_FILE_NAME).exists() {
+        return Err("Percorso progetto non valido".to_string());
+    }
+    Ok(path)
+}
+
+fn project_updated_at(project_path: &Path) -> Option<String> {
+    project_path
+        .join(PROJECT_FILE_NAME)
+        .metadata()
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs().to_string())
 }
 
 fn unique_project_path(root: &Path, name: &str) -> PathBuf {
@@ -965,6 +1045,8 @@ pub fn run() {
             create_project_folder,
             open_project_folder,
             open_last_project_folder,
+            rename_project_folder,
+            delete_project_folder,
             save_project_folder,
             load_project_json,
             save_project_json,

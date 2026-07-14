@@ -55,6 +55,15 @@ describe('markdown chip rendering', () => {
     expect(html).toContain('>Blues intro</span>')
   })
 
+  it('sanitizes bookmark labels that were persisted with chip html', () => {
+    const html = markdownToHtml('[BOOKMARK: &lt;span data-chip=&quot;bookmark&quot; data-chip-label=&quot;Scena finale&quot; data-ref-id=&quot;bookmark-001&quot;&gt;Scena finale&lt;/span&gt;] {#bookmark-001}')
+
+    expect(html).toContain('data-chip="bookmark"')
+    expect(html).toContain('data-chip-label="Scena finale"')
+    expect(html).toContain('>Scena finale</span>')
+    expect(html).not.toContain('data-chip-label="&lt;span')
+  })
+
   it('renders structured actor dialogue blocks with stable ids', () => {
     const html = markdownToHtml('::battuta{id="battuta-001" characterId="mirandolina" character="MIRANDOLINA" sceneId="scena-1"}\nA pranzo?\n::')
 
@@ -245,6 +254,22 @@ describe('markdown serialization', () => {
     ].join('\n'))
 
     expect(clean).toBe('PERSONAGGIO\nBattuta.')
+  })
+
+  it('can preserve selected director note types in clean export', () => {
+    const clean = cleanScriptMarkdown([
+      '::regia{id="note-tone" type="tone" color="purple" title="Tono"}',
+      'Sottovoce.',
+      '::',
+      '::regia{id="note-light" type="light" color="yellow" title="Luce"}',
+      'Taglio caldo.',
+      '::',
+    ].join('\n'), { preserveNoteTypes: ['tone'] })
+
+    expect(clean).toContain('type="tone"')
+    expect(clean).toContain('Sottovoce.')
+    expect(clean).not.toContain('type="light"')
+    expect(clean).not.toContain('Taglio caldo.')
   })
 
   it('parses the visual cue marker as a media block', () => {

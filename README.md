@@ -46,7 +46,7 @@ Implementato:
 15. conversione automatica `nota:` in nota generale con focus sul contenuto;
 16. `Cmd/Ctrl+Invio` dalle textarea di note e battute per creare una riga sotto il box;
 17. inserimento toolbar di Atto, Scena, Sezione, note, battute, tabelle ed export;
-18. scorciatoie per struttura e battute;
+18. menu teatrale per struttura, note, battute, export e condivisione;
 19. cue audio, musica, immagine e video;
 20. controlli inline per cue audio/musica;
 21. inspector laterale dedicato ai cue;
@@ -135,9 +135,7 @@ Scorciatoie e inserimenti testuali principali:
 
 1. `Personaggio:` converte la riga in un oggetto battuta se il personaggio è presente nella tabella personaggi;
 2. `nota:` inserisce una nota generale nel punto corrente e porta il focus nel contenuto;
-3. `Alt+1`, `Alt+2`, `Alt+3` inseriscono o applicano Atto, Scena e Sezione;
-4. `Alt+Shift+1..9` inserisce una battuta del personaggio corrispondente;
-5. `Cmd+Invio` su macOS o `Ctrl+Invio` su Windows/Linux, dentro una textarea di nota o battuta, crea una riga sotto il box e sposta lì il cursore.
+3. `Cmd+Invio` su macOS o `Ctrl+Invio` su Windows/Linux, dentro una textarea di nota o battuta, crea una riga sotto il box e sposta lì il cursore.
 
 ## Documenti applicativi
 

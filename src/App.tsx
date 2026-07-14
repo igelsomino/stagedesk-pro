@@ -8,6 +8,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import { TableKit } from '@tiptap/extension-table'
 import type { jsPDF as JsPDF } from 'jspdf'
+import QRCode from 'qrcode'
 import {
   BookOpen,
   Bookmark,
@@ -15,6 +16,9 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  CloudCheck,
+  CloudOff,
+  CloudUpload,
   Copy,
   Download,
   Drama,
@@ -59,7 +63,7 @@ import {
   LogOut,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   CSSProperties,
   ChangeEvent,
@@ -72,6 +76,7 @@ import type {
 } from 'react'
 import './App.css'
 import { appDocumentContent, fetchAppDocumentContent, getAppDocument, isAppDocumentPath } from './appDocs'
+import { supabase } from './auth'
 import { useAuth } from './authContext'
 import type { DirectorNote, MediaAsset, MediaCue, NotePanelMode, NoteType, Project, ProjectTreeNode } from './domain'
 import { blankProject } from './defaultProject'
@@ -88,6 +93,7 @@ import {
   slug,
 } from './markdown'
 import { ScriptChip } from './scriptChip'
+import { sanitizeChipLabel } from './chipText'
 import { ScriptDialogue } from './scriptDialogue'
 import { ScriptNote } from './scriptNote'
 import { browserProjectStorage, readBrowserMediaAssetObjectUrl } from './storage'
@@ -111,6 +117,10 @@ const STOP_EDITOR_PLAYBACK_EVENT = 'stagedesk-stop-editor-playback'
 const UI_STATE_STORAGE_KEY = 'stagedesk-pro.ui-state'
 const WINDOW_STATE_STORAGE_KEY = 'stagedesk-pro.window-state'
 const PLAYBACK_LOG_STORAGE_KEY = 'stagedesk-pro.playback-log'
+const PUBLISHED_SCRIPT_BUCKET = 'published-scripts'
+const SHARED_SCRIPT_NOTE_TYPES = ['movement', 'position', 'characters', 'tone'] as const
+const STORE_TAB_PATH = 'web://stagedesk-store'
+const STORE_URL = 'https://stagedesk-pro.aigconsulting.it/store/'
 type EditorCueState = 'playing' | 'paused' | 'stopped'
 type EditorCueStateWindow = Window & {
   __STAGEDESK_EDITOR_CUE_STATE__?: { id: string; state: EditorCueState }
@@ -118,6 +128,53 @@ type EditorCueStateWindow = Window & {
 type CharacterOption = {
   id: string
   name: string
+}
+type PublishedScriptDialogue = {
+  id: string
+  characterId: string
+  characterName: string
+  sceneId?: string
+  text: string
+  sourceLine?: number
+}
+type PublishedScriptCharacter = CharacterOption & {
+  dialogues: PublishedScriptDialogue[]
+}
+type PublishedScriptNote = {
+  id: string
+  type: string
+  title: string
+  content: string
+  sceneId?: string
+  sourceLine?: number
+}
+type PublishedScriptPayload = {
+  schemaVersion: 1
+  app: 'StageDesk Pro'
+  project: {
+    id: string
+    name: string
+  }
+  script: {
+    path: string
+    name: string
+  }
+  publishedAt: string
+  characters: PublishedScriptCharacter[]
+  dialogues: PublishedScriptDialogue[]
+  notes: PublishedScriptNote[]
+}
+type PublishState = {
+  status: 'idle' | 'publishing' | 'published' | 'removing' | 'error'
+  url?: string
+  storagePath?: string
+  publishedAt?: string
+  error?: string
+}
+type ShareIndicatorState = {
+  status: 'disabled' | 'checking' | 'shared' | 'not-shared' | 'error'
+  url?: string
+  message?: string
 }
 type CharacterOptionsWindow = Window & {
   __STAGEDESK_CHARACTER_OPTIONS__?: CharacterOption[]
@@ -255,6 +312,9 @@ function App() {
   const pendingEditorSelectionRef = useRef<number | undefined>(undefined)
   const fullscreenReturnBlockRef = useRef<ReturnType<typeof parseScriptBlocks>[number] | undefined>(undefined)
   const [scriptDialog, setScriptDialog] = useState<ScriptActionDialog | undefined>()
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false)
+  const [publishState, setPublishState] = useState<PublishState>({ status: 'idle' })
+  const [shareIndicator, setShareIndicator] = useState<ShareIndicatorState>({ status: 'disabled' })
   const [theaterMenuOpen, setTheaterMenuOpen] = useState(false)
   const [theaterMenuPosition, setTheaterMenuPosition] = useState<{ top: number; left: number } | undefined>()
   const [tableMenuOpen, setTableMenuOpen] = useState(false)
@@ -281,6 +341,7 @@ function App() {
   const markdownFiles = useMemo(() => flattenMarkdownFiles(project.scripts), [project.scripts])
   const activeFile = useMemo(() => findMarkdownNode(project.scripts, activePath), [activePath, project.scripts])
   const activeAppDocument = useMemo(() => getAppDocument(activePath), [activePath])
+  const activeStoreTab = activePath === STORE_TAB_PATH
   const selectedScriptNode = useMemo(
     () => findTreeNode(project.scripts, selectedScriptPath),
     [project.scripts, selectedScriptPath],
@@ -292,11 +353,13 @@ function App() {
   const activeAppDocumentMarkdown = activeAppDocument
     ? appDocumentContent(activeAppDocument, installedUpdateVersion, remoteAppDocuments[activeAppDocument.path])
     : ''
-  const activeMarkdown = activeAppDocument
+  const activeMarkdown = activeStoreTab
+    ? ''
+    : activeAppDocument
     ? activeAppDocumentMarkdown
     : drafts[activePath] ?? activeFile?.content ?? ''
   const [editorMarkdown, setEditorMarkdown] = useState(activeMarkdown)
-  const activeCharacterMarkdown = activeAppDocument ? activeMarkdown : editorMarkdown || activeMarkdown
+  const activeCharacterMarkdown = activeAppDocument || activeStoreTab ? activeMarkdown : editorMarkdown || activeMarkdown
   const activeCharacters = useMemo(
     () => charactersFromMarkdown(activeCharacterMarkdown, project.characters),
     [activeCharacterMarkdown, project.characters],
@@ -315,8 +378,16 @@ function App() {
   const currentScene = activeEditorSceneId || currentBlock?.sceneId
   const selectedNoteType =
     project.noteTypes.find((noteType) => noteType.id === selectedNoteTypeId) ?? defaultNoteType(project.noteTypes)
+  const noteMenuTypes = useMemo(() => {
+    const general = project.noteTypes.find((noteType) => noteType.id === 'general')
+    const remaining = project.noteTypes.filter((noteType) => noteType.id !== 'general')
+    return general ? [general, ...remaining] : remaining
+  }, [project.noteTypes])
   const selectedMediaIsProtectedRoot = selectedMediaNode ? isProtectedMediaRoot(selectedMediaNode) : false
   const activeFilePath = activeFile?.path ?? ''
+  const activeShareStoragePath = user && activeFile && !activeAppDocument
+    ? publishedScriptStoragePath(user.id, project.id, activeFile.path)
+    : ''
   const userEmail = user?.email ?? 'Utente autenticato'
   const activeCharactersRef = useRef(activeCharacters)
   const currentSceneRef = useRef(currentScene)
@@ -405,6 +476,43 @@ function App() {
   useEffect(() => {
     chipInspectorRef.current = { notes: fileNotes, cues: fileCues }
   }, [fileCues, fileNotes])
+
+  useEffect(() => {
+    let active = true
+    if (!user || !activeFile || activeAppDocument || !activeShareStoragePath) {
+      setShareIndicator({ status: 'disabled' })
+      return undefined
+    }
+
+    const checkSharedFile = async () => {
+      setShareIndicator({ status: 'checking' })
+      try {
+        const folderPath = `${user.id}/${project.id}`
+        const fileName = `${slug(activeFile.path)}.json`
+        const { data, error } = await supabase.storage
+          .from(PUBLISHED_SCRIPT_BUCKET)
+          .list(folderPath, { limit: 100, search: fileName })
+        if (error) throw error
+        if (!active) return
+        const shared = Boolean(data?.some((item) => item.name === fileName))
+        const { data: publicUrlData } = supabase.storage.from(PUBLISHED_SCRIPT_BUCKET).getPublicUrl(activeShareStoragePath)
+        setShareIndicator(shared
+          ? { status: 'shared', url: publicUrlData.publicUrl }
+          : { status: 'not-shared' })
+      } catch (error) {
+        if (!active) return
+        setShareIndicator({
+          status: 'error',
+          message: publishErrorMessage(error),
+        })
+      }
+    }
+
+    void checkSharedFile()
+    return () => {
+      active = false
+    }
+  }, [activeAppDocument, activeFile, activeShareStoragePath, project.id, user])
 
   useEffect(() => {
     const installedVersion = window.localStorage.getItem(INSTALLED_UPDATE_VERSION_KEY)
@@ -1070,8 +1178,8 @@ function App() {
     },
     immediatelyRender: false,
   })
-  const editorEditingDisabled = !editor || Boolean(activeAppDocument)
-  const activeDocumentTitle = activeFile?.name ?? activeAppDocument?.title
+  const editorEditingDisabled = !editor || Boolean(activeAppDocument) || activeStoreTab
+  const activeDocumentTitle = activeFile?.name ?? activeAppDocument?.title ?? (activeStoreTab ? 'Store' : undefined)
   const selectedTableContext = editor ? currentTableContext(editor) : undefined
   const selectedCharacterTable = Boolean(selectedTableContext?.isCharacterTable)
   const selectedCharacterTableHeaderRow = Boolean(selectedTableContext?.isCharacterTable && selectedTableContext.isHeaderRow)
@@ -1185,8 +1293,8 @@ function App() {
 
   useEffect(() => {
     if (!editor) return
-    editor.setEditable(!activeAppDocument)
-  }, [activeAppDocument, editor])
+    editor.setEditable(!activeAppDocument && !activeStoreTab)
+  }, [activeAppDocument, activeStoreTab, editor])
 
   useEffect(() => {
     if (!editor || activeAppDocument) return
@@ -1204,6 +1312,17 @@ function App() {
 
   useEffect(() => {
     if (!editor) return
+
+    if (activeStoreTab) {
+      editor.commands.setContent('', { emitUpdate: false })
+      setEditorMarkdown('')
+      setActiveOutline([])
+      setActiveOutlineId('')
+      setActiveBookmarks([])
+      setActiveBookmarkId('')
+      setEditorCueRefIds([])
+      return
+    }
 
     if (activeAppDocument) {
       editor.commands.setContent(markdownToHtml(activeAppDocumentMarkdown, { preserveEmptyParagraphs: false }), { emitUpdate: false })
@@ -1243,7 +1362,7 @@ function App() {
     syncOutlineState(editor, setActiveOutline, setActiveOutlineId)
     syncBookmarkState(editor, setActiveBookmarks, setActiveBookmarkId)
     syncEditorCueRefs(editor, setEditorCueRefIds)
-  }, [activeAppDocument, activeAppDocumentMarkdown, activeFilePath, editor, project.id])
+  }, [activeAppDocument, activeAppDocumentMarkdown, activeFilePath, activeStoreTab, editor, project.id])
 
   useEffect(() => {
     if (!editor || !activeFilePath) return
@@ -1684,6 +1803,45 @@ function App() {
       })
       .catch((error) => setStorageStatus(`Apertura progetto non riuscita: ${String(error)}`))
 
+  const refreshProjectPickerEntries = () =>
+    storage.listProjectFolders()
+      .then(setProjectPickerEntries)
+      .catch((error) => setStorageStatus(`Aggiornamento lista progetti non riuscito: ${String(error)}`))
+
+  const renameProjectEntry = (entry: ProjectEntry) => {
+    const nextName = prompt('Nuovo nome progetto', entry.name)?.trim()
+    if (!nextName || nextName === entry.name) return
+    storage.renameProjectFolder(entry.path, nextName)
+      .then((renamed) => {
+        setStorageStatus(`Progetto rinominato: ${nextName}`)
+        setProjectPickerEntries((current) =>
+          current.map((item) => item.path === entry.path ? { ...item, name: renamed.name, path: renamed.path } : item),
+        )
+        if (project.rootPath === entry.path) {
+          const renamedProject = { ...projectRef.current, name: nextName, rootPath: renamed.path }
+          projectRef.current = renamedProject
+          setProject(renamedProject)
+          storage.save(renamedProject)
+        }
+      })
+      .catch((error) => setStorageStatus(`Rinomina progetto non riuscita: ${String(error)}`))
+  }
+
+  const deleteProjectEntry = (entry: ProjectEntry) => {
+    if (!confirm(`Eliminare definitivamente il progetto "${entry.name}"?`)) return
+    storage.deleteProjectFolder(entry.path)
+      .then(() => {
+        setProjectPickerEntries((current) => current.filter((item) => item.path !== entry.path))
+        setStorageStatus(`Progetto eliminato: ${entry.name}`)
+        if (project.rootPath === entry.path) {
+          const nextProject = storage.reset()
+          activateProject(nextProject)
+        }
+        void refreshProjectPickerEntries()
+      })
+      .catch((error) => setStorageStatus(`Eliminazione progetto non riuscita: ${String(error)}`))
+  }
+
   const openMarkdownTab = (path: string) => {
     setOpenTabs((current) => (current.includes(path) ? current : [...current, path]))
     setActivePath(path)
@@ -1694,6 +1852,12 @@ function App() {
     if (!isAppDocumentPath(path)) return
     setOpenTabs((current) => (current.includes(path) ? current : [...current, path]))
     setActivePath(path)
+  }
+
+  const openStoreTab = () => {
+    setProjectPickerEntries([])
+    setOpenTabs((current) => (current.includes(STORE_TAB_PATH) ? current : [...current, STORE_TAB_PATH]))
+    setActivePath(STORE_TAB_PATH)
   }
 
   const closeMarkdownTab = (path: string) => {
@@ -1713,7 +1877,7 @@ function App() {
         const closedIndex = current.indexOf(path)
         const fallbackPath = nextTabs[Math.max(0, closedIndex - 1)] ?? nextTabs[0] ?? ''
         setActivePath(fallbackPath)
-        if (fallbackPath && !isAppDocumentPath(fallbackPath)) setSelectedScriptPath(fallbackPath)
+        if (fallbackPath && !isAppDocumentPath(fallbackPath) && fallbackPath !== STORE_TAB_PATH) setSelectedScriptPath(fallbackPath)
       }
       return nextTabs
     })
@@ -2307,26 +2471,6 @@ function App() {
     setTableContextActive(Boolean(element?.closest('table')))
   }
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!editor || editorEditingDisabled || !event.altKey || event.ctrlKey || event.metaKey) return
-      const key = event.key.toLowerCase()
-      if (!event.shiftKey && (key === '1' || key === '2' || key === '3')) {
-        event.preventDefault()
-        setCurrentBlockAsHeading(Number(key) as 1 | 2 | 3)
-        return
-      }
-      if (event.shiftKey && /^[1-9]$/.test(key)) {
-        const character = dialogueCharacters[Number(key) - 1]
-        if (!character) return
-        event.preventDefault()
-        insertActorDialogueForCharacter(character)
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [dialogueCharacters, editor, editorEditingDisabled, insertActorDialogueForCharacter, setCurrentBlockAsHeading])
-
   const showBookmarkDialog = () => {
     if (!editor || !activeFile) return
     setScriptDialog({
@@ -2701,6 +2845,87 @@ function App() {
     if (exportResult.objectUrl) openObjectUrlInNewTab(exportResult.objectUrl)
   }
 
+  const showPublishDialog = () => {
+    setTheaterMenuOpen(false)
+    setTheaterMenuPosition(undefined)
+    setPublishDialogOpen(true)
+    setPublishState((current) => current.status === 'idle' ? current : { ...current, error: undefined })
+  }
+
+  const publishScriptJson = async (mode: 'publish' | 'update' = 'publish') => {
+    if (!activeFile || activeAppDocument) {
+      setPublishState({ status: 'error', error: 'Apri un file copione del progetto prima di condividere.' })
+      return
+    }
+    if (!user) {
+      setPublishState({ status: 'error', error: 'Utente non autenticato.' })
+      return
+    }
+
+    const markdown = buildActiveExtendedMarkdown() ?? editorMarkdown
+    const payload = buildPublishedScriptPayload(project, activeFile, markdown, activeCharacters)
+    const storagePath = publishedScriptStoragePath(user.id, project.id, activeFile.path)
+    setPublishState((current) => ({ ...current, status: 'publishing', error: undefined, storagePath }))
+
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError) throw sessionError
+      if (!sessionData.session?.user?.id) {
+        throw new Error('Sessione Supabase non disponibile: esegui nuovamente l’accesso.')
+      }
+      const { error } = await supabase.storage
+        .from(PUBLISHED_SCRIPT_BUCKET)
+        .upload(storagePath, JSON.stringify(payload, null, 2), {
+          cacheControl: '60',
+          contentType: 'application/json',
+          upsert: true,
+        })
+      if (error) throw error
+
+      const { data } = supabase.storage.from(PUBLISHED_SCRIPT_BUCKET).getPublicUrl(storagePath)
+      const url = data.publicUrl
+      setPublishState({
+        status: 'published',
+        url,
+        storagePath,
+        publishedAt: payload.publishedAt,
+      })
+      setShareIndicator({ status: 'shared', url })
+      showStatus(mode === 'update' ? 'Condivisione aggiornata' : 'Copione condiviso')
+    } catch (error) {
+      const message = publishErrorMessage(error)
+      setPublishState((current) => ({ ...current, status: 'error', error: message }))
+      showStatus(`Condivisione non riuscita: ${message}`, 12000)
+    }
+  }
+
+  const unpublishScriptJson = async () => {
+    if (!user || !activeFile) return
+    const storagePath = publishState.storagePath || publishedScriptStoragePath(user.id, project.id, activeFile.path)
+    setPublishState((current) => ({ ...current, status: 'removing', error: undefined, storagePath }))
+    try {
+      const { error } = await supabase.storage.from(PUBLISHED_SCRIPT_BUCKET).remove([storagePath])
+      if (error) throw error
+      setPublishState({ status: 'idle' })
+      setShareIndicator({ status: 'not-shared' })
+      showStatus('Condivisione interrotta')
+    } catch (error) {
+      const message = publishErrorMessage(error)
+      setPublishState((current) => ({ ...current, status: 'error', error: message }))
+      showStatus(`Interruzione condivisione non riuscita: ${message}`, 12000)
+    }
+  }
+
+  const copyPublishedLink = async () => {
+    if (!publishState.url) return
+    try {
+      await navigator.clipboard.writeText(publishState.url)
+      showStatus('Link condivisione copiato')
+    } catch (error) {
+      showStatus(`Copia link non riuscita: ${String(error)}`)
+    }
+  }
+
   const submitScriptDialog = () => {
     if (!scriptDialog) return
 
@@ -2755,7 +2980,10 @@ function App() {
         <div>
           <p className="eyebrow">StageDesk Pro</p>
           <h1>{project.name}</h1>
-          <p className="storage-status">{storageStatus}</p>
+          <div className="topbar-meta">
+            <p className="storage-status">{storageStatus}</p>
+            <ShareStatusIndicator state={shareIndicator} />
+          </div>
         </div>
         <div className="topbar-actions">
           <button type="button" className="topbar-button" onClick={resetProject}>
@@ -3022,23 +3250,25 @@ function App() {
             {openTabs.length > 0 ? (
               openTabs.map((path) => {
                 const tabFile = findMarkdownNode(project.scripts, path)
+                const isStoreTab = path === STORE_TAB_PATH
+                const tabTitle = tabFile?.name ?? getAppDocument(path)?.title ?? (isStoreTab ? 'Store' : path.split('/').pop())
                 return (
                   <button
                     type="button"
                     key={path}
-                    className={path === activePath ? fileTabClass(tabFile, true, isAppDocumentPath(path)) : fileTabClass(tabFile, false, isAppDocumentPath(path))}
+                    className={path === activePath ? fileTabClass(tabFile, true, isAppDocumentPath(path) || isStoreTab) : fileTabClass(tabFile, false, isAppDocumentPath(path) || isStoreTab)}
                     onClick={() => {
                       setActivePath(path)
-                      if (!isAppDocumentPath(path)) setSelectedScriptPath(path)
+                      if (!isAppDocumentPath(path) && !isStoreTab) setSelectedScriptPath(path)
                     }}
                   >
-                    <span className="file-tab-name">{tabFile?.name ?? getAppDocument(path)?.title ?? path.split('/').pop()}</span>
+                    <span className="file-tab-name">{tabTitle}</span>
                     {tabFile?.dirty ? <span className="dirty-dot" aria-label="modificato" /> : null}
                     <span
                       role="button"
                       tabIndex={0}
                       className="file-tab-close"
-                      aria-label={`Chiudi ${tabFile?.name ?? getAppDocument(path)?.title ?? path}`}
+                      aria-label={`Chiudi ${tabTitle}`}
                       onClick={(event) => {
                         event.stopPropagation()
                         closeMarkdownTab(path)
@@ -3060,6 +3290,12 @@ function App() {
               <button type="button" className="file-tab active">Nessun file</button>
             )}
           </div>
+          {activeStoreTab ? (
+            <div className="store-tab-view">
+              <iframe title="StageDesk Store" src={STORE_URL} />
+            </div>
+          ) : (
+            <>
           <div className="editor-toolbar">
             <div className="toolbar-group" aria-label="Cronologia">
               <button type="button" title="Annulla" aria-label="Annulla" onClick={() => editor?.chain().focus().undo().run()} disabled={editorEditingDisabled}>
@@ -3254,7 +3490,6 @@ function App() {
                       >
                         <Heading1 size={14} />
                         <span className="menu-item-label">Atto</span>
-                        <kbd>Alt+1</kbd>
                       </button>
                       <button
                         type="button"
@@ -3265,7 +3500,6 @@ function App() {
                       >
                         <Heading2 size={14} />
                         <span className="menu-item-label">Scena</span>
-                        <kbd>Alt+2</kbd>
                       </button>
                       <button
                         type="button"
@@ -3276,7 +3510,6 @@ function App() {
                       >
                         <Heading3 size={14} />
                         <span className="menu-item-label">Sezione</span>
-                        <kbd>Alt+3</kbd>
                       </button>
                     </div>
                   </div>
@@ -3287,22 +3520,26 @@ function App() {
                       <ChevronRight size={14} />
                     </div>
                     <div className="theater-submenu-panel" role="menu" aria-label="Note">
-                      {project.noteTypes.map((noteType) => (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          key={noteType.id}
-                          className={noteType.id === selectedNoteType?.id ? 'active' : ''}
-                          disabled={editorEditingDisabled}
-                          onClick={() => {
-                            setTheaterMenuOpen(false)
-                            setTheaterMenuPosition(undefined)
-                            insertNote(noteType)
-                          }}
-                        >
-                          <span className={`note-dot ${noteType.color}`} />
-                          {noteType.label}
-                        </button>
+                      {noteMenuTypes.map((noteType) => (
+                        <Fragment key={noteType.id}>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className={noteType.id === selectedNoteType?.id ? 'active' : ''}
+                            disabled={editorEditingDisabled}
+                            onClick={() => {
+                              setTheaterMenuOpen(false)
+                              setTheaterMenuPosition(undefined)
+                              insertNote(noteType)
+                            }}
+                          >
+                            <span className={`note-dot ${noteType.color}`} />
+                            {noteType.label}
+                          </button>
+                          {noteType.id === 'general' || noteType.id === 'tone' ? (
+                            <span className="theater-menu-separator" aria-hidden="true" />
+                          ) : null}
+                        </Fragment>
                       ))}
                     </div>
                   </div>
@@ -3313,7 +3550,7 @@ function App() {
                       <ChevronRight size={14} />
                     </div>
                     <div className="theater-submenu-panel" role="menu" aria-label="Battuta">
-                      {dialogueCharacters.map((character, index) => (
+                      {dialogueCharacters.map((character) => (
                         <button
                           type="button"
                           role="menuitem"
@@ -3323,7 +3560,6 @@ function App() {
                         >
                           <Quote size={14} />
                           <span className="menu-item-label">{character.name}</span>
-                          {index < 9 ? <kbd>Alt+Shift+{index + 1}</kbd> : null}
                         </button>
                       ))}
                     </div>
@@ -3363,6 +3599,16 @@ function App() {
                       </button>
                     </div>
                   </div>
+                  <span className="theater-menu-separator" aria-hidden="true" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!activeFile || Boolean(activeAppDocument)}
+                    onClick={showPublishDialog}
+                  >
+                    <CloudUpload size={14} />
+                    <span className="menu-item-label">Condividi</span>
+                  </button>
                 </div>
               ) : null}
             </div>
@@ -3459,6 +3705,8 @@ function App() {
               </div>
             </section>
           ) : null}
+            </>
+          )}
           <audio ref={editorAudioRef} className="sr-only" />
         </section>
 
@@ -3599,10 +3847,13 @@ function App() {
         <ProjectPickerModal
           entries={projectPickerEntries}
           onCancel={() => setProjectPickerEntries([])}
+          onImport={openStoreTab}
           onOpen={(entry) => {
             setProjectPickerEntries([])
             void openProjectFolder(entry.path)
           }}
+          onRename={(entry) => renameProjectEntry(entry)}
+          onDelete={(entry) => deleteProjectEntry(entry)}
         />
       ) : null}
       {pointerDropIndicator ? (
@@ -3629,6 +3880,17 @@ function App() {
           {pointerDragPreview.detail ? <span>{pointerDragPreview.detail}</span> : null}
         </div>
       ) : null}
+      {publishDialogOpen ? (
+        <PublishScriptModal
+          state={publishState}
+          disabled={!activeFile || Boolean(activeAppDocument)}
+          onClose={() => setPublishDialogOpen(false)}
+          onPublish={() => void publishScriptJson('publish')}
+          onUpdate={() => void publishScriptJson('update')}
+          onUnpublish={() => void unpublishScriptJson()}
+          onCopyLink={() => void copyPublishedLink()}
+        />
+      ) : null}
       {toastMessage ? (
         <div className="app-toast" role="status">
           <span>{toastMessage}</span>
@@ -3640,6 +3902,147 @@ function App() {
         </div>
       ) : null}
     </main>
+  )
+}
+
+function ShareStatusIndicator({ state }: { state: ShareIndicatorState }) {
+  if (state.status === 'disabled') return null
+  const title =
+    state.status === 'shared'
+      ? 'File condiviso'
+      : state.status === 'not-shared'
+        ? 'File non condiviso'
+        : state.status === 'checking'
+          ? 'Verifica condivisione in corso'
+          : state.message || 'Stato condivisione non disponibile'
+  return (
+    <span className="share-status-indicator" data-state={state.status} title={title} aria-label={title}>
+      {state.status === 'shared' ? <CloudCheck size={14} /> : null}
+      {state.status === 'not-shared' ? <CloudOff size={14} /> : null}
+      {state.status === 'checking' ? <RefreshCw size={14} /> : null}
+      {state.status === 'error' ? <AlertTriangle size={14} /> : null}
+    </span>
+  )
+}
+
+function PublishScriptModal({
+  state,
+  disabled,
+  onClose,
+  onPublish,
+  onUpdate,
+  onUnpublish,
+  onCopyLink,
+}: {
+  state: PublishState
+  disabled: boolean
+  onClose: () => void
+  onPublish: () => void
+  onUpdate: () => void
+  onUnpublish: () => void
+  onCopyLink: () => void
+}) {
+  const busy = state.status === 'publishing' || state.status === 'removing'
+  const [qrUrl, setQrUrl] = useState('')
+
+  useEffect(() => {
+    let active = true
+    if (!state.url) {
+      setQrUrl('')
+      return undefined
+    }
+    QRCode.toDataURL(state.url, { margin: 1, width: 180 })
+      .then((url) => {
+        if (active) setQrUrl(url)
+      })
+      .catch(() => {
+        if (active) setQrUrl('')
+      })
+    return () => {
+      active = false
+    }
+  }, [state.url])
+
+  const statusLabel =
+    state.status === 'publishing'
+      ? 'Condivisione in corso'
+      : state.status === 'removing'
+        ? 'Rimozione in corso'
+        : state.status === 'published'
+          ? 'Condiviso'
+          : state.status === 'error'
+            ? 'Errore'
+            : 'Non condiviso'
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="action-modal publish-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="publish-script-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="publish-modal-header">
+          <div>
+            <span className="publish-kicker">StageDesk Share</span>
+            <h2 id="publish-script-title">Condividi copione</h2>
+            <p>Prepara il copione per le app attori con personaggi, scene e battute del file attivo.</p>
+          </div>
+          <button type="button" className="publish-close" aria-label="Chiudi" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+        {state.url ? (
+          <div className="publish-qr">
+            {qrUrl ? <img src={qrUrl} alt="QR code del link condiviso" /> : <div className="publish-qr-placeholder" aria-hidden="true" />}
+          </div>
+        ) : null}
+        <div className="publish-summary" data-state={state.status}>
+          <span className="publish-status-dot" />
+          <div>
+            <strong>{statusLabel}</strong>
+            <span>
+              {state.status === 'published' && state.publishedAt
+                ? `Ultima versione: ${formatDateTime(state.publishedAt)}`
+                : state.status === 'error'
+                  ? state.error
+              : state.status === 'idle'
+                ? 'Il copione non risulta condiviso in questa sessione.'
+                : 'Attendere il completamento dell’operazione.'}
+            </span>
+          </div>
+        </div>
+        {state.url ? (
+          <div className="publish-share">
+            <label>
+              Link condivisione
+              <div className="publish-link-row">
+                <input readOnly value={state.url} onFocus={(event) => event.currentTarget.select()} />
+                <button type="button" onClick={onCopyLink}>
+                  <Copy size={14} />
+                  Copia
+                </button>
+              </div>
+            </label>
+          </div>
+        ) : null}
+        <div className="publish-actions">
+          <button type="button" className="publish-primary" disabled={disabled || busy} onClick={onPublish}>
+            <CloudUpload size={15} />
+            Condividi
+          </button>
+          <button type="button" disabled={disabled || busy || !state.url} onClick={onUpdate}>
+            <RefreshCw size={15} />
+            Aggiorna
+          </button>
+          <button type="button" className="publish-danger" disabled={disabled || busy || !state.storagePath} onClick={onUnpublish}>
+            <CloudOff size={15} />
+            Interrompi
+          </button>
+        </div>
+      </section>
+    </div>
   )
 }
 
@@ -3753,12 +4156,20 @@ function ScriptActionModal({
 function ProjectPickerModal({
   entries,
   onCancel,
+  onImport,
   onOpen,
+  onRename,
+  onDelete,
 }: {
   entries: ProjectEntry[]
   onCancel: () => void
+  onImport: () => void
   onOpen: (entry: ProjectEntry) => void
+  onRename: (entry: ProjectEntry) => void
+  onDelete: (entry: ProjectEntry) => void
 }) {
+  const [openMenuPath, setOpenMenuPath] = useState('')
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onCancel}>
       <section
@@ -3768,19 +4179,67 @@ function ProjectPickerModal({
         aria-labelledby="project-picker-title"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <h2 id="project-picker-title">Apri progetto</h2>
+        <div className="project-picker-header">
+          <h2 id="project-picker-title">Apri progetto</h2>
+        </div>
         <div className="project-picker-list">
           {entries.map((entry) => (
-            <button type="button" key={entry.path} onClick={() => onOpen(entry)}>
-              <FolderOpen size={15} />
-              <span>
-                <strong>{entry.name}</strong>
-                <small>{compactPath(entry.path)}</small>
-              </span>
-            </button>
+            <div className="project-picker-row" key={entry.path}>
+              <button type="button" className="project-picker-open" onClick={() => onOpen(entry)}>
+                <FolderOpen size={15} />
+                <span>
+                  <strong>{entry.name}</strong>
+                  <small>{compactPath(entry.path)}</small>
+                </span>
+              </button>
+              <div className="project-picker-actions">
+                <button
+                  type="button"
+                  className="project-picker-more"
+                  title="Azioni progetto"
+                  aria-label={`Azioni progetto ${entry.name}`}
+                  aria-haspopup="menu"
+                  aria-expanded={openMenuPath === entry.path}
+                  onClick={() => setOpenMenuPath((current) => current === entry.path ? '' : entry.path)}
+                >
+                  <MoreVertical size={16} />
+                </button>
+                {openMenuPath === entry.path ? (
+                  <div className="project-picker-menu" role="menu">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setOpenMenuPath('')
+                        onRename(entry)
+                      }}
+                    >
+                      <Pencil size={14} />
+                      Rinomina
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="danger"
+                      onClick={() => {
+                        setOpenMenuPath('')
+                        onDelete(entry)
+                      }}
+                    >
+                      <Trash2 size={14} />
+                      Elimina
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           ))}
         </div>
-        <div className="modal-actions">
+        <div className="modal-actions project-picker-footer">
+          <button type="button" className="project-import-button" onClick={onImport}>
+            <Download size={15} />
+            Importa
+          </button>
           <button type="button" onClick={onCancel}>Annulla</button>
         </div>
       </section>
@@ -6089,7 +6548,7 @@ const cueMarkerFromAttrs = (attrs?: Record<string, unknown>) => {
 }
 
 const bookmarkMarkerFromAttrs = (attrs?: Record<string, unknown>) => {
-  const label = String(attrs?.label || attrs?.refId || 'Bookmark')
+  const label = sanitizeChipLabel(attrs?.label || attrs?.refId, 'Bookmark')
   const refId = String(attrs?.refId || '')
   return refId ? `[BOOKMARK: ${label}] {#${refId}}` : `[BOOKMARK: ${label}]`
 }
@@ -7279,6 +7738,132 @@ const scheduleNativeCueEnd = (
 
 const stripMarkdownExtension = (name: string) => name.replace(/\.md$/i, '')
 
+const buildPublishedScriptPayload = (
+  project: Project,
+  activeFile: ProjectTreeNode,
+  markdown: string,
+  characters: CharacterOption[],
+): PublishedScriptPayload => {
+  const characterMap = new Map<string, PublishedScriptCharacter>()
+  for (const character of characters) {
+    characterMap.set(character.id, { ...character, dialogues: [] })
+  }
+
+  const dialogues = parseScriptBlocks(markdown)
+    .filter((block) => block.type === 'dialogue' && block.text?.trim())
+    .map((block, index): PublishedScriptDialogue => {
+      const fallbackCharacterName = characterNameFromDialogueText(block.text ?? '') || 'PERSONAGGIO'
+      const characterId = block.characterId || slug(fallbackCharacterName)
+      const existingCharacter = characterMap.get(characterId)
+      const characterName = existingCharacter?.name ?? fallbackCharacterName
+      if (!existingCharacter) {
+        characterMap.set(characterId, { id: characterId, name: characterName, dialogues: [] })
+      }
+      return {
+        id: block.id || `battuta-${index + 1}`,
+        characterId,
+        characterName,
+        sceneId: block.sceneId,
+        text: dialogueTextOnly(block.text ?? ''),
+        sourceLine: block.sourceLine !== undefined ? block.sourceLine + 1 : undefined,
+      }
+    })
+
+  for (const dialogue of dialogues) {
+    characterMap.get(dialogue.characterId)?.dialogues.push(dialogue)
+  }
+
+  const notes = parsePublishedScriptNotes(markdown)
+
+  return {
+    schemaVersion: 1,
+    app: 'StageDesk Pro',
+    project: {
+      id: project.id,
+      name: project.name,
+    },
+    script: {
+      path: activeFile.path,
+      name: activeFile.name,
+    },
+    publishedAt: new Date().toISOString(),
+    characters: [...characterMap.values()],
+    dialogues,
+    notes,
+  }
+}
+
+const parsePublishedScriptNotes = (markdown: string): PublishedScriptNote[] => {
+  const sharedNoteTypes = new Set<string>(SHARED_SCRIPT_NOTE_TYPES)
+  const lines = markdown.split('\n')
+  const notes: PublishedScriptNote[] = []
+  let sceneId: string | undefined
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const trimmed = lines[index].trim()
+    if (trimmed.startsWith('## ') || /^SCENA\b/i.test(trimmed)) {
+      sceneId = slug(trimmed.replace(/^##\s*/, ''))
+      continue
+    }
+
+    const directive = trimmed.match(/^::regia\{([^}]*)\}/)
+    if (!directive) continue
+
+    const attrs = directive[1]
+    const type = readDirectiveAttr(attrs, 'type') || 'general'
+    const contentLines: string[] = []
+    const sourceLine = index + 1
+    index += 1
+    while (index < lines.length && lines[index].trim() !== '::') {
+      contentLines.push(lines[index])
+      index += 1
+    }
+    if (!sharedNoteTypes.has(type)) continue
+
+    notes.push({
+      id: readDirectiveAttr(attrs, 'id') || `nota-${sourceLine}`,
+      type,
+      title: readDirectiveAttr(attrs, 'title') || type,
+      content: contentLines.join('\n').trim(),
+      sceneId: readDirectiveAttr(attrs, 'sceneId') || sceneId,
+      sourceLine,
+    })
+  }
+
+  return notes
+}
+
+const dialogueTextOnly = (value: string) =>
+  value
+    .replace(/^\*\*([^*]+)\*\*:\s*/, '')
+    .replace(/^\*\*([^*]+):\*\*\s*/, '')
+    .trim()
+
+const characterNameFromDialogueText = (value: string) =>
+  value.match(/^\*\*([^*]+)\*\*:/)?.[1]?.trim()
+  ?? value.match(/^\*\*([^*]+):\*\*/)?.[1]?.trim()
+  ?? ''
+
+const publishedScriptStoragePath = (userId: string, projectId: string, scriptPath: string) =>
+  `${userId}/${projectId}/${slug(scriptPath)}.json`
+
+const publishErrorMessage = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/bucket not found/i.test(message)) {
+    return `Storage condivisione non configurato: crea il bucket "${PUBLISHED_SCRIPT_BUCKET}" in Supabase.`
+  }
+  if (/row-level security|violates.*security policy/i.test(message)) {
+    return `Permessi Storage mancanti: esegui le policy RLS per il bucket "${PUBLISHED_SCRIPT_BUCKET}" in Supabase.`
+  }
+  return message
+}
+
+const formatDateTime = (value: string) =>
+  new Intl.DateTimeFormat('it-IT', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value))
+
 type PdfBlock =
   | { type: 'heading'; level: number; text: string }
   | { type: 'paragraph'; text: string }
@@ -7294,9 +7879,10 @@ type PdfInlineSegment = {
 }
 
 const markdownToPdfBlocks = (markdown: string, mode: 'complete' | 'clean'): PdfBlock[] => {
-  const source = mode === 'clean' ? cleanScriptMarkdown(markdown) : markdown
+  const source = mode === 'clean' ? cleanScriptMarkdown(markdown, { preserveNoteTypes: SHARED_SCRIPT_NOTE_TYPES }) : markdown
   const lines = source.split('\n')
   const blocks: PdfBlock[] = []
+  const exportedNoteTypes = new Set<string>(SHARED_SCRIPT_NOTE_TYPES)
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]
@@ -7336,13 +7922,14 @@ const markdownToPdfBlocks = (markdown: string, mode: 'complete' | 'clean'): PdfB
     if (directive) {
       const directiveType = directive[1]
       const attrs = directive[2]
+      const noteType = readDirectiveAttr(attrs, 'type') || 'general'
       const contentLines: string[] = []
       index += 1
       while (index < lines.length && lines[index].trim() !== '::') {
         contentLines.push(lines[index])
         index += 1
       }
-      if (mode === 'complete') {
+      if (mode === 'complete' || (directiveType === 'regia' && exportedNoteTypes.has(noteType))) {
         const title =
           readDirectiveAttr(attrs, 'title') ||
           readDirectiveAttr(attrs, directiveType === 'regia' ? 'type' : 'src') ||

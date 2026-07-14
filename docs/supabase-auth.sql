@@ -206,3 +206,57 @@ create trigger profiles_set_updated_at
 before update on public.profiles
 for each row
 execute function public.set_updated_at();
+
+-- Storage per la condivisione copioni.
+-- Eseguire anche se il bucket è già stato creato dalla dashboard:
+-- le policy RLS su storage.objects sono necessarie per upload, aggiornamento e rimozione.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'published-scripts',
+  'published-scripts',
+  true,
+  5242880,
+  array['application/json']::text[]
+)
+on conflict (id) do update
+set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "published_scripts_public_read" on storage.objects;
+create policy "published_scripts_public_read"
+on storage.objects for select
+to public
+using (bucket_id = 'published-scripts');
+
+drop policy if exists "published_scripts_insert_own" on storage.objects;
+create policy "published_scripts_insert_own"
+on storage.objects for insert
+to authenticated
+with check (
+  bucket_id = 'published-scripts'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+drop policy if exists "published_scripts_update_own" on storage.objects;
+create policy "published_scripts_update_own"
+on storage.objects for update
+to authenticated
+using (
+  bucket_id = 'published-scripts'
+  and (storage.foldername(name))[1] = auth.uid()::text
+)
+with check (
+  bucket_id = 'published-scripts'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+drop policy if exists "published_scripts_delete_own" on storage.objects;
+create policy "published_scripts_delete_own"
+on storage.objects for delete
+to authenticated
+using (
+  bucket_id = 'published-scripts'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
