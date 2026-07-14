@@ -272,6 +272,33 @@ describe('markdown serialization', () => {
     expect(clean).not.toContain('Taglio caldo.')
   })
 
+  it('preserves rich note markers for selected types in clean export', () => {
+    const clean = cleanScriptMarkdown(
+      '[NOTA: Tono] {#note-tone .purple type="tone" content="Sottovoce."}',
+      { preserveNoteTypes: ['tone'] },
+    )
+
+    expect(clean).toContain('[NOTA: Tono]')
+    expect(clean).toContain('type="tone"')
+    expect(clean).toContain('content="Sottovoce."')
+  })
+
+  it('serializes a note marker when the project note record is missing', () => {
+    const serialized = serializeExtendedMarkdown(
+      '[NOTA: Tono] {#note-tone .purple type="tone" content="Sottovoce."}',
+      [],
+      [],
+    )
+
+    expect(serialized).toContain('::regia{')
+    expect(serialized).toContain('type="tone"')
+    expect(serialized).toContain('Sottovoce.')
+  })
+
+  it('renders horizontal rules in editor HTML', () => {
+    expect(markdownToHtml('Prima\n\n---\n\nDopo')).toContain('<hr>')
+  })
+
   it('parses the visual cue marker as a media block', () => {
     const blocks = parseScriptBlocks('[CUE: Blues intro] {#cue-001 .audio}')
 

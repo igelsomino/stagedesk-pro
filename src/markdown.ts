@@ -16,7 +16,10 @@ export const cleanScriptMarkdown = (markdown: string, options: CleanScriptMarkdo
       return preserveNoteTypes.has(noteType) ? match : ''
     })
     .replace(/::media\{[^}]*\}[\s\S]*?::/g, '')
-    .replace(/^\[NOTA:[^\]]+\](?:\s+\{[^}]+\})?\s*$/gm, '')
+    .replace(/^\[NOTA:[^\]]+\](?:\s+\{[^}]+\})?\s*$/gm, (match: string) => {
+      const marker = parseChipLine(match.trim())
+      return marker.type && preserveNoteTypes.has(marker.type) ? match : ''
+    })
     .replace(/^\[CUE[:\s][^\]]+\](?:\s+\{[^}]+\})?\s*$/gm, '')
     .replace(/\s*\[BOOKMARK:[^\]]+\](?:\s+\{[^}]+\})?/g, '')
     .replace(/\n{3,}/g, '\n\n')
@@ -198,7 +201,7 @@ export const serializeExtendedMarkdown = (
           line.trim().match(/^\[NOTA:\s*([^\]]+)\]/)?.[1]
         const note = notes.find((item) => item.id === refId) ?? notes[noteIndex]
         noteIndex += 1
-        if (!note) return line
+        if (!note) return serializeNoteMarker(parseChipLine(line.trim()))
         return serializeDirectorNote(note)
       }
 
@@ -555,6 +558,20 @@ const parseChipLine = (line: string) => {
 
   const cueMatch = line.match(/^(.*?)(?:\s+\{#([^\s}]+)\})?$/)
   return { label: cueMatch?.[1] ?? line, refId: cueMatch?.[2] ?? '', color: '', type: '', content: '', collapsed: false }
+}
+
+const serializeNoteMarker = (marker: ReturnType<typeof parseChipLine>) => {
+  const attrs = [
+    ['id', marker.refId],
+    ['type', marker.type || 'general'],
+    ['color', marker.color],
+    ['title', marker.label],
+    ['collapsed', marker.collapsed ? 'true' : undefined],
+  ]
+    .filter(([, value]) => value)
+    .map(([name, value]) => `${name}="${escapeAttr(String(value))}"`)
+    .join(' ')
+  return `::regia{${attrs}}\n${marker.content.trim()}\n::`
 }
 
 const parseDialogueLine = (line: string) => {

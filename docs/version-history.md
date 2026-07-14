@@ -1,5 +1,14 @@
 # Novità
 
+## Versione 1.0.18
+
+> Aggiornamento dedicato all'export PDF e alla compatibilità delle note su Linux.
+
+- Corretto il rendering delle linee orizzontali Markdown (`hr`) nell'export PDF.
+- Le note dell'editor vengono convertite in blocchi di export anche quando i metadati del progetto non sono disponibili o non sono sincronizzati.
+- L'export PDF riconosce direttamente i marker nota presenti nel documento, mantenendo le note previste anche su Linux.
+- Aggiunti test automatici per linee orizzontali, marker nota e fallback dei metadati.
+
 ## Versione 1.0.17
 
 > Aggiornamento dedicato alla chiarezza dei filtri cue, alla stabilità dell'editor e alla diagnostica.

@@ -8554,6 +8554,7 @@ const formatDateTime = (value: string) =>
 
 type PdfBlock =
   | { type: 'heading'; level: number; text: string }
+  | { type: 'hr' }
   | { type: 'paragraph'; text: string }
   | { type: 'dialogue'; character: string; text: string }
   | { type: 'quote'; text: string }
@@ -8606,6 +8607,20 @@ const markdownToPdfBlocks = (markdown: string, mode: 'complete' | 'clean'): PdfB
       continue
     }
 
+    const richNote = trimmed.match(/^\[NOTA:\s*([^\]]+)\](?:\s+\{([^}]*)\})?$/)
+    if (richNote) {
+      const attrs = richNote[2] ?? ''
+      const noteType = readDirectiveAttr(attrs, 'type') || 'general'
+      if (mode === 'complete' || exportedNoteTypes.has(noteType)) {
+        blocks.push({
+          type: 'note',
+          title: decodePdfAttr(richNote[1].trim()),
+          content: decodePdfAttr(readDirectiveAttr(attrs, 'content') || ''),
+        })
+      }
+      continue
+    }
+
     const directive = trimmed.match(/^::(regia|media)\{([^}]*)\}/)
     if (directive) {
       const directiveType = directive[1]
@@ -8628,6 +8643,11 @@ const markdownToPdfBlocks = (markdown: string, mode: 'complete' | 'clean'): PdfB
           content: contentLines.join('\n').trim(),
         })
       }
+      continue
+    }
+
+    if (/^-{3,}$/.test(trimmed)) {
+      blocks.push({ type: 'hr' })
       continue
     }
 
@@ -8727,6 +8747,15 @@ const downloadPdf = async (name: string, markdown: string, title: string, mode: 
         y += style.lineHeight
       }
       y += style.after
+      continue
+    }
+
+    if (block.type === 'hr') {
+      y = ensurePdfSpace(doc, y, pageBottom, marginTop, 18)
+      doc.setDrawColor(148, 163, 184)
+      doc.setLineWidth(0.8)
+      doc.line(marginX, y + 5, marginX + maxWidth, y + 5)
+      y += 18
       continue
     }
 
