@@ -85,15 +85,15 @@ Nota operativa: anche con firma valida, Microsoft SmartScreen può continuare a 
 Aggiornare la versione in modo sincronizzato:
 
 ```bash
-npm run version:sync -- --set=1.0.19
+npm run version:sync -- --set=1.0.20
 ```
 
 Commit e tag:
 
 ```bash
 git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
-git commit -m "chore: release v1.0.19"
-git tag v1.0.19
+git commit -m "chore: release v1.0.20"
+git tag v1.0.20
 git push origin main --tags
 ```
 

@@ -46,6 +46,12 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.20
+
+> Patch di stabilità della riproduzione audio.
+
+- Corretto il monitoraggio della durata naturale dei cue audio: i cue in loop restano in esecuzione finché l'utente non li interrompe.
+
 ## Versione 1.0.19
 
 > Aggiornamento dedicato a battute, gestione del menu e riproduzione audio.

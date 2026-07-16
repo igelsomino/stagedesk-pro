@@ -8380,6 +8380,7 @@ const scheduleCueEnd = (
   timersRef: MutableRefObject<number[]>,
   onComplete?: () => void,
 ) => {
+  if (cue.options.loop) return
   const startAt = cue.options.startAt ?? 0
   const configuredEndAt = cue.options.endAt ?? (cue.options.duration ? startAt + cue.options.duration : undefined)
   const naturalEndAt = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : undefined
