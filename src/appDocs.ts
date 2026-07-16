@@ -46,6 +46,18 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.19
+
+> Aggiornamento dedicato a battute, gestione del menu e riproduzione audio.
+
+- Rimosso il bordo di focus dal titolo delle note, mantenendo il focus visibile sul contenuto modificabile.
+- Aggiunto il trascinamento delle battute nell'editor con indicatore della posizione di rilascio e anteprima compatta.
+- Aggiunto il pulsante per eliminare una battuta direttamente dal suo header.
+- Nascosto il comando Condividi dal menu teatrale.
+- Resa più precisa la dissolvenza audio nel player web, includendo la durata naturale del file quando non è configurata una durata manuale.
+- Allineata la temporizzazione della dissolvenza web a intervalli brevi e regolari.
+- Verificato il player nativo desktop per mantenere fade in e fade out durante la riproduzione dei cue audio.
+
 ## Versione 1.0.17
 
 > Aggiornamento dedicato alla chiarezza dei filtri cue, alla stabilità dell'editor e alla diagnostica.

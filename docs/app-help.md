@@ -37,6 +37,8 @@ L'editor supporta titoli, paragrafi, grassetto, corsivo, elenchi, citazioni, tab
 
 Il documento può contenere anche oggetti battuta. Gli oggetti battuta mantengono separati personaggio e testo, sono collegati alla tabella personaggi del copione e vengono usati per la modalità schermo intero.
 
+Puoi trascinare una battuta dal suo header in un'altra posizione dell'editor. Il pulsante X nell'header elimina la battuta.
+
 Per una battuta usa questo formato:
 
 `**MIRANDOLINA**: A pranzo, che cosa comanda?`
@@ -53,7 +55,7 @@ Se digiti `nota:` su una riga vuota, StageDesk Pro inserisce una nota generale e
 
 Quando stai scrivendo dentro la textarea di una battuta o di una nota, usa `Cmd+Invio` su macOS o `Ctrl+Invio` su Windows/Linux per creare una nuova riga sotto il box e continuare a scrivere nell'editor. `Shift+Invio` resta disponibile per andare a capo dentro la textarea.
 
-Dal menu con le maschere puoi inserire rapidamente Atto, Scena, Sezione, note di regia, battute dei personaggi, export e condivisione. I comandi Atto, Scena e Sezione applicano lo stile alla riga corrente, al testo selezionato o inseriscono il titolo base quando la riga è vuota.
+Dal menu con le maschere puoi inserire rapidamente Atto, Scena, Sezione, note di regia, battute dei personaggi ed export. I comandi Atto, Scena e Sezione applicano lo stile alla riga corrente, al testo selezionato o inseriscono il titolo base quando la riga è vuota.
 
 Scorciatoie utili:
 
@@ -140,7 +142,7 @@ Alla fine dell'export l'app mostra dove è stato salvato il file e, quando possi
 
 ## Condivisione copione
 
-Dal menu con le maschere puoi aprire Condividi. La dialog prepara e carica su Supabase Storage il copione attivo, pensato per le future app Android e iOS dedicate agli attori.
+La condivisione del copione per le future app Android e iOS è predisposta nel progetto ma il comando è temporaneamente nascosto dal menu operativo.
 
 Il file condiviso contiene i personaggi, le relative battute con identificativi, scena e riga sorgente, e le note operative di movimento, posizione, personaggi in scena e tono. Dalla stessa dialog puoi aggiornare l'ultima versione condivisa, interrompere la condivisione eliminando il file, copiare il link o condividerlo tramite QR code.
 

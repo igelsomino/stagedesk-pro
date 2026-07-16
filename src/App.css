@@ -1957,6 +1957,31 @@ body.stagedesk-pointer-dragging * {
   min-width: 0;
   padding: 8px 10px 0 12px;
   background: transparent;
+  cursor: grab;
+}
+
+.script-dialogue-header:active {
+  cursor: grabbing;
+}
+
+.script-dialogue-close {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.script-dialogue-close:hover {
+  background: color-mix(in srgb, var(--background-modifier-hover) 80%, transparent);
+  color: var(--text-error);
 }
 
 .script-dialogue-character {
@@ -2174,9 +2199,13 @@ body.stagedesk-pointer-dragging * {
   font-weight: 700;
 }
 
-.script-note-title:focus,
 .script-note-content:focus {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--note-block-color) 70%, transparent);
+}
+
+.script-note-title:focus {
+  outline: 0;
+  box-shadow: none;
 }
 
 .script-note-type {

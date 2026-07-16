@@ -211,7 +211,7 @@ export const serializeExtendedMarkdown = (
           line.trim().match(/^\[CUE(?:\s+|:\s*)([^\]}]+)/)?.[1]?.trim()
         const cue = cues.find((item) => item.id === refId) ?? cues[cueIndex]
         cueIndex += 1
-        if (!cue) return line
+        if (!cue) return serializeCueMarker(parseChipLine(line.trim()))
         return serializeMediaCue(cue)
       }
 
@@ -572,6 +572,20 @@ const serializeNoteMarker = (marker: ReturnType<typeof parseChipLine>) => {
     .map(([name, value]) => `${name}="${escapeAttr(String(value))}"`)
     .join(' ')
   return `::regia{${attrs}}\n${marker.content.trim()}\n::`
+}
+
+const serializeCueMarker = (marker: ReturnType<typeof parseChipLine>) => {
+  const supportedTypes = new Set(['audio', 'music', 'image', 'video'])
+  const type = supportedTypes.has(marker.color) ? marker.color : 'audio'
+  const attrs = [
+    ['id', marker.refId],
+    ['type', type],
+    ['title', marker.label],
+  ]
+    .filter(([, value]) => value)
+    .map(([name, value]) => `${name}="${escapeAttr(String(value))}"`)
+    .join(' ')
+  return `::media{${attrs}}\n${marker.content.trim()}\n::`
 }
 
 const parseDialogueLine = (line: string) => {

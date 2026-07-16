@@ -44,24 +44,26 @@ Implementato:
 13. note di regia inline, colorate e collassabili;
 14. collasso o espansione globale delle note;
 15. oggetti battuta collegati alla tabella personaggi;
-16. conversione automatica `Personaggio:` in oggetto battuta quando il personaggio è presente in tabella;
-17. conversione automatica `nota:` in nota generale con focus sul contenuto;
-18. `Cmd/Ctrl+Invio` dalle textarea di note e battute per creare una riga sotto il box;
-19. inserimento toolbar di Atto, Scena, Sezione, note, battute, tabelle ed export;
-20. menu teatrale per struttura, note, battute, export e condivisione;
-21. cue audio, musica, immagine e video;
-22. controlli inline per cue audio/musica;
-23. inspector laterale dedicato ai cue;
-24. riapertura automatica dell'ultimo progetto nella versione desktop;
-25. validazione tipografica e formale prima della modalità schermo intero;
-26. sincronizzazione tra posizione editor e modalità schermo intero;
-27. modalità schermo intero con step battuta/cue;
-28. export PDF completo e pulito, con conservazione delle note operative nel pulito;
-29. condivisione strutturata del copione per future app attori, con battute, personaggi e note operative;
-30. inspector cue con filtri Contestuali, Scena e Tutte;
-31. paginazione della lista cue con cinque elementi per pagina;
-32. aggiornamenti automatici tramite GitHub Releases;
-33. diagnostica persistente per eventi di lifecycle, focus, refresh, stato editor e riproduzione media.
+16. trascinamento delle battute nell'editor e pulsante per eliminarle dall'header;
+17. conversione automatica `Personaggio:` in oggetto battuta quando il personaggio è presente in tabella;
+18. conversione automatica `nota:` in nota generale con focus sul contenuto;
+19. `Cmd/Ctrl+Invio` dalle textarea di note e battute per creare una riga sotto il box;
+20. inserimento toolbar di Atto, Scena, Sezione, note, battute, tabelle ed export;
+21. menu teatrale per struttura, note, battute ed export;
+22. trascinamento delle battute con indicatore di rilascio e cancellazione dal relativo header;
+23. cue audio, musica, immagine e video;
+24. controlli inline per cue audio/musica;
+25. inspector laterale dedicato ai cue;
+26. riapertura automatica dell'ultimo progetto nella versione desktop;
+27. validazione tipografica e formale prima della modalità schermo intero;
+28. sincronizzazione tra posizione editor e modalità schermo intero;
+29. modalità schermo intero con step battuta/cue;
+30. export PDF completo e pulito, con conservazione delle note operative nel pulito;
+31. condivisione strutturata del copione per future app attori, con battute, personaggi e note operative;
+32. inspector cue con filtri Contestuali, Scena e Tutte;
+33. paginazione della lista cue con cinque elementi per pagina;
+34. aggiornamenti automatici tramite GitHub Releases;
+35. diagnostica persistente per eventi di lifecycle, focus, refresh, stato editor e riproduzione media.
 
 ## Sviluppo
 

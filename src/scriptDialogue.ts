@@ -16,7 +16,22 @@ type CharacterOption = {
 
 type ScriptDialogueWindow = Window & {
   __STAGEDESK_CHARACTER_OPTIONS__?: CharacterOption[]
+  __STAGEDESK_DRAG_PAYLOAD__?: {
+    type: string
+    value: string
+    startedAt: number
+    startX?: number
+    startY?: number
+    pointerId?: number
+    pointerActive?: boolean
+    label?: string
+    detail?: string
+    tone?: 'cue' | 'note' | 'media'
+  }
 }
+
+const DIALOGUE_ID_DND_TYPE = 'application/x-stagedesk-dialogue-id'
+const DIALOGUE_ID_DND_PREFIX = 'stagedesk-dialogue:'
 
 const characterOptions = (currentId: string, currentName: string) => {
   const options = [...((window as ScriptDialogueWindow).__STAGEDESK_CHARACTER_OPTIONS__ ?? [])]
@@ -94,6 +109,7 @@ export const ScriptDialogue = TiptapNode.create({
       const characterIcon = document.createElement('span')
       const characterMenu = document.createElement('div')
       const body = document.createElement('textarea')
+      const closeButton = document.createElement('button')
       let characterMenuOpen = false
       let resizeFrame = 0
       const closeCharacterMenuOnOutsideClick = (event: PointerEvent) => {
@@ -118,11 +134,54 @@ export const ScriptDialogue = TiptapNode.create({
       characterMenu.className = 'script-note-type-menu'
       characterMenu.setAttribute('role', 'menu')
       characterDropdown.append(characterButton, characterMenu)
+      closeButton.type = 'button'
+      closeButton.className = 'script-dialogue-close'
+      closeButton.title = 'Elimina battuta'
+      closeButton.setAttribute('aria-label', 'Elimina battuta')
+      closeButton.textContent = '×'
       body.className = 'script-dialogue-text'
       body.rows = 1
       body.placeholder = 'Battuta'
-      header.append(characterDropdown)
+      header.append(characterDropdown, closeButton)
       dom.append(header, body)
+
+      const writePointerDragPayload = (event: PointerEvent | MouseEvent) => {
+        const target = event.target as HTMLElement | null
+        if (!target?.closest('.script-dialogue-header') || target.closest('button, textarea, .script-note-type-menu')) return
+        const id = String(currentNode.attrs.id ?? '')
+        if (!id) return
+        ;(window as ScriptDialogueWindow).__STAGEDESK_DRAG_PAYLOAD__ = {
+          type: DIALOGUE_ID_DND_TYPE,
+          value: id,
+          startedAt: Date.now(),
+          startX: event.clientX,
+          startY: event.clientY,
+          pointerId: 'pointerId' in event ? event.pointerId : undefined,
+          label: String(currentNode.attrs.character || 'Battuta'),
+          detail: 'Battuta',
+          tone: 'cue',
+        }
+      }
+
+      const startNativeDrag = (event: Event) => {
+        const dragEvent = event as DragEvent
+        const target = dragEvent.target as HTMLElement | null
+        if (target?.closest('button, textarea, .script-note-type-menu')) {
+          dragEvent.preventDefault()
+          return
+        }
+        const id = String(currentNode.attrs.id ?? '')
+        if (!id || !dragEvent.dataTransfer) return
+        dragEvent.dataTransfer.effectAllowed = 'move'
+        dragEvent.dataTransfer.setData('text/plain', `${DIALOGUE_ID_DND_PREFIX}${id}`)
+        dragEvent.dataTransfer.setData(DIALOGUE_ID_DND_TYPE, id)
+        writePointerDragPayload(dragEvent)
+      }
+
+      const clearDialogueDragPayload = () => {
+        const payload = (window as ScriptDialogueWindow).__STAGEDESK_DRAG_PAYLOAD__
+        if (payload?.type === DIALOGUE_ID_DND_TYPE) delete (window as ScriptDialogueWindow).__STAGEDESK_DRAG_PAYLOAD__
+      }
 
       const updateAttrs = (patch: Partial<ScriptDialogueAttrs>) => {
         const position = typeof getPos === 'function' ? getPos() : undefined
@@ -206,6 +265,21 @@ export const ScriptDialogue = TiptapNode.create({
         setCharacterMenuOpen(!characterMenuOpen)
       })
 
+      closeButton.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        const position = typeof getPos === 'function' ? getPos() : undefined
+        if (typeof position !== 'number') return
+        editor.view.dispatch(editor.state.tr.delete(position, position + currentNode.nodeSize))
+        editor.view.focus()
+      })
+
+      header.draggable = true
+      header.addEventListener('pointerdown', writePointerDragPayload)
+      header.addEventListener('mousedown', writePointerDragPayload)
+      header.addEventListener('dragstart', startNativeDrag)
+      header.addEventListener('dragend', clearDialogueDragPayload)
+
       characterMenu.addEventListener('click', (event) => {
         event.preventDefault()
         event.stopPropagation()
@@ -259,6 +333,10 @@ export const ScriptDialogue = TiptapNode.create({
           window.removeEventListener('stagedesk-characters-updated', render)
           window.removeEventListener('pointerdown', closeCharacterMenuOnOutsideClick)
           window.removeEventListener('resize', scheduleResize)
+          header.removeEventListener('pointerdown', writePointerDragPayload)
+          header.removeEventListener('mousedown', writePointerDragPayload)
+          header.removeEventListener('dragstart', startNativeDrag)
+          header.removeEventListener('dragend', clearDialogueDragPayload)
         },
       }
     }

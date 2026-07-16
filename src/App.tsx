@@ -108,9 +108,11 @@ const storage = browserProjectStorage
 const MEDIA_PATH_DND_TYPE = 'application/x-stagedesk-media-path'
 const CUE_ID_DND_TYPE = 'application/x-stagedesk-cue-id'
 const NOTE_ID_DND_TYPE = 'application/x-stagedesk-note-id'
+const DIALOGUE_ID_DND_TYPE = 'application/x-stagedesk-dialogue-id'
 const MEDIA_PATH_DND_PREFIX = 'stagedesk-media:'
 const CUE_ID_DND_PREFIX = 'stagedesk-cue:'
 const NOTE_ID_DND_PREFIX = 'stagedesk-note:'
+const DIALOGUE_ID_DND_PREFIX = 'stagedesk-dialogue:'
 const INSTALLED_UPDATE_VERSION_KEY = 'stagedesk-installed-update-version'
 const STAGEDESK_SITE_URL = 'https://stagedesk-pro.aigconsulting.it'
 const STAGEDESK_DRAG_STATE_KEY = '__STAGEDESK_DRAG_PAYLOAD__'
@@ -1202,6 +1204,19 @@ function App() {
           clearGlobalDragPayload()
           setSelectedNoteId(note.id)
           showStatus(`Nota spostata: ${note.title}`)
+          return true
+        }
+
+        const dialogueId = readDragPayload(dataTransfer, DIALOGUE_ID_DND_TYPE, DIALOGUE_ID_DND_PREFIX)
+        if (dialogueId) {
+          const match = nodeMatchByAttr(view.state.doc, 'scriptDialogue', 'id', dialogueId)
+          if (!match) return false
+          if (dropPosition >= match.position && dropPosition <= match.position + match.nodeSize) return true
+
+          event.preventDefault()
+          if (!moveEditorNode(view, match, dropPosition)) return true
+          clearGlobalDragPayload()
+          showStatus(`Battuta spostata`)
           return true
         }
 
@@ -3179,18 +3194,6 @@ function App() {
     if (exportResult.objectUrl) openObjectUrlInNewTab(exportResult.objectUrl)
   }
 
-  const showPublishDialog = () => {
-    setTheaterMenuOpen(false)
-    setTheaterMenuPosition(undefined)
-    setPublishDialogOpen(true)
-    const shareState = activeFile ? shareIndicators[activeFile.path] : undefined
-    setPublishState(
-      shareState?.status === 'shared' && shareState.url
-        ? { status: 'published', url: shareState.url, storagePath: activeShareStoragePath }
-        : { status: 'idle' },
-    )
-  }
-
   const publishScriptJson = async (mode: 'publish' | 'update' = 'publish') => {
     if (!activeFile || activeAppDocument) {
       setPublishState({ status: 'error', error: 'Apri un file copione del progetto prima di condividere.' })
@@ -3974,16 +3977,6 @@ function App() {
                       </button>
                     </div>
                   </div>
-                  <span className="theater-menu-separator" aria-hidden="true" />
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={!activeFile || Boolean(activeAppDocument)}
-                    onClick={showPublishDialog}
-                  >
-                    <CloudUpload size={14} />
-                    <span className="menu-item-label">Condividi</span>
-                  </button>
                 </div>
               ) : null}
             </div>
@@ -6183,7 +6176,8 @@ const hasDragPayload = (dataTransfer: DataTransfer, type: string) =>
 const hasAnyEditorDragPayload = (dataTransfer: DataTransfer) =>
   hasDragPayload(dataTransfer, NOTE_ID_DND_TYPE) ||
   hasDragPayload(dataTransfer, CUE_ID_DND_TYPE) ||
-  hasDragPayload(dataTransfer, MEDIA_PATH_DND_TYPE)
+  hasDragPayload(dataTransfer, MEDIA_PATH_DND_TYPE) ||
+  hasDragPayload(dataTransfer, DIALOGUE_ID_DND_TYPE)
 
 const dragTypes = (dataTransfer: DataTransfer) => {
   try {
@@ -6252,6 +6246,7 @@ const dragPreviewFromPayload = (payload: StagedeskDragPayload, event: InternalDr
 const fallbackDragLabel = (payload: StagedeskDragPayload) => {
   if (payload.type === CUE_ID_DND_TYPE) return 'Cue'
   if (payload.type === NOTE_ID_DND_TYPE) return 'Nota'
+  if (payload.type === DIALOGUE_ID_DND_TYPE) return 'Battuta'
   if (payload.type === MEDIA_PATH_DND_TYPE) return payload.value.split('/').pop() || 'Media'
   return 'Elemento'
 }
@@ -6280,7 +6275,7 @@ const editorDropIndicator = (view: EditorView, position: number): PointerDropInd
 }
 
 const isEditorDragPayload = (type: string) =>
-  type === NOTE_ID_DND_TYPE || type === CUE_ID_DND_TYPE || type === MEDIA_PATH_DND_TYPE
+  type === NOTE_ID_DND_TYPE || type === CUE_ID_DND_TYPE || type === MEDIA_PATH_DND_TYPE || type === DIALOGUE_ID_DND_TYPE
 
 const editorBlockElementAtPosition = (view: EditorView, position: number) => {
   const domAtPosition = view.domAtPos(Math.max(0, Math.min(position, view.state.doc.content.size)))
@@ -6308,6 +6303,15 @@ const handleEditorPointerDrop = (
   setSelectedCueId: Dispatch<SetStateAction<string>>,
   showStatus: (message: string, duration?: number) => void,
 ) => {
+  if (payload.type === DIALOGUE_ID_DND_TYPE) {
+    const match = nodeMatchByAttr(view.state.doc, 'scriptDialogue', 'id', payload.value)
+    if (!match) return false
+    if (dropPosition >= match.position && dropPosition <= match.position + match.nodeSize) return true
+    if (!moveEditorNode(view, match, dropPosition)) return true
+    showStatus('Battuta spostata')
+    return true
+  }
+
   if (payload.type === NOTE_ID_DND_TYPE) {
     const note = project.notes.find((item) => item.id === payload.value && item.filePath === activeFilePath)
     const match = nodeMatchByRef(view.state.doc, 'scriptNote', payload.value)
@@ -8344,8 +8348,8 @@ const fadeAudioVolume = (
   }
 
   const startVolume = audio.volume
-  const steps = 14
-  const intervalMs = Math.max(60, (durationSeconds * 1000) / steps)
+  const steps = Math.max(4, Math.ceil(durationSeconds * 30))
+  const intervalMs = Math.max(16, (durationSeconds * 1000) / steps)
   let step = 0
   const interval = window.setInterval(() => {
     step += 1
@@ -8377,7 +8381,13 @@ const scheduleCueEnd = (
   onComplete?: () => void,
 ) => {
   const startAt = cue.options.startAt ?? 0
-  const endAt = cue.options.endAt ?? (cue.options.duration ? startAt + cue.options.duration : undefined)
+  const configuredEndAt = cue.options.endAt ?? (cue.options.duration ? startAt + cue.options.duration : undefined)
+  const naturalEndAt = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : undefined
+  const endAt = configuredEndAt === undefined
+    ? naturalEndAt
+    : naturalEndAt === undefined
+      ? configuredEndAt
+      : Math.min(configuredEndAt, naturalEndAt)
   if (!endAt || endAt <= audio.currentTime) return
 
   const fadeOut = Math.max(0, cue.options.fadeOut ?? 0)
@@ -8621,6 +8631,17 @@ const markdownToPdfBlocks = (markdown: string, mode: 'complete' | 'clean'): PdfB
       continue
     }
 
+    const richCue = trimmed.match(/^\[CUE:?\s*([^\]]+)\](?:\s+\{([^}]*)\})?$/)
+    if (richCue) {
+      const attrs = richCue[2] ?? ''
+      blocks.push({
+        type: 'cue',
+        title: decodePdfAttr(richCue[1].trim()),
+        content: decodePdfAttr(readDirectiveAttr(attrs, 'content') || ''),
+      })
+      continue
+    }
+
     const directive = trimmed.match(/^::(regia|media)\{([^}]*)\}/)
     if (directive) {
       const directiveType = directive[1]
@@ -8733,7 +8754,16 @@ const downloadPdf = async (name: string, markdown: string, title: string, mode: 
   doc.text(title, doc.internal.pageSize.getWidth() / 2, y, { align: 'center' })
   y += 30
 
-  for (const block of markdownToPdfBlocks(markdown, mode)) {
+  const blocks = markdownToPdfBlocks(markdown, mode)
+  diagnosticLog('pdf-export-blocks', {
+    mode,
+    total: blocks.length,
+    cues: blocks.filter((block) => block.type === 'cue').length,
+    notes: blocks.filter((block) => block.type === 'note').length,
+    horizontalRules: blocks.filter((block) => block.type === 'hr').length,
+  })
+
+  for (const block of blocks) {
     if (block.type === 'heading') {
       const style = pdfHeadingStyle(block.level)
       y += style.before
@@ -8772,12 +8802,7 @@ const downloadPdf = async (name: string, markdown: string, title: string, mode: 
     }
 
     if (block.type === 'cue') {
-      y = drawPdfInlineBlock(doc, `[CUE: ${block.title}]${block.content ? ` ${block.content}` : ''}`, marginX, y, maxWidth, pageBottom, marginTop, {
-        size: 10,
-        lineHeight: 14,
-        bold: true,
-        color: '#4b5563',
-      })
+      y = drawPdfCueBox(doc, block, marginX, y, maxWidth, pageBottom, marginTop)
       y += 6
       continue
     }
@@ -8945,6 +8970,40 @@ const drawPdfQuoteBox = (
   }
 
   doc.setFont('helvetica', 'normal')
+  return y + boxHeight
+}
+
+const drawPdfCueBox = (
+  doc: JsPDF,
+  block: Extract<PdfBlock, { type: 'cue' }>,
+  x: number,
+  y: number,
+  width: number,
+  pageBottom: number,
+  marginTop: number,
+) => {
+  const padding = 9
+  const titleHeight = 15
+  const lines = doc.splitTextToSize(block.content || 'Cue multimediale', width - (padding * 2)) as string[]
+  const boxHeight = padding + titleHeight + Math.max(lines.length, 1) * 14 + padding
+  y = ensurePdfSpace(doc, y, pageBottom, marginTop, boxHeight)
+  doc.setDrawColor(96, 165, 250)
+  doc.setFillColor(239, 246, 255)
+  doc.roundedRect(x, y, width, boxHeight, 4, 4, 'FD')
+  doc.setFillColor(59, 130, 246)
+  doc.rect(x, y, 4, boxHeight, 'F')
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(10)
+  doc.setTextColor('#1e3a8a')
+  doc.text(`Cue: ${stripInlineMarkdown(block.title)}`, x + padding, y + padding + 9)
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(9.5)
+  doc.setTextColor('#1f2937')
+  let textY = y + padding + titleHeight + 10
+  for (const line of lines) {
+    doc.text(line, x + padding, textY)
+    textY += 14
+  }
   return y + boxHeight
 }
 

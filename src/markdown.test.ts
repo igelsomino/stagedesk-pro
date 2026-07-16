@@ -295,6 +295,18 @@ describe('markdown serialization', () => {
     expect(serialized).toContain('Sottovoce.')
   })
 
+  it('serializes a cue marker when the project cue record is missing', () => {
+    const serialized = serializeExtendedMarkdown(
+      '[CUE: Campanello] {#cue-bell .audio}',
+      [],
+      [],
+    )
+
+    expect(serialized).toContain('::media{')
+    expect(serialized).toContain('type="audio"')
+    expect(serialized).toContain('title="Campanello"')
+  })
+
   it('renders horizontal rules in editor HTML', () => {
     expect(markdownToHtml('Prima\n\n---\n\nDopo')).toContain('<hr>')
   })
