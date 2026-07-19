@@ -1,5 +1,17 @@
 # Novità
 
+## Versione 1.0.21
+
+> Condivisione privata dei copioni con accesso per gli attori.
+
+- Reso nuovamente visibile il comando **Condividi** nel menu teatrale.
+- Ogni condivisione ora usa un identificativo univoco e un link dedicato `/share/[UID]`.
+- Generato un PIN attore di cinque cifre, visualizzato nella dialog di condivisione e reimpostabile dall'autore del progetto.
+- Aggiunta una pagina responsive per l'accesso degli attori con Google, GitHub, Azure oppure email e password.
+- Aggiunta la selezione di uno o più personaggi, la visualizzazione filtrata delle battute e lo stato di apprendimento locale.
+- Copiato il file condiviso nel bucket privato Supabase `published-scripts`, mantenendo il percorso associato all'UID.
+- Aggiunta la migrazione Supabase `docs/supabase-sharing.sql` con RLS e RPC per pubblicazione e verifica del PIN.
+
 ## Versione 1.0.20
 
 > Patch di stabilità della riproduzione audio.

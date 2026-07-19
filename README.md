@@ -175,7 +175,9 @@ La funzione Condividi genera un payload strutturato destinato alle future app at
 3. battute con personaggio, scena, testo e riga sorgente;
 4. note operative dei tipi movimento, posizione, personaggi in scena e tono.
 
-Il file viene pubblicato su Supabase Storage nel bucket configurato per la condivisione. La UI mostra link, QR code e stato di condivisione del file attivo.
+Il nuovo flusso salva il file strutturato anche nel bucket privato `published-scripts` di Supabase, usando un percorso associato all'utente e all'UID della condivisione. La tabella privata `script_shares` conserva metadati, percorso del file, payload di fallback e hash del PIN; l'accesso degli attori avviene tramite RPC dopo autenticazione e verifica del PIN, senza esporre un URL pubblico diretto. La UI mostra link, QR code, PIN e stato di condivisione del file attivo.
+
+Per configurare il flusso eseguire `docs/supabase-sharing.sql` dopo `docs/supabase-auth.sql` nel SQL Editor di Supabase.
 
 ## Sicurezza
 

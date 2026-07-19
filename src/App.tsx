@@ -128,7 +128,10 @@ const PLAYBACK_LOG_VERSION = 2
 const PLAYBACK_SESSION_ID = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
   ? crypto.randomUUID()
   : `playback-${Date.now()}-${Math.random().toString(36).slice(2)}`
-const PUBLISHED_SCRIPT_BUCKET = 'published-scripts'
+const SCRIPT_SHARE_TABLE = 'script_shares'
+const SCRIPT_SHARE_BUCKET = 'published-scripts'
+const SHARE_PIN_STORAGE_PREFIX = 'stagedesk-share-pin:'
+const SHARE_URL_BASE = 'https://stagedesk-pro.aigconsulting.it/share'
 const SHARED_SCRIPT_NOTE_TYPES = ['movement', 'position', 'characters', 'tone'] as const
 const CUE_PAGE_SIZE = 5
 const STORE_TAB_PATH = 'web://stagedesk-store'
@@ -179,7 +182,10 @@ type PublishedScriptPayload = {
 type PublishState = {
   status: 'idle' | 'publishing' | 'published' | 'removing' | 'error'
   url?: string
+  shareUid?: string
   storagePath?: string
+  pin?: string
+  pinAvailable?: boolean
   publishedAt?: string
   error?: string
 }
@@ -409,9 +415,6 @@ function App() {
   }, [project.noteTypes])
   const selectedMediaIsProtectedRoot = selectedMediaNode ? isProtectedMediaRoot(selectedMediaNode) : false
   const activeFilePath = activeFile?.path ?? ''
-  const activeShareStoragePath = user && activeFile && !activeAppDocument
-    ? publishedScriptStoragePath(user.id, project.id, activeFile.path)
-    : ''
   const userEmail = user?.email ?? 'Utente autenticato'
   const activeCharactersRef = useRef(activeCharacters)
   const currentSceneRef = useRef(currentScene)
@@ -531,24 +534,26 @@ function App() {
 
   useEffect(() => {
     let active = true
-    if (!user || !activeFile || activeAppDocument || !activeShareStoragePath) {
+    if (!user || !activeFile || activeAppDocument) {
       return undefined
     }
 
     const checkSharedFile = async () => {
       setShareIndicatorForPath(activeFile.path, { status: 'checking' })
       try {
-        const folderPath = `${user.id}/${project.id}`
-        const fileName = `${slug(activeFile.path)}.json`
-        const { data, error } = await supabase.storage
-          .from(PUBLISHED_SCRIPT_BUCKET)
-          .list(folderPath, { limit: 100, search: fileName })
+        const { data, error } = await supabase
+          .from(SCRIPT_SHARE_TABLE)
+          .select('uid, published_at, updated_at')
+          .eq('owner_id', user.id)
+          .eq('project_id', project.id)
+          .eq('script_path', activeFile.path)
+          .maybeSingle()
         if (error) throw error
         if (!active) return
-        const shared = Boolean(data?.some((item) => item.name === fileName))
-        const { data: publicUrlData } = supabase.storage.from(PUBLISHED_SCRIPT_BUCKET).getPublicUrl(activeShareStoragePath)
+        const shareUid = data?.uid
+        const shared = Boolean(shareUid)
         setShareIndicatorForPath(activeFile.path, shared
-          ? { status: 'shared', url: publicUrlData.publicUrl }
+          ? { status: 'shared', url: shareUrlForUid(shareUid as string) }
           : { status: 'not-shared' })
       } catch (error) {
         if (!active) return
@@ -563,7 +568,7 @@ function App() {
     return () => {
       active = false
     }
-  }, [activeAppDocument, activeFile, activeShareStoragePath, project.id, setShareIndicatorForPath, user])
+  }, [activeAppDocument, activeFile, project.id, setShareIndicatorForPath, user])
 
   useEffect(() => {
     const installedVersion = window.localStorage.getItem(INSTALLED_UPDATE_VERSION_KEY)
@@ -3194,7 +3199,46 @@ function App() {
     if (exportResult.objectUrl) openObjectUrlInNewTab(exportResult.objectUrl)
   }
 
-  const publishScriptJson = async (mode: 'publish' | 'update' = 'publish') => {
+  const loadShareState = async (file: ProjectTreeNode | undefined = activeFile) => {
+    if (!user || !file || activeAppDocument) {
+      setPublishState({ status: 'error', error: 'Apri un file copione del progetto prima di condividere.' })
+      return
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from(SCRIPT_SHARE_TABLE)
+        .select('uid, storage_path, published_at')
+        .eq('owner_id', user.id)
+        .eq('project_id', project.id)
+        .eq('script_path', file.path)
+        .maybeSingle()
+      if (error) throw error
+      if (!data?.uid) {
+        setPublishState({ status: 'idle' })
+        return
+      }
+      const pin = window.localStorage.getItem(`${SHARE_PIN_STORAGE_PREFIX}${data.uid}`) ?? undefined
+      setPublishState({
+        status: 'published',
+        shareUid: data.uid,
+        storagePath: data.storage_path ?? undefined,
+        pin,
+        pinAvailable: Boolean(pin),
+        url: shareUrlForUid(data.uid),
+        publishedAt: data.published_at,
+      })
+    } catch (error) {
+      setPublishState({ status: 'error', error: publishErrorMessage(error) })
+    }
+  }
+
+  const openPublishDialog = () => {
+    setPublishDialogOpen(true)
+    void loadShareState()
+  }
+
+  const publishScriptJson = async (mode: 'publish' | 'update' = 'publish', resetPin = false) => {
     if (!activeFile || activeAppDocument) {
       setPublishState({ status: 'error', error: 'Apri un file copione del progetto prima di condividere.' })
       return
@@ -3206,8 +3250,10 @@ function App() {
 
     const markdown = buildActiveExtendedMarkdown() ?? editorMarkdown
     const payload = buildPublishedScriptPayload(project, activeFile, markdown, activeCharacters)
-    const storagePath = publishedScriptStoragePath(user.id, project.id, activeFile.path)
-    setPublishState((current) => ({ ...current, status: 'publishing', error: undefined, storagePath }))
+    const nextPin = resetPin || !publishState.shareUid
+      ? generateSharePin()
+      : publishState.pin
+    setPublishState((current) => ({ ...current, status: 'publishing', error: undefined }))
 
     try {
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
@@ -3215,25 +3261,54 @@ function App() {
       if (!sessionData.session?.user?.id) {
         throw new Error('Sessione Supabase non disponibile: esegui nuovamente l’accesso.')
       }
-      const { error } = await supabase.storage
-        .from(PUBLISHED_SCRIPT_BUCKET)
+      const { data, error } = await supabase.rpc('upsert_script_share', {
+        p_share_uid: publishState.shareUid ?? null,
+        p_project_id: project.id,
+        p_script_path: activeFile.path,
+        p_project_name: project.name,
+        p_script_name: activeFile.name,
+        p_payload: payload,
+        p_pin: nextPin ?? null,
+        p_reset_pin: resetPin,
+      })
+      if (error) throw error
+      const shareUid = typeof data?.uid === 'string' ? data.uid : publishState.shareUid
+      if (!shareUid) throw new Error('UID condivisione non restituito da Supabase.')
+
+      const storagePath = `${user.id}/${shareUid}.json`
+      const { error: uploadError } = await supabase.storage
+        .from(SCRIPT_SHARE_BUCKET)
         .upload(storagePath, JSON.stringify(payload, null, 2), {
-          cacheControl: '60',
           contentType: 'application/json',
           upsert: true,
         })
-      if (error) throw error
+      if (uploadError) throw uploadError
 
-      const { data } = supabase.storage.from(PUBLISHED_SCRIPT_BUCKET).getPublicUrl(storagePath)
-      const url = data.publicUrl
+      const { error: metadataError } = await supabase.rpc('upsert_script_share', {
+        p_share_uid: shareUid,
+        p_project_id: project.id,
+        p_script_path: activeFile.path,
+        p_project_name: project.name,
+        p_script_name: activeFile.name,
+        p_payload: payload,
+        p_storage_path: storagePath,
+        p_pin: null,
+        p_reset_pin: false,
+      })
+      if (metadataError) throw metadataError
+      if (nextPin) window.localStorage.setItem(`${SHARE_PIN_STORAGE_PREFIX}${shareUid}`, nextPin)
+      const url = shareUrlForUid(shareUid)
       setPublishState({
         status: 'published',
         url,
+        shareUid,
         storagePath,
-        publishedAt: payload.publishedAt,
+        pin: nextPin,
+        pinAvailable: Boolean(nextPin),
+        publishedAt: typeof data?.publishedAt === 'string' ? data.publishedAt : payload.publishedAt,
       })
       setShareIndicatorForPath(activeFile.path, { status: 'shared', url })
-      showStatus(mode === 'update' ? 'Condivisione aggiornata' : 'File condiviso')
+      showStatus(resetPin ? 'PIN condivisione reimpostato' : mode === 'update' ? 'Condivisione aggiornata' : 'File condiviso')
     } catch (error) {
       const message = publishErrorMessage(error)
       setPublishState((current) => ({ ...current, status: 'error', error: message }))
@@ -3244,11 +3319,21 @@ function App() {
 
   const unpublishScriptJson = async () => {
     if (!user || !activeFile) return
-    const storagePath = publishState.storagePath || publishedScriptStoragePath(user.id, project.id, activeFile.path)
-    setPublishState((current) => ({ ...current, status: 'removing', error: undefined, storagePath }))
+    if (!publishState.shareUid) return
+    setPublishState((current) => ({ ...current, status: 'removing', error: undefined }))
     try {
-      const { error } = await supabase.storage.from(PUBLISHED_SCRIPT_BUCKET).remove([storagePath])
+      const storagePath = publishState.storagePath ?? `${user.id}/${publishState.shareUid}.json`
+      const { error: storageError } = await supabase.storage
+        .from(SCRIPT_SHARE_BUCKET)
+        .remove([storagePath])
+      if (storageError) throw storageError
+      const { error } = await supabase
+        .from(SCRIPT_SHARE_TABLE)
+        .delete()
+        .eq('owner_id', user.id)
+        .eq('uid', publishState.shareUid)
       if (error) throw error
+      window.localStorage.removeItem(`${SHARE_PIN_STORAGE_PREFIX}${publishState.shareUid}`)
       setPublishState({ status: 'idle' })
       setShareIndicatorForPath(activeFile.path, { status: 'not-shared' })
       showStatus('Condivisione interrotta')
@@ -3403,6 +3488,19 @@ function App() {
                 >
                   <FileText size={15} />
                   Aiuto
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={activePath === 'app://documentation' ? 'active' : ''}
+                  onClick={() => {
+                    setAppMenuOpen(false)
+                    setAppMenuPosition(undefined)
+                    openAppDocumentTab('app://documentation')
+                  }}
+                >
+                  <BookOpen size={15} />
+                  Documentazione
                 </button>
                 <button
                   type="button"
@@ -3977,6 +4075,20 @@ function App() {
                       </button>
                     </div>
                   </div>
+                  <span className="theater-menu-separator" aria-hidden="true" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!activeFile || Boolean(activeAppDocument)}
+                    onClick={() => {
+                      setTheaterMenuOpen(false)
+                      setTheaterMenuPosition(undefined)
+                      openPublishDialog()
+                    }}
+                  >
+                    <CloudUpload size={14} />
+                    Condividi
+                  </button>
                 </div>
               ) : null}
             </div>
@@ -4288,6 +4400,7 @@ function App() {
           onClose={() => setPublishDialogOpen(false)}
           onPublish={() => void publishScriptJson('publish')}
           onUpdate={() => void publishScriptJson('update')}
+          onResetPin={() => void publishScriptJson('update', true)}
           onUnpublish={() => void unpublishScriptJson()}
           onCopyLink={() => void copyPublishedLink()}
         />
@@ -4332,6 +4445,7 @@ function PublishScriptModal({
   onClose,
   onPublish,
   onUpdate,
+  onResetPin,
   onUnpublish,
   onCopyLink,
 }: {
@@ -4340,6 +4454,7 @@ function PublishScriptModal({
   onClose: () => void
   onPublish: () => void
   onUpdate: () => void
+  onResetPin: () => void
   onUnpublish: () => void
   onCopyLink: () => void
 }) {
@@ -4426,6 +4541,16 @@ function PublishScriptModal({
                 </button>
               </div>
             </label>
+            <label className="publish-pin-field">
+              PIN attore
+              <div className="publish-link-row">
+                <input readOnly value={state.pin ?? ''} placeholder={state.pinAvailable ? '' : 'Non disponibile: reimposta il PIN'} />
+                <button type="button" disabled={busy} onClick={onResetPin}>
+                  <RefreshCw size={14} />
+                  Reimposta
+                </button>
+              </div>
+            </label>
           </div>
         ) : null}
         <div className="publish-actions">
@@ -4437,7 +4562,7 @@ function PublishScriptModal({
             <RefreshCw size={15} />
             Aggiorna
           </button>
-          <button type="button" className="publish-danger" disabled={disabled || busy || !state.storagePath} onClick={onUnpublish}>
+          <button type="button" className="publish-danger" disabled={disabled || busy || !state.shareUid} onClick={onUnpublish}>
             <CloudOff size={15} />
             Interrompi
           </button>
@@ -8543,16 +8668,17 @@ const characterNameFromDialogueText = (value: string) =>
   ?? value.match(/^\*\*([^*]+):\*\*/)?.[1]?.trim()
   ?? ''
 
-const publishedScriptStoragePath = (userId: string, projectId: string, scriptPath: string) =>
-  `${userId}/${projectId}/${slug(scriptPath)}.json`
+const shareUrlForUid = (uid: string) => `${SHARE_URL_BASE}/${encodeURIComponent(uid)}`
+
+const generateSharePin = () => String(Math.floor(Math.random() * 100000)).padStart(5, '0')
 
 const publishErrorMessage = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)
-  if (/bucket not found/i.test(message)) {
-    return `Storage condivisione non configurato: crea il bucket "${PUBLISHED_SCRIPT_BUCKET}" in Supabase.`
+  if (/function .*upsert_script_share.*does not exist|could not find the function/i.test(message)) {
+    return 'Condivisione non configurata: esegui la migrazione docs/supabase-sharing.sql in Supabase.'
   }
   if (/row-level security|violates.*security policy/i.test(message)) {
-    return `Permessi Storage mancanti: esegui le policy RLS per il bucket "${PUBLISHED_SCRIPT_BUCKET}" in Supabase.`
+    return 'Permessi condivisione mancanti: verifica le policy RLS e le funzioni della migrazione Supabase.'
   }
   return message
 }

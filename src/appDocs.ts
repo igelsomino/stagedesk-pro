@@ -6,8 +6,31 @@ export type AppDocument = {
 }
 
 const githubRawBase = 'https://raw.githubusercontent.com/igelsomino/stagedesk-pro/main'
+const githubWikiHome = 'https://raw.githubusercontent.com/wiki/igelsomino/stagedesk-pro/Home.md'
+const githubWikiBase = 'https://github.com/igelsomino/stagedesk-pro/wiki'
 
 export const compactAppDocumentMarkdown = (markdown: string) => markdown.trim().replace(/\n{3,}/g, '\n\n')
+
+const wikiPageSlug = (title: string) =>
+  title
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+
+const normalizeWikiLinks = (markdown: string) =>
+  markdown.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target: string, label?: string) => {
+    const pageTitle = target.trim()
+    return `[${(label ?? pageTitle).trim()}](${githubWikiBase}/${wikiPageSlug(pageTitle)})`
+  })
+
+const documentationFallback = compactAppDocumentMarkdown(`# Documentazione
+
+La documentazione completa di StageDesk Pro è disponibile nel [wiki del progetto](${githubWikiBase}).
+
+Apri le sezioni dalla home del wiki per consultare guida rapida, editor, note, battute, cue, modalità spettacolo, export, condivisione, aggiornamenti e sviluppo.
+`)
 
 const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
@@ -27,8 +50,8 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 - Digita \`nota:\` su una riga vuota per inserire una nota generale con focus nel contenuto.
 - Inserisci Atto, Scena, Sezione, battute e tabelle dalla toolbar teatrale.
 - Usa Cmd+Invio su macOS o Ctrl+Invio su Windows/Linux dentro una nota o battuta per creare una riga sotto il box.
-- Condividi il copione attivo per future app attori, con link copiabile e QR code.
-- La condivisione include personaggi, battute e note operative di movimento, posizione, personaggi in scena e tono.
+- Condividi il copione attivo per future app attori con un link \`/share/[UID]\`, QR code e PIN personale di cinque cifre.
+- La condivisione richiede autenticazione e include personaggi, battute e note operative di movimento, posizione, personaggi in scena e tono.
 - Collassa o espandi tutte le note e assegna colori predefiniti alle note.
 - I media importati vengono salvati nella cartella progetto e restano collegati ai cue.
 - Usa la modalità schermo intero per seguire battute e cue durante l'esecuzione; prima dell'avvio l'app segnala eventuali anomalie tipografiche o formali.
@@ -59,7 +82,7 @@ const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 - Rimosso il bordo di focus dal titolo delle note, mantenendo il focus visibile sul contenuto modificabile.
 - Aggiunto il trascinamento delle battute nell'editor con indicatore della posizione di rilascio e anteprima compatta.
 - Aggiunto il pulsante per eliminare una battuta direttamente dal suo header.
-- Nascosto il comando Condividi dal menu teatrale.
+- Reso nuovamente visibile il comando Condividi nel menu teatrale.
 - Resa più precisa la dissolvenza audio nel player web, includendo la durata naturale del file quando non è configurata una durata manuale.
 - Allineata la temporizzazione della dissolvenza web a intervalli brevi e regolari.
 - Verificato il player nativo desktop per mantenere fade in e fade out durante la riproduzione dei cue audio.
@@ -248,6 +271,12 @@ export const appDocuments: AppDocument[] = [
     content: versionHistoryFallback,
     remoteUrl: `${githubRawBase}/docs/version-history.md`,
   },
+  {
+    path: 'app://documentation',
+    title: 'Documentazione',
+    content: documentationFallback,
+    remoteUrl: githubWikiHome,
+  },
 ]
 
 export const getAppDocument = (path: string) => appDocuments.find((document) => document.path === path)
@@ -257,11 +286,13 @@ export const isAppDocumentPath = (path: string) => Boolean(getAppDocument(path))
 export const fetchAppDocumentContent = async (document: AppDocument) => {
   const response = await fetch(`${document.remoteUrl}?_=${Date.now()}`, { cache: 'no-store' })
   if (!response.ok) throw new Error(`Documento remoto non disponibile: ${response.status}`)
-  return compactAppDocumentMarkdown(await response.text())
+  const content = compactAppDocumentMarkdown(await response.text())
+  return document.path === 'app://documentation' ? normalizeWikiLinks(content) : content
 }
 
 export const appDocumentContent = (document: AppDocument, installedVersion?: string, remoteContent?: string) => {
   const content = compactAppDocumentMarkdown(remoteContent || document.content)
+  if (document.path === 'app://documentation') return normalizeWikiLinks(content)
   if (document.path !== 'app://version-history' || !installedVersion) return content
   return compactAppDocumentMarkdown(`# Novità
 

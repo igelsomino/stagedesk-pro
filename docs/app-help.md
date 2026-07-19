@@ -142,13 +142,15 @@ Alla fine dell'export l'app mostra dove è stato salvato il file e, quando possi
 
 ## Condivisione copione
 
-La condivisione del copione per le future app Android e iOS è predisposta nel progetto ma il comando è temporaneamente nascosto dal menu operativo.
+La condivisione del copione è disponibile nel menu teatrale tramite il comando **Condividi**. La dialog genera un UID univoco, un PIN numerico di cinque cifre e il collegamento `https://stagedesk-pro.aigconsulting.it/share/[UID]`.
 
-Il file condiviso contiene i personaggi, le relative battute con identificativi, scena e riga sorgente, e le note operative di movimento, posizione, personaggi in scena e tono. Dalla stessa dialog puoi aggiornare l'ultima versione condivisa, interrompere la condivisione eliminando il file, copiare il link o condividerlo tramite QR code.
+Il PIN viene mostrato nella stessa dialog e può essere reimpostato dal regista. Il copione non è accessibile con il solo URL: l'attore deve autenticarsi con Google, GitHub, Azure oppure con e-mail e password, quindi inserire il PIN.
 
-Quando il file attivo è condiviso, la schermata principale mostra un'icona di stato vicino alle informazioni di salvataggio.
+Il contenuto condiviso contiene personaggi, battute con identificativi, scena e riga sorgente, oltre alle note operative di movimento, posizione, personaggi in scena e tono. Dalla dialog puoi aggiornare il contenuto, reimpostare il PIN, interrompere la condivisione, copiare il link o visualizzare il QR code.
 
-Nelle app attori, dopo l'accesso con Google, GitHub o Azure, l'utente potrà selezionare il proprio personaggio e visualizzare o nascondere le proprie battute per studiare la parte.
+Quando il file attivo è condiviso, la schermata principale mostra un'icona di stato vicino al tab del file.
+
+La pagina attore è responsive e consente di selezionare uno o più personaggi, mostrare tutte le battute oppure solo quelle selezionate e assegnare a ogni battuta lo stato **Da studiare**, **In studio** o **Studiata**.
 
 ## Aggiornamenti e supporto
 
