@@ -1658,15 +1658,15 @@ body.stagedesk-pointer-dragging * {
 }
 
 .publish-qr img {
-  width: 118px;
-  height: 118px;
+  width: 176px;
+  height: 176px;
   border-radius: 4px;
   background: #fff;
 }
 
 .publish-qr-placeholder {
-  width: 118px;
-  height: 118px;
+  width: 176px;
+  height: 176px;
   border-radius: 4px;
   background:
     linear-gradient(90deg, transparent 45%, rgba(255, 255, 255, 0.08) 50%, transparent 55%),

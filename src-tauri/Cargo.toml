@@ -1,6 +1,6 @@
 [package]
 name = "studio-copione"
-version = "1.0.21"
+version = "1.0.22"
 description = "Applicazione desktop per copioni teatrali"
 authors = ["StageDesk Pro"]
 edition = "2021"

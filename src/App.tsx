@@ -163,8 +163,11 @@ type PublishedScriptNote = {
   sceneId?: string
   sourceLine?: number
 }
+type PublishedScriptItem =
+  | (PublishedScriptDialogue & { kind: 'dialogue' })
+  | (PublishedScriptNote & { kind: 'note' })
 type PublishedScriptPayload = {
-  schemaVersion: 1
+  schemaVersion: 3
   app: 'StageDesk Pro'
   project: {
     id: string
@@ -178,6 +181,7 @@ type PublishedScriptPayload = {
   characters: PublishedScriptCharacter[]
   dialogues: PublishedScriptDialogue[]
   notes: PublishedScriptNote[]
+  items: PublishedScriptItem[]
 }
 type PublishState = {
   status: 'idle' | 'publishing' | 'published' | 'removing' | 'error'
@@ -4467,7 +4471,7 @@ function PublishScriptModal({
       setQrUrl('')
       return undefined
     }
-    QRCode.toDataURL(state.url, { margin: 1, width: 180 })
+    QRCode.toDataURL(state.url, { margin: 1, width: 240 })
       .then((url) => {
         if (active) setQrUrl(url)
       })
@@ -8568,39 +8572,10 @@ const buildPublishedScriptPayload = (
   markdown: string,
   characters: CharacterOption[],
 ): PublishedScriptPayload => {
-  const characterMap = new Map<string, PublishedScriptCharacter>()
-  for (const character of characters) {
-    characterMap.set(character.id, { ...character, dialogues: [] })
-  }
-
-  const dialogues = parseScriptBlocks(markdown)
-    .filter((block) => block.type === 'dialogue' && block.text?.trim())
-    .map((block, index): PublishedScriptDialogue => {
-      const fallbackCharacterName = characterNameFromDialogueText(block.text ?? '') || 'PERSONAGGIO'
-      const characterId = block.characterId || slug(fallbackCharacterName)
-      const existingCharacter = characterMap.get(characterId)
-      const characterName = existingCharacter?.name ?? fallbackCharacterName
-      if (!existingCharacter) {
-        characterMap.set(characterId, { id: characterId, name: characterName, dialogues: [] })
-      }
-      return {
-        id: block.id || `battuta-${index + 1}`,
-        characterId,
-        characterName,
-        sceneId: block.sceneId,
-        text: dialogueTextOnly(block.text ?? ''),
-        sourceLine: block.sourceLine !== undefined ? block.sourceLine + 1 : undefined,
-      }
-    })
-
-  for (const dialogue of dialogues) {
-    characterMap.get(dialogue.characterId)?.dialogues.push(dialogue)
-  }
-
-  const notes = parsePublishedScriptNotes(markdown)
+  const parsed = parsePublishedScriptItems(markdown, characters)
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 3,
     app: 'StageDesk Pro',
     project: {
       id: project.id,
@@ -8611,16 +8586,24 @@ const buildPublishedScriptPayload = (
       name: activeFile.name,
     },
     publishedAt: new Date().toISOString(),
-    characters: [...characterMap.values()],
-    dialogues,
-    notes,
+    characters: parsed.characters,
+    dialogues: parsed.dialogues,
+    notes: parsed.notes,
+    items: parsed.items,
   }
 }
 
-const parsePublishedScriptNotes = (markdown: string): PublishedScriptNote[] => {
+const parsePublishedScriptItems = (
+  markdown: string,
+  characters: CharacterOption[],
+) => {
   const sharedNoteTypes = new Set<string>(SHARED_SCRIPT_NOTE_TYPES)
+  const characterMap = new Map<string, PublishedScriptCharacter>(
+    characters.map((character) => [character.id, { ...character, dialogues: [] }]),
+  )
+  const items: PublishedScriptItem[] = []
   const lines = markdown.split('\n')
-  const notes: PublishedScriptNote[] = []
+  let dialogueCount = 0
   let sceneId: string | undefined
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -8630,43 +8613,67 @@ const parsePublishedScriptNotes = (markdown: string): PublishedScriptNote[] => {
       continue
     }
 
-    const directive = trimmed.match(/^::regia\{([^}]*)\}/)
-    if (!directive) continue
-
-    const attrs = directive[1]
-    const type = readDirectiveAttr(attrs, 'type') || 'general'
-    const contentLines: string[] = []
-    const sourceLine = index + 1
-    index += 1
-    while (index < lines.length && lines[index].trim() !== '::') {
-      contentLines.push(lines[index])
+    const dialogueDirective = trimmed.match(/^::battuta\{([^}]*)\}/)
+    if (dialogueDirective) {
+      const attrs = dialogueDirective[1]
+      const contentLines: string[] = []
+      const sourceLine = index + 1
       index += 1
+      while (index < lines.length && lines[index].trim() !== '::') {
+        contentLines.push(lines[index])
+        index += 1
+      }
+      const fallbackCharacterName = readDirectiveAttr(attrs, 'character') || readDirectiveAttr(attrs, 'characterId') || 'PERSONAGGIO'
+      const characterId = readDirectiveAttr(attrs, 'characterId') || slug(fallbackCharacterName)
+      const existingCharacter = characterMap.get(characterId)
+      const characterName = existingCharacter?.name ?? fallbackCharacterName
+      if (!existingCharacter) characterMap.set(characterId, { id: characterId, name: characterName, dialogues: [] })
+      const dialogue: PublishedScriptDialogue = {
+        id: readDirectiveAttr(attrs, 'id') || `battuta-${dialogueCount + 1}`,
+        characterId,
+        characterName,
+        sceneId: readDirectiveAttr(attrs, 'sceneId') || sceneId,
+        text: contentLines.join('\n').trim(),
+        sourceLine,
+      }
+      dialogueCount += 1
+      items.push({ kind: 'dialogue', ...dialogue })
+      characterMap.get(characterId)?.dialogues.push(dialogue)
+      continue
     }
-    if (!sharedNoteTypes.has(type)) continue
 
-    notes.push({
-      id: readDirectiveAttr(attrs, 'id') || `nota-${sourceLine}`,
-      type,
-      title: readDirectiveAttr(attrs, 'title') || type,
-      content: contentLines.join('\n').trim(),
-      sceneId: readDirectiveAttr(attrs, 'sceneId') || sceneId,
-      sourceLine,
-    })
+    const noteDirective = trimmed.match(/^::regia\{([^}]*)\}/)
+    if (noteDirective) {
+      const attrs = noteDirective[1]
+      const type = readDirectiveAttr(attrs, 'type') || 'general'
+      const contentLines: string[] = []
+      const sourceLine = index + 1
+      index += 1
+      while (index < lines.length && lines[index].trim() !== '::') {
+        contentLines.push(lines[index])
+        index += 1
+      }
+      if (sharedNoteTypes.has(type)) {
+        const note: PublishedScriptNote = {
+          id: readDirectiveAttr(attrs, 'id') || `nota-${sourceLine}`,
+          type,
+          title: readDirectiveAttr(attrs, 'title') || type,
+          content: contentLines.join('\n').trim(),
+          sceneId: readDirectiveAttr(attrs, 'sceneId') || sceneId,
+          sourceLine,
+        }
+        items.push({ kind: 'note', ...note })
+      }
+    }
   }
 
-  return notes
+  return {
+    characters: [...characterMap.values()],
+    dialogues: items.filter((item): item is PublishedScriptDialogue & { kind: 'dialogue' } => item.kind === 'dialogue').map(({ kind: _kind, ...dialogue }) => dialogue),
+    notes: items.filter((item): item is PublishedScriptNote & { kind: 'note' } => item.kind === 'note').map(({ kind: _kind, ...note }) => note),
+    items,
+  }
 }
-
-const dialogueTextOnly = (value: string) =>
-  value
-    .replace(/^\*\*([^*]+)\*\*:\s*/, '')
-    .replace(/^\*\*([^*]+):\*\*\s*/, '')
-    .trim()
-
-const characterNameFromDialogueText = (value: string) =>
-  value.match(/^\*\*([^*]+)\*\*:/)?.[1]?.trim()
-  ?? value.match(/^\*\*([^*]+):\*\*/)?.[1]?.trim()
-  ?? ''
 
 const shareUrlForUid = (uid: string) => `${SHARE_URL_BASE}/${encodeURIComponent(uid)}`
 

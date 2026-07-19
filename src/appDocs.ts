@@ -69,6 +69,14 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.22
+
+> Aggiornamento dedicato alla condivisione del copione e alla continuità di lettura.
+
+- Note e battute condivise vengono pubblicate in un unico elenco ordinato secondo la posizione reale nel copione.
+- La pagina StageDesk Share mantiene la posizione della pagina quando si mostra o si nasconde una battuta.
+- La selezione dei personaggi viene mantenuta dopo il refresh della pagina condivisa e ripristinata per il copione attivo.
+
 ## Versione 1.0.20
 
 > Patch di stabilità della riproduzione audio.
