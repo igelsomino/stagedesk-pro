@@ -8,7 +8,7 @@ Per usare l'app devi accedere con un account. Alla prima registrazione viene ric
 
 Se accedi con Google, GitHub o Azure, l'app controlla comunque il profilo applicativo. Quando mancano dati obbligatori mostra **Completa il profilo** prima di permettere l'utilizzo dell'app.
 
-La password e il provider non vengono salvati nel profilo dell'app. Sono gestiti dal sistema di autenticazione Supabase. Per questo un account creato con Google può, dopo il recupero via e-mail, impostare anche una password e usare lo stesso account con entrambi i metodi.
+Un account creato con Google può, dopo il recupero via e-mail, impostare anche una password e usare lo stesso account con entrambi i metodi.
 
 Link utili:
 

@@ -98,7 +98,7 @@ Se non ricordi la password, seleziona **Password dimenticata?** nella schermata 
 
 Dopo l'accesso con Google, GitHub o Azure, se il profilo non contiene ancora nome, cognome, telefono, un profilo operativo e l'accettazione della privacy, l'app apre automaticamente **Completa il profilo** prima di consentire l'accesso al resto dell'applicazione.
 
-La tabella `profiles` contiene esclusivamente i dati applicativi del profilo. Provider e credenziali non vengono copiati nella tabella: il provider è gestito da Supabase Auth tramite identità e metadati di autenticazione, mentre la password resta gestita e protetta dal servizio Auth. Il recupero password può quindi aggiungere una credenziale email/password allo stesso account nato con OAuth; l'account resta unico per StageDesk Pro e StageDesk Share.
+Un account creato con Google, GitHub o Azure può completare il recupero tramite e-mail e impostare una nuova password, mantenendo lo stesso account per StageDesk Pro e StageDesk Share.
 
 Per il recupero desktop, Supabase deve consentire il redirect `https://stagedesk-pro.aigconsulting.it/auth-callback/` nelle URL di reindirizzamento dell'autenticazione. Il callback del provider resta invece `https://insoqzhjmrbrgfrsmlnj.supabase.co/auth/v1/callback`.
 

@@ -10,7 +10,7 @@
 - Dopo l'accesso OAuth viene verificato il profilo applicativo e, se incompleto, viene richiesto il completamento prima di entrare nell'app o nel copione condiviso.
 - Allineata la registrazione Share ai campi desktop: nome, cognome, telefono, profili multipli e consensi.
 - Aggiunto il profilo operativo **Attore/Attrice**, uniformata la label **Autore/Autrice** e aggiornati normalizzazione e vincoli Supabase.
-- Chiarita la separazione tra `profiles` e Supabase Auth: provider e password restano gestiti dal sistema Auth e non vengono salvati nella tabella applicativa.
+- Chiarito il comportamento del recupero password per gli account creati tramite provider esterni, mantenendo un unico account tra desktop e condivisione.
 - Documentati i redirect URL necessari per configurare il recupero password in Supabase.
 
 ## Versione 1.0.24
