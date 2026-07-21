@@ -1995,8 +1995,9 @@ function App() {
       const response = await fetch(url, { cache: 'no-store' })
       if (!response.ok) throw new Error(`Download non riuscito (${response.status})`)
       const content = await response.text()
-      const hasDialogueDirective = /(?:^|\n)::{2,3}battuta\{/.test(content)
-      if (!content.includes('| Personaggio |') || !hasDialogueDirective) {
+      const hasCharactersTable = /(?:^|\n)\s*\|\s*Personaggio\s*\|/m.test(content)
+      const hasDialogueDirective = /(?:^|\n)\s*:{2,3}battuta\{/m.test(content)
+      if (!hasCharactersTable || !hasDialogueDirective) {
         throw new Error('Il pacchetto non contiene un copione StageDesk valido')
       }
 
@@ -5924,7 +5925,7 @@ const parseStoreNumber = (attrs: string, name: string) => {
 const parseStoreNotes = (markdown: string, filePath: string): DirectorNote[] => {
   const timestamp = new Date().toISOString()
   const notes: DirectorNote[] = []
-  const pattern = /:::regia\{([^}]*)\}([\s\S]*?)::/g
+  const pattern = /:{2,3}regia\{([^}]*)\}([\s\S]*?):{2,3}/g
   let match: RegExpExecArray | null
   while ((match = pattern.exec(markdown))) {
     const attrs = match[1]
@@ -5950,7 +5951,7 @@ const parseStoreNotes = (markdown: string, filePath: string): DirectorNote[] => 
 const parseStoreCues = (markdown: string, filePath: string): MediaCue[] => {
   const timestamp = new Date().toISOString()
   const cues: MediaCue[] = []
-  const pattern = /:::media\{([^}]*)\}([\s\S]*?)::/g
+  const pattern = /:{2,3}media\{([^}]*)\}([\s\S]*?):{2,3}/g
   let match: RegExpExecArray | null
   while ((match = pattern.exec(markdown))) {
     const attrs = match[1]

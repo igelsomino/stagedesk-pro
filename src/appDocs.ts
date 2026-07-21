@@ -70,6 +70,14 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.28
+
+> Corretto definitivamente il riconoscimento e l'importazione dei pacchetti Store.
+
+- La validazione riconosce l'intestazione della tabella personaggi anche in presenza di spaziatura diversa.
+- Note, battute e cue vengono letti sia nei pacchetti con direttive a due \`:\` sia in quelli precedenti a tre \`:\`.
+- Evitata la segnalazione errata di pacchetto StageDesk non valido durante l'importazione.
+
 ## Versione 1.0.27
 
 > Corretto l'import del copione dal catalogo Store.
