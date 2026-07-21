@@ -1,5 +1,14 @@
 # Novità
 
+## Versione 1.0.23
+
+> Aggiornamento dedicato al completamento dell'autenticazione OAuth desktop.
+
+- Il login con Google, GitHub e Azure ora passa da una pagina HTTPS pubblica di completamento invece di reindirizzare direttamente il browser allo schema dell'app.
+- Dopo l'autenticazione, la pagina riapre StageDesk Pro tramite deep link e mostra un messaggio esplicito che consente di chiudere la finestra del browser.
+- Aggiunto un collegamento manuale per riaprire StageDesk Pro quando il browser non avvia automaticamente l'app.
+- Aggiornati gli installer e i metadati dell'updater per macOS, Windows e Linux.
+
 ## Versione 1.0.21
 
 > Condivisione privata dei copioni con accesso per gli attori.
