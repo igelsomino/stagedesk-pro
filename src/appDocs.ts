@@ -70,6 +70,14 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.27
+
+> Corretto l'import del copione dal catalogo Store.
+
+- I pacchetti StageDesk con estensione .stagedesk vengono riconosciuti anche quando usano la sintassi estesa compatibile con l'editor desktop.
+- Risolto il controllo preliminare che segnalava erroneamente il pacchetto come non valido.
+- Note registiche e battute vengono ora interpretate come oggetti del copione invece di essere mostrate come testo sorgente.
+
 ## Versione 1.0.26
 
 > Aggiornamento dedicato all'importazione diretta dei copioni dallo Store desktop.

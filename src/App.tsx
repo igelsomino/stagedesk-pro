@@ -1995,7 +1995,8 @@ function App() {
       const response = await fetch(url, { cache: 'no-store' })
       if (!response.ok) throw new Error(`Download non riuscito (${response.status})`)
       const content = await response.text()
-      if (!content.includes('| Personaggio |') || !content.includes(':::battuta')) {
+      const hasDialogueDirective = /(?:^|\n)::{2,3}battuta\{/.test(content)
+      if (!content.includes('| Personaggio |') || !hasDialogueDirective) {
         throw new Error('Il pacchetto non contiene un copione StageDesk valido')
       }
 
