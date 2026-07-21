@@ -79,7 +79,7 @@ import type {
 } from 'react'
 import './App.css'
 import { appDocumentContent, fetchAppDocumentContent, getAppDocument, isAppDocumentPath } from './appDocs'
-import { supabase } from './auth'
+import { supabase, supabaseUrl } from './auth'
 import { useAuth } from './authContext'
 import { SCRIPT_ROOT_PATH } from './domain'
 import type { DirectorNote, MediaAsset, MediaCue, NotePanelMode, NoteType, Project, ProjectTreeNode } from './domain'
@@ -139,6 +139,20 @@ const STORE_URL = 'https://stagedesk-pro.aigconsulting.it/store/'
 const STORE_ORIGIN = 'https://stagedesk-pro.aigconsulting.it'
 const STORE_IMPORT_MESSAGE = 'stagedesk-store-import'
 const STORE_CONTEXT_MESSAGE = 'stagedesk-store-context'
+const SUPABASE_STORAGE_ORIGIN = (() => {
+  try {
+    return supabaseUrl ? new URL(supabaseUrl).origin : ''
+  } catch {
+    return ''
+  }
+})()
+
+const isTrustedStorePackageUrl = (url: URL) =>
+  (url.origin === STORE_ORIGIN && url.pathname.startsWith('/store/copioni/') && url.pathname.endsWith('.stagedesk')) ||
+  (Boolean(SUPABASE_STORAGE_ORIGIN) &&
+    url.origin === SUPABASE_STORAGE_ORIGIN &&
+    url.pathname.startsWith('/storage/v1/object/public/store-packages/') &&
+    url.pathname.endsWith('.stagedesk'))
 type EditorCueState = 'playing' | 'paused' | 'stopped'
 type EditorCueStateWindow = Window & {
   __STAGEDESK_EDITOR_CUE_STATE__?: { id: string; state: EditorCueState }
@@ -1987,7 +2001,7 @@ function App() {
   const importStorePackage = async (packageUrl: string, packageTitle: string) => {
     try {
       const url = new URL(packageUrl)
-      if (url.origin !== STORE_ORIGIN || !url.pathname.startsWith('/store/copioni/') || !url.pathname.endsWith('.stagedesk')) {
+      if (!isTrustedStorePackageUrl(url)) {
         throw new Error('Pacchetto Store non riconosciuto')
       }
 
