@@ -70,6 +70,14 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.29
+
+> Aggiornata la verifica formale della struttura del copione.
+
+- Rimossa la segnalazione di errore per la presenza di più titoli H1.
+- Gli H1 possono essere utilizzati per identificare più atti dello stesso copione.
+- Rimane attivo il controllo che segnala l'assenza totale di un titolo H1.
+
 ## Versione 1.0.28
 
 > Corretto definitivamente il riconoscimento e l'importazione dei pacchetti Store.

@@ -6899,9 +6899,6 @@ const validateScriptForFullscreen = (markdown: string, project: Project): Script
       if (level === 1) {
         currentSection = ''
         h1Count += 1
-        if (h1Count > 1) {
-          addIssue(index, 'Struttura', 'È presente più di un titolo H1 nel file.', heading[1])
-        }
       } else if (level === 2) {
         currentSection = ''
         if (!/^scena\b/i.test(title)) {
