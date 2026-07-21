@@ -1,5 +1,15 @@
 # Novità
 
+## Versione 1.0.26
+
+> Aggiornamento dedicato all'importazione diretta dei copioni dallo Store desktop.
+
+- Lo Store pubblica i copioni come pacchetti `.stagedesk`, senza esporre file Markdown scaricabili.
+- Il comando **Importa in StageDesk Pro** viene mostrato soltanto quando lo Store è aperto nell'app desktop.
+- L'importazione crea una nuova cartella progetto locale con il copione nella struttura `copioni`.
+- Personaggi e note registiche vengono ricostruiti automaticamente dal pacchetto importato.
+- Un browser normale continua a mostrare la scheda informativa dello Store senza il comando di importazione.
+
 ## Versione 1.0.25
 
 > Recupero password integrato nelle schermate di accesso.

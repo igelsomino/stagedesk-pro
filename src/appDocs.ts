@@ -42,6 +42,7 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 - Crea o apri un progetto.
 - Cerca, rinomina o elimina progetti dalla dialog Apri progetto.
 - Apri lo Store dal pulsante Importa nella dialog Apri progetto.
+- Dallo Store aperto nell'app desktop importa direttamente i pacchetti \`.stagedesk\`, senza scaricare file Markdown.
 - Nella versione desktop viene riaperto automaticamente l'ultimo progetto usato.
 - Scrivi il copione nell'editor centrale.
 - Organizza copioni, media e bookmark dalla colonna Struttura.
@@ -68,6 +69,16 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 `)
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
+
+## Versione 1.0.26
+
+> Aggiornamento dedicato all'importazione diretta dei copioni dallo Store desktop.
+
+- Lo Store pubblica i copioni come pacchetti \`.stagedesk\`, senza esporre file Markdown scaricabili.
+- Il comando **Importa in StageDesk Pro** viene mostrato soltanto quando lo Store è aperto nell'app desktop.
+- L'importazione crea una nuova cartella progetto locale con il copione nella struttura \`copioni\`.
+- Personaggi e note registiche vengono ricostruiti automaticamente dal pacchetto importato.
+- Un browser normale continua a mostrare la scheda informativa dello Store senza il comando di importazione.
 
 ## Versione 1.0.22
 
