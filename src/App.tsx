@@ -136,6 +136,9 @@ const SHARED_SCRIPT_NOTE_TYPES = ['movement', 'position', 'characters', 'tone'] 
 const CUE_PAGE_SIZE = 5
 const STORE_TAB_PATH = 'web://stagedesk-store'
 const STORE_URL = 'https://stagedesk-pro.aigconsulting.it/store/'
+const STORE_ORIGIN = 'https://stagedesk-pro.aigconsulting.it'
+const STORE_IMPORT_MESSAGE = 'stagedesk-store-import'
+const STORE_CONTEXT_MESSAGE = 'stagedesk-store-context'
 type EditorCueState = 'playing' | 'paused' | 'stopped'
 type EditorCueStateWindow = Window & {
   __STAGEDESK_EDITOR_CUE_STATE__?: { id: string; state: EditorCueState }
@@ -472,6 +475,7 @@ function App() {
   const tableMenuRef = useRef<HTMLDivElement>(null)
   const tableInsertMenuRef = useRef<HTMLDivElement>(null)
   const appMenuRef = useRef<HTMLDivElement>(null)
+  const storeFrameRef = useRef<HTMLIFrameElement>(null)
   const pointerDropTargetRef = useRef<PointerDropTarget | undefined>(undefined)
   const moveMediaNodeRef = useRef<(sourcePath: string, targetFolderPath: string) => Promise<void>>(async () => undefined)
   const fileNotes = useMemo(
@@ -1980,6 +1984,62 @@ function App() {
       .catch((error) => setStorageStatus(`Creazione progetto non riuscita: ${String(error)}`))
   }
 
+  const importStorePackage = async (packageUrl: string, packageTitle: string) => {
+    try {
+      const url = new URL(packageUrl)
+      if (url.origin !== STORE_ORIGIN || !url.pathname.startsWith('/store/copioni/') || !url.pathname.endsWith('.stagedesk')) {
+        throw new Error('Pacchetto Store non riconosciuto')
+      }
+
+      setStoreLoading(true)
+      const response = await fetch(url, { cache: 'no-store' })
+      if (!response.ok) throw new Error(`Download non riuscito (${response.status})`)
+      const content = await response.text()
+      if (!content.includes('| Personaggio |') || !content.includes(':::battuta')) {
+        throw new Error('Il pacchetto non contiene un copione StageDesk valido')
+      }
+
+      const projectName = packageTitle.trim() || 'Copione importato'
+      const fileName = `${slug(projectName) || 'copione-importato'}.md`
+      const filePath = `${SCRIPT_ROOT_PATH}/${fileName}`
+      const baseProject = blankProject(projectName)
+      const importedProject: Project = {
+        ...baseProject,
+        scripts: [{
+          id: crypto.randomUUID(),
+          name: 'copioni',
+          path: SCRIPT_ROOT_PATH,
+          kind: 'folder',
+          children: [{
+            id: crypto.randomUUID(),
+            name: fileName,
+            path: filePath,
+            kind: 'markdown',
+            content,
+          }],
+        }],
+        characters: charactersFromMarkdown(content, baseProject.characters),
+        notes: parseStoreNotes(content, filePath),
+        cues: parseStoreCues(content, filePath),
+      }
+
+      const path = await storage.createProjectFolder(importedProject)
+      if (!path) {
+        setStorageStatus('Importazione annullata')
+        return
+      }
+
+      const projectInFolder = { ...importedProject, rootPath: path }
+      activateProject(projectInFolder)
+      persistProject(projectInFolder)
+      setStorageStatus(`Copione importato: ${compactPath(path)}`)
+    } catch (error) {
+      setStorageStatus(`Importazione Store non riuscita: ${String(error)}`)
+    } finally {
+      setStoreLoading(false)
+    }
+  }
+
   const openProjectFile = () => {
     if (storage.requiresDirectFolderPicker()) {
       void openProjectFolder()
@@ -2090,6 +2150,17 @@ function App() {
     setActivePath(STORE_TAB_PATH)
     persistUiStateNow()
   }
+
+  useEffect(() => {
+    const onStoreMessage = (event: MessageEvent<{ type?: string; url?: string; title?: string }>) => {
+      if (!isTauriRuntime() || event.source !== storeFrameRef.current?.contentWindow) return
+      if (event.data?.type !== STORE_IMPORT_MESSAGE || !event.data.url) return
+      void importStorePackage(event.data.url, event.data.title ?? '')
+    }
+
+    window.addEventListener('message', onStoreMessage)
+    return () => window.removeEventListener('message', onStoreMessage)
+  })
 
   const updateFileTabOverflow = () => {
     const element = fileTabbarRef.current
@@ -3772,7 +3843,20 @@ function App() {
                   <span>Caricamento store...</span>
                 </div>
               ) : null}
-              <iframe title="StageDesk Store" src={STORE_URL} onLoad={() => setStoreLoading(false)} />
+              <iframe
+                ref={storeFrameRef}
+                title="StageDesk Store"
+                src={STORE_URL}
+                onLoad={() => {
+                  setStoreLoading(false)
+                  if (isTauriRuntime()) {
+                    storeFrameRef.current?.contentWindow?.postMessage(
+                      { type: STORE_CONTEXT_MESSAGE, canImport: true },
+                      STORE_ORIGIN,
+                    )
+                  }
+                }}
+              />
             </div>
           ) : (
             <>
@@ -5827,6 +5911,77 @@ const requiredNoteTypes: NoteType[] = [
   { id: 'prop', label: 'Oggetto di scena', color: 'brown' },
   { id: 'general', label: 'Nota generale', color: 'cyan' },
 ]
+
+const parseStoreAttribute = (attrs: string, name: string) =>
+  attrs.match(new RegExp(`${name}="([^"]*)"`))?.[1] ?? ''
+
+const parseStoreNumber = (attrs: string, name: string) => {
+  const value = Number.parseFloat(parseStoreAttribute(attrs, name))
+  return Number.isFinite(value) ? value : undefined
+}
+
+const parseStoreNotes = (markdown: string, filePath: string): DirectorNote[] => {
+  const timestamp = new Date().toISOString()
+  const notes: DirectorNote[] = []
+  const pattern = /:::regia\{([^}]*)\}([\s\S]*?)::/g
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(markdown))) {
+    const attrs = match[1]
+    const id = parseStoreAttribute(attrs, 'id')
+    const type = parseStoreAttribute(attrs, 'type') || 'general'
+    if (!id) continue
+    notes.push({
+      id,
+      type,
+      color: parseStoreAttribute(attrs, 'color') || requiredNoteTypes.find((item) => item.id === type)?.color || 'cyan',
+      title: parseStoreAttribute(attrs, 'title') || requiredNoteTypes.find((item) => item.id === type)?.label || 'Nota regia',
+      content: match[2].trim(),
+      filePath,
+      anchorId: parseStoreAttribute(attrs, 'anchorId') || id,
+      sceneId: parseStoreAttribute(attrs, 'sceneId') || undefined,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    })
+  }
+  return notes
+}
+
+const parseStoreCues = (markdown: string, filePath: string): MediaCue[] => {
+  const timestamp = new Date().toISOString()
+  const cues: MediaCue[] = []
+  const pattern = /:::media\{([^}]*)\}([\s\S]*?)::/g
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(markdown))) {
+    const attrs = match[1]
+    const id = parseStoreAttribute(attrs, 'id')
+    const type = parseStoreAttribute(attrs, 'type')
+    const src = parseStoreAttribute(attrs, 'src')
+    if (!id || !['audio', 'music', 'image', 'video'].includes(type) || !src) continue
+    cues.push({
+      id,
+      type: type as MediaCue['type'],
+      src,
+      title: parseStoreAttribute(attrs, 'title') || src.split('/').pop() || 'Cue media',
+      description: match[2].trim(),
+      autoplay: parseStoreAttribute(attrs, 'autoplay') === 'true',
+      anchorId: parseStoreAttribute(attrs, 'anchorId') || id,
+      filePath,
+      sceneId: parseStoreAttribute(attrs, 'sceneId') || undefined,
+      options: {
+        volume: parseStoreNumber(attrs, 'volume'),
+        fadeIn: parseStoreNumber(attrs, 'fadeIn'),
+        fadeOut: parseStoreNumber(attrs, 'fadeOut'),
+        duration: parseStoreNumber(attrs, 'duration'),
+        startAt: parseStoreNumber(attrs, 'startAt'),
+        endAt: parseStoreNumber(attrs, 'endAt'),
+        loop: parseStoreAttribute(attrs, 'loop') === 'true',
+      },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    })
+  }
+  return cues
+}
 
 function normalizeProject(project: Project): Project {
   const noteTypeIds = new Set(project.noteTypes.map((noteType) => noteType.id))
