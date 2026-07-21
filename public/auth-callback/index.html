@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Accesso completato - StageDesk Pro</title>
+    <title>Autenticazione completata - StageDesk Pro</title>
     <style>
       :root {
         color-scheme: dark;
@@ -38,6 +38,15 @@
         font-size: 1.35rem;
       }
 
+      .eyebrow {
+        margin: 0 0 10px;
+        color: #ff7a42;
+        font-size: 0.72rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
       p {
         margin: 0 0 18px;
         color: #c7c2b8;
@@ -52,18 +61,23 @@
   </head>
   <body>
     <main>
-      <h1>Accesso completato</h1>
-      <p>StageDesk Pro sta completando l'autenticazione. Se l'app non si apre automaticamente, usa il collegamento qui sotto.</p>
-      <a id="open-app" href="stagedeskpro://auth-callback">Apri StageDesk Pro</a>
+      <p class="eyebrow">StageDesk Pro</p>
+      <h1>Autenticazione completata</h1>
+      <p id="status">StageDesk Pro sta completando l'accesso. Puoi chiudere questa finestra dopo l'apertura dell'app.</p>
+      <a id="open-app" href="stagedeskpro://auth-callback">Riapri StageDesk Pro</a>
     </main>
     <script>
       const callbackPath = `${window.location.search || ""}${window.location.hash || ""}`;
       const appUrl = `stagedeskpro://auth-callback${callbackPath}`;
       const link = document.getElementById("open-app");
+      const status = document.getElementById("status");
       link.href = appUrl;
       window.setTimeout(() => {
-        window.location.href = appUrl;
-      }, 250);
+        link.click();
+        window.setTimeout(() => {
+          status.textContent = "StageDesk Pro è stato aperto. Ora puoi chiudere questa finestra del browser.";
+        }, 1200);
+      }, 300);
     </script>
   </body>
 </html>

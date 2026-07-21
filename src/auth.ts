@@ -56,7 +56,8 @@ export type AuthState = {
   signOut: () => Promise<void>
 }
 
-export const desktopAuthCallbackUrl = 'stagedeskpro://auth-callback'
+export const desktopDeepLinkCallbackUrl = 'stagedeskpro://auth-callback'
+export const desktopAuthCallbackUrl = 'https://stagedesk-pro.aigconsulting.it/auth-callback/'
 
 export const isLocalAuthOrigin = () => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(window.location.origin)
 

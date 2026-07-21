@@ -27,11 +27,12 @@ describe('auth redirect urls', () => {
     expect(usesDesktopAuthCallback()).toBe(false)
   })
 
-  it('uses the desktop deep link callback in installed tauri builds', () => {
+  it('uses the public completion page in installed tauri builds', () => {
     setRuntime('http://tauri.localhost', true)
 
     expect(isLocalAuthOrigin()).toBe(false)
     expect(authRedirectUrl()).toBe(desktopAuthCallbackUrl)
+    expect(authRedirectUrl()).toBe('https://stagedesk-pro.aigconsulting.it/auth-callback/')
     expect(usesDesktopAuthCallback()).toBe(true)
   })
 
