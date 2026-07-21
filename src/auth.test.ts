@@ -66,4 +66,8 @@ describe('auth profile types', () => {
   it('falls back to the legacy single profile', () => {
     expect(normalizeUserTypes({ user_type: 'autore', user_types: null })).toEqual(['autore'])
   })
+
+  it('accepts the actor profile', () => {
+    expect(normalizeUserTypes({ user_type: 'attore', user_types: ['attore'] })).toEqual(['attore'])
+  })
 })

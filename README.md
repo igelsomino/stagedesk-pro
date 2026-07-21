@@ -30,7 +30,7 @@ La codebase comprende:
 Implementato:
 
 1. autenticazione obbligatoria e profilo utente;
-2. ruoli profilo multipli: regista, autore, altro;
+2. profili operativi multipli: regista, autore/autrice, attore/attrice, altro;
 3. layout a tre colonne con Struttura, Editor e Cue;
 4. creazione e apertura progetti;
 5. ricerca, paginazione, rinomina ed eliminazione nella dialog di apertura progetti;
@@ -65,6 +65,7 @@ Implementato:
 34. aggiornamenti automatici tramite GitHub Releases;
 35. diagnostica persistente per eventi di lifecycle, focus, refresh, stato editor e riproduzione media.
 36. completamento OAuth desktop tramite pagina HTTPS pubblica, con riapertura dell'app tramite deep link senza lasciare il browser in caricamento;
+37. recupero password tramite link e-mail e impostazione guidata di una nuova password;
 
 ## Sviluppo
 
@@ -92,6 +93,14 @@ La configurazione dell'autenticazione viene letta dall'ambiente di build. Non in
 Se la configurazione manca, l'app mostra una schermata esplicita di errore invece di usare valori di fallback.
 
 Nel desktop il login con Google, GitHub e Azure passa dalla pagina pubblica `https://stagedesk-pro.aigconsulting.it/auth-callback/`. La pagina conferma il completamento dell'autenticazione, riapre StageDesk Pro tramite il protocollo `stagedeskpro://` e lascia disponibile un collegamento manuale se il sistema operativo non avvia automaticamente l'app. Dopo l'apertura dell'app è possibile chiudere la finestra del browser.
+
+Se non ricordi la password, seleziona **Password dimenticata?** nella schermata di accesso, inserisci l'e-mail dell'account e apri il collegamento ricevuto. StageDesk Pro mostra una pagina dedicata per impostare e confermare la nuova password; al termine chiude la sessione di recupero e riporta alla schermata di accesso.
+
+Dopo l'accesso con Google, GitHub o Azure, se il profilo non contiene ancora nome, cognome, telefono, un profilo operativo e l'accettazione della privacy, l'app apre automaticamente **Completa il profilo** prima di consentire l'accesso al resto dell'applicazione.
+
+La tabella `profiles` contiene esclusivamente i dati applicativi del profilo. Provider e credenziali non vengono copiati nella tabella: il provider è gestito da Supabase Auth tramite identità e metadati di autenticazione, mentre la password resta gestita e protetta dal servizio Auth. Il recupero password può quindi aggiungere una credenziale email/password allo stesso account nato con OAuth; l'account resta unico per StageDesk Pro e StageDesk Share.
+
+Per il recupero desktop, Supabase deve consentire il redirect `https://stagedesk-pro.aigconsulting.it/auth-callback/` nelle URL di reindirizzamento dell'autenticazione. Il callback del provider resta invece `https://insoqzhjmrbrgfrsmlnj.supabase.co/auth/v1/callback`.
 
 ## Installer
 

@@ -31,7 +31,7 @@ export const supabase = createClient(supabaseUrl || 'https://auth.local.invalid'
   },
 })
 
-export type AuthUserType = 'regista' | 'autore' | 'altro'
+export type AuthUserType = 'regista' | 'autore' | 'attore' | 'altro'
 
 export type UserProfile = {
   id: string
@@ -78,7 +78,7 @@ export const userDisplayName = (user: User | null, profile: UserProfile | null) 
 export const normalizeUserTypes = (profile: Pick<UserProfile, 'user_type' | 'user_types'> | null) => {
   const values = profile?.user_types?.length ? profile.user_types : profile?.user_type ? [profile.user_type] : []
   return Array.from(new Set(values.filter((value): value is AuthUserType =>
-    value === 'regista' || value === 'autore' || value === 'altro',
+    value === 'regista' || value === 'autore' || value === 'attore' || value === 'altro',
   )))
 }
 

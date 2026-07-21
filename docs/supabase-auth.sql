@@ -4,7 +4,7 @@ create table if not exists public.profiles (
   first_name text not null,
   last_name text not null,
   phone text not null,
-  user_type text not null check (user_type in ('regista', 'autore', 'altro')),
+  user_type text not null check (user_type in ('regista', 'autore', 'attore', 'altro')),
   user_types text[] not null default array['regista']::text[],
   privacy_accepted_at timestamptz not null,
   terms_accepted_at timestamptz,
@@ -26,23 +26,18 @@ alter column user_types set default array['regista']::text[];
 alter table public.profiles
 alter column user_types set not null;
 
-do $$
-begin
-  if not exists (
-    select 1
-    from pg_constraint
-    where conname = 'profiles_user_types_check'
-      and conrelid = 'public.profiles'::regclass
-  ) then
-    alter table public.profiles
-    add constraint profiles_user_types_check
-    check (
-      cardinality(user_types) > 0
-      and user_types <@ array['regista', 'autore', 'altro']::text[]
-    );
-  end if;
-end;
-$$;
+alter table public.profiles drop constraint if exists profiles_user_type_check;
+alter table public.profiles
+add constraint profiles_user_type_check
+check (user_type in ('regista', 'autore', 'attore', 'altro'));
+
+alter table public.profiles drop constraint if exists profiles_user_types_check;
+alter table public.profiles
+add constraint profiles_user_types_check
+check (
+  cardinality(user_types) > 0
+  and user_types <@ array['regista', 'autore', 'attore', 'altro']::text[]
+);
 
 create or replace function public.profile_user_types_from_metadata(metadata jsonb)
 returns text[]
@@ -56,14 +51,14 @@ begin
   select coalesce(array_agg(value), array[]::text[])
   into selected_types
   from jsonb_array_elements_text(coalesce(metadata -> 'user_types', '[]'::jsonb)) as value
-  where value in ('regista', 'autore', 'altro');
+  where value in ('regista', 'autore', 'attore', 'altro');
 
   if cardinality(selected_types) > 0 then
     return selected_types;
   end if;
 
   legacy_type := metadata ->> 'user_type';
-  if legacy_type in ('regista', 'autore', 'altro') then
+  if legacy_type in ('regista', 'autore', 'attore', 'altro') then
     return array[legacy_type];
   end if;
 
@@ -83,11 +78,11 @@ begin
   from (
     select value, min(position) as first_position
     from unnest(coalesce(new.user_types, array[]::text[])) with ordinality as profile_type(value, position)
-    where value in ('regista', 'autore', 'altro')
+    where value in ('regista', 'autore', 'attore', 'altro')
     group by value
   ) selected;
 
-  if cardinality(normalized_types) = 0 and new.user_type in ('regista', 'autore', 'altro') then
+  if cardinality(normalized_types) = 0 and new.user_type in ('regista', 'autore', 'attore', 'altro') then
     normalized_types := array[new.user_type];
   end if;
 

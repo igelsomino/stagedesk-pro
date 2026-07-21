@@ -1,5 +1,18 @@
 # Novità
 
+## Versione 1.0.25
+
+> Recupero password integrato nelle schermate di accesso.
+
+- Aggiunto il comando **Password dimenticata?** nella pagina di login desktop.
+- Aggiunto l'invio del link di recupero tramite Supabase e la pagina per impostare e confermare una nuova password.
+- Aggiunto lo stesso flusso nella pagina StageDesk Share, mantenendo il collegamento alla condivisione e al relativo PIN.
+- Dopo l'accesso OAuth viene verificato il profilo applicativo e, se incompleto, viene richiesto il completamento prima di entrare nell'app o nel copione condiviso.
+- Allineata la registrazione Share ai campi desktop: nome, cognome, telefono, profili multipli e consensi.
+- Aggiunto il profilo operativo **Attore/Attrice**, uniformata la label **Autore/Autrice** e aggiornati normalizzazione e vincoli Supabase.
+- Chiarita la separazione tra `profiles` e Supabase Auth: provider e password restano gestiti dal sistema Auth e non vengono salvati nella tabella applicativa.
+- Documentati i redirect URL necessari per configurare il recupero password in Supabase.
+
 ## Versione 1.0.24
 
 > Patch dedicata alla conclusione del login OAuth desktop.

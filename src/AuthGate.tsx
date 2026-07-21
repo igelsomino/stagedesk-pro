@@ -61,7 +61,8 @@ const legalLinks = {
 
 const profileOptions: Array<{ value: AuthUserType; label: string }> = [
   { value: 'regista', label: 'Regista' },
-  { value: 'autore', label: 'Autore' },
+  { value: 'autore', label: 'Autore/Autrice' },
+  { value: 'attore', label: 'Attore/Attrice' },
   { value: 'altro', label: 'Altro' },
 ]
 
@@ -77,6 +78,21 @@ const authParamsFromUrl = (rawUrl: string) => {
   const hash = parsed.hash.startsWith('#') ? parsed.hash.slice(1) : parsed.hash
   new URLSearchParams(hash).forEach((value, key) => params.set(key, value))
   return params
+}
+
+const isPasswordRecoveryCallbackUrl = (rawUrl: string) => {
+  try {
+    const params = authParamsFromUrl(rawUrl)
+    return params.get('mode') === 'recovery' || params.get('type') === 'recovery'
+  } catch {
+    return false
+  }
+}
+
+const passwordRecoveryRedirectUrl = () => {
+  const url = new URL(authRedirectUrl(), window.location.origin)
+  url.searchParams.set('mode', 'recovery')
+  return url.toString()
 }
 
 const processAuthCallbackUrl = async (rawUrl: string, options: { cleanUrl?: boolean } = {}) => {
@@ -126,6 +142,7 @@ export function AuthGate({ children }: AuthGateProps) {
   const [loading, setLoading] = useState(true)
   const [profileLoading, setProfileLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
 
   const user = session?.user ?? null
   const profileComplete = isProfileComplete(profile)
@@ -143,6 +160,7 @@ export function AuthGate({ children }: AuthGateProps) {
     let active = true
 
     const loadSession = async () => {
+      if (isPasswordRecoveryCallbackUrl(window.location.href)) setPasswordRecovery(true)
       let callbackError = await processAuthCallbackUrl(window.location.href, { cleanUrl: true })
 
       if (usesDesktopAuthCallback()) {
@@ -151,6 +169,7 @@ export function AuthGate({ children }: AuthGateProps) {
         if (urls?.length) {
           setMessage('Completamento accesso provider in corso...')
           for (const url of urls) {
+            if (isPasswordRecoveryCallbackUrl(url)) setPasswordRecovery(true)
             callbackError = await processAuthCallbackUrl(url)
             if (callbackError) break
           }
@@ -175,6 +194,7 @@ export function AuthGate({ children }: AuthGateProps) {
         event,
         userId: nextSession?.user.id,
       })
+      if (event === 'PASSWORD_RECOVERY') setPasswordRecovery(true)
       if (!nextSession) {
         setSession(null)
         setProfile(null)
@@ -200,6 +220,7 @@ export function AuthGate({ children }: AuthGateProps) {
               setMessage('Completamento accesso provider in corso...')
               let callbackError = ''
               for (const url of urls) {
+                if (isPasswordRecoveryCallbackUrl(url)) setPasswordRecovery(true)
                 callbackError = await processAuthCallbackUrl(url)
                 if (callbackError) break
               }
@@ -282,6 +303,7 @@ export function AuthGate({ children }: AuthGateProps) {
     signOut: async () => {
       await supabase.auth.signOut()
       setProfile(null)
+      setPasswordRecovery(false)
     },
   }), [profile, profileComplete, session, user])
 
@@ -297,6 +319,19 @@ export function AuthGate({ children }: AuthGateProps) {
     return (
       <AuthShell title="StageDesk Pro" subtitle="Autenticazione obbligatoria">
         <AuthPanel message={message} onMessage={setMessage} />
+      </AuthShell>
+    )
+  }
+
+  if (passwordRecovery) {
+    return (
+      <AuthShell title="Reimposta password" subtitle="Scegli una nuova password per il tuo account.">
+        <PasswordRecoveryPanel
+          onCompleted={(nextMessage) => {
+            setPasswordRecovery(false)
+            setMessage(nextMessage)
+          }}
+        />
       </AuthShell>
     )
   }
@@ -340,8 +375,17 @@ function AuthPanel({
   const [formBusy, setFormBusy] = useState(false)
   const [oauthBusyProvider, setOauthBusyProvider] = useState<Provider | ''>('')
   const [oauthRedirectUrl, setOauthRedirectUrl] = useState('')
+  const [resetRequestMode, setResetRequestMode] = useState(false)
   const [form, setForm] = useState<ProfileFormState>(emptyProfileForm)
   const busy = formBusy || Boolean(oauthBusyProvider)
+
+  if (resetRequestMode) {
+    return (
+      <PasswordResetRequestPanel
+        onBack={() => setResetRequestMode(false)}
+      />
+    )
+  }
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -446,6 +490,10 @@ function AuthPanel({
         })}
       </div>
 
+      <div className="auth-divider" aria-hidden="true">
+        <span>oppure con e-mail</span>
+      </div>
+
       <form className="auth-form" onSubmit={(event) => void submit(event)}>
         <label>
           Email
@@ -461,6 +509,19 @@ function AuthPanel({
             required
           />
         </label>
+
+        {mode === 'signin' ? (
+          <button
+            type="button"
+            className="auth-recovery-link"
+            onClick={() => {
+              onMessage('')
+              setResetRequestMode(true)
+            }}
+          >
+            Password dimenticata?
+          </button>
+        ) : null}
 
         {mode === 'signup' ? (
           <ProfileFields form={form} onChange={setForm} />
@@ -485,6 +546,91 @@ function AuthPanel({
           Apri accesso provider
         </a>
       ) : null}
+    </div>
+  )
+}
+
+function PasswordResetRequestPanel({ onBack }: { onBack: () => void }) {
+  const [email, setEmail] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setBusy(true)
+    setMessage('Invio del link in corso...')
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: passwordRecoveryRedirectUrl(),
+    })
+    setBusy(false)
+    setMessage(error ? authErrorMessage(error) : 'Se l’indirizzo è registrato, riceverai un link per impostare una nuova password.')
+  }
+
+  return (
+    <div className="auth-recovery-panel">
+      <h2>Recupera password</h2>
+      <p>Inserisci l’indirizzo e-mail del tuo account. Riceverai un link per impostare una nuova password.</p>
+      <form className="auth-form" onSubmit={(event) => void submit(event)}>
+        <label>
+          Email
+          <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required />
+        </label>
+        <button type="submit" className="primary" disabled={busy}>
+          {busy ? 'Invio in corso...' : 'Invia link di recupero'}
+        </button>
+      </form>
+      {message ? <p className="auth-message">{message}</p> : null}
+      <button type="button" className="auth-recovery-link" onClick={onBack}>Torna all’accesso</button>
+    </div>
+  )
+}
+
+function PasswordRecoveryPanel({ onCompleted }: { onCompleted: (message: string) => void }) {
+  const [password, setPassword] = useState('')
+  const [confirmation, setConfirmation] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (password.length < 8) {
+      setMessage('La password deve contenere almeno 8 caratteri.')
+      return
+    }
+    if (password !== confirmation) {
+      setMessage('Le password non coincidono.')
+      return
+    }
+    setBusy(true)
+    setMessage('Aggiornamento password in corso...')
+    const { error } = await supabase.auth.updateUser({ password })
+    if (error) {
+      setBusy(false)
+      setMessage(authErrorMessage(error))
+      return
+    }
+    await supabase.auth.signOut({ scope: 'local' })
+    onCompleted('Password aggiornata. Accedi con la nuova password.')
+  }
+
+  return (
+    <div className="auth-recovery-panel">
+      <h2>Nuova password</h2>
+      <p>Imposta una nuova password di almeno 8 caratteri.</p>
+      <form className="auth-form" onSubmit={(event) => void submit(event)}>
+        <label>
+          Nuova password
+          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength={8} required />
+        </label>
+        <label>
+          Conferma password
+          <input type="password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" minLength={8} required />
+        </label>
+        <button type="submit" className="primary" disabled={busy}>
+          {busy ? 'Salvataggio in corso...' : 'Salva nuova password'}
+        </button>
+      </form>
+      {message ? <p className="auth-message">{message}</p> : null}
     </div>
   )
 }
@@ -604,26 +750,33 @@ function ProfileFields({
       </label>
       <div className="auth-field">
         <span>Profilo</span>
-        <span className="auth-choice-list">
-          {profileOptions.map((option) => {
-            const checked = form.userTypes.includes(option.value)
-            return (
-              <span className="auth-choice" key={option.value}>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={(event) => {
-                    const nextTypes = event.target.checked
-                      ? [...form.userTypes, option.value]
-                      : form.userTypes.filter((value) => value !== option.value)
-                    onChange({ ...form, userTypes: Array.from(new Set(nextTypes)) })
-                  }}
-                />
-                {option.label}
-              </span>
-            )
-          })}
-        </span>
+        <details className="auth-profile-dropdown">
+          <summary>
+            {form.userTypes.length
+              ? profileOptions.filter((option) => form.userTypes.includes(option.value)).map((option) => option.label).join(', ')
+              : 'Seleziona uno o più profili'}
+          </summary>
+          <span className="auth-choice-list">
+            {profileOptions.map((option) => {
+              const checked = form.userTypes.includes(option.value)
+              return (
+                <label className="auth-choice" key={option.value}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => {
+                      const nextTypes = event.target.checked
+                        ? [...form.userTypes, option.value]
+                        : form.userTypes.filter((value) => value !== option.value)
+                      onChange({ ...form, userTypes: Array.from(new Set(nextTypes)) })
+                    }}
+                  />
+                  {option.label}
+                </label>
+              )
+            })}
+          </span>
+        </details>
       </div>
       <label className="auth-check">
         <input
@@ -808,7 +961,7 @@ const userTypesFromMetadata = (user: User): AuthUserType[] => {
   if (metadataTypes.length) return metadataTypes
 
   const metadata = user.user_metadata
-  if (metadata?.user_type === 'regista' || metadata?.user_type === 'autore' || metadata?.user_type === 'altro') {
+  if (metadata?.user_type === 'regista' || metadata?.user_type === 'autore' || metadata?.user_type === 'attore' || metadata?.user_type === 'altro') {
     return [metadata.user_type]
   }
   return []
@@ -818,7 +971,7 @@ const userTypesArrayFromMetadata = (user: User): AuthUserType[] => {
   const metadata = user.user_metadata
   if (Array.isArray(metadata?.user_types)) {
     const metadataTypes = metadata.user_types.filter((value): value is AuthUserType =>
-      value === 'regista' || value === 'autore' || value === 'altro',
+      value === 'regista' || value === 'autore' || value === 'attore' || value === 'altro',
     )
     if (metadataTypes.length) return Array.from(new Set(metadataTypes))
   }
