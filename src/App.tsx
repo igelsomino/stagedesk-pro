@@ -2170,6 +2170,13 @@ function App() {
   useEffect(() => {
     const onStoreMessage = (event: MessageEvent<{ type?: string; url?: string; title?: string }>) => {
       if (!isTauriRuntime() || event.source !== storeFrameRef.current?.contentWindow) return
+      if (event.data?.type === 'stagedesk-store-ready') {
+        storeFrameRef.current?.contentWindow?.postMessage(
+          { type: STORE_CONTEXT_MESSAGE, canImport: true },
+          STORE_ORIGIN,
+        )
+        return
+      }
       if (event.data?.type !== STORE_IMPORT_MESSAGE || !event.data.url) return
       void importStorePackage(event.data.url, event.data.title ?? '')
     }
