@@ -64,6 +64,7 @@ Implementato:
 33. paginazione della lista cue con cinque elementi per pagina;
 34. aggiornamenti automatici tramite GitHub Releases;
 35. diagnostica persistente per eventi di lifecycle, focus, refresh, stato editor e riproduzione media.
+36. completamento OAuth desktop tramite pagina HTTPS pubblica, con riapertura dell'app tramite deep link senza lasciare il browser in caricamento;
 
 ## Sviluppo
 
@@ -89,6 +90,8 @@ http://127.0.0.1:1420/
 La configurazione dell'autenticazione viene letta dall'ambiente di build. Non inserire credenziali, chiavi o URL di progetto direttamente nel codice sorgente.
 
 Se la configurazione manca, l'app mostra una schermata esplicita di errore invece di usare valori di fallback.
+
+Nel desktop il login con Google, GitHub e Azure passa dalla pagina pubblica `https://stagedesk-pro.aigconsulting.it/auth-callback/`. La pagina conferma il completamento dell'autenticazione, riapre StageDesk Pro tramite il protocollo `stagedeskpro://` e lascia disponibile un collegamento manuale se il sistema operativo non avvia automaticamente l'app. Dopo l'apertura dell'app è possibile chiudere la finestra del browser.
 
 ## Installer
 

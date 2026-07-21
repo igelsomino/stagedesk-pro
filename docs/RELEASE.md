@@ -82,6 +82,8 @@ Nota operativa: anche con firma valida, Microsoft SmartScreen può continuare a 
 
 ## Pubblicare una nuova versione
 
+Prima di pubblicare una release, aggiornare anche `docs/version-history.md` con una sezione dedicata alla nuova versione e verificare che il README descriva il comportamento effettivamente incluso negli installer.
+
 Aggiornare la versione in modo sincronizzato:
 
 ```bash

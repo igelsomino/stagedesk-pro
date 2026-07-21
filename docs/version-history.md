@@ -1,5 +1,14 @@
 # Novità
 
+## Versione 1.0.24
+
+> Patch dedicata alla conclusione del login OAuth desktop.
+
+- La pagina HTTPS di completamento mantiene il browser su una pagina stabile mentre riapre StageDesk Pro tramite deep link.
+- Dopo l'autenticazione viene mostrato subito un messaggio che indica quando è possibile chiudere la finestra del browser.
+- Mantenuto il collegamento manuale **Riapri StageDesk Pro** come fallback se il sistema operativo non avvia automaticamente l'app.
+- Aggiornati i sorgenti e gli installer per macOS, Windows e Linux.
+
 ## Versione 1.0.23
 
 > Aggiornamento dedicato al completamento dell'autenticazione OAuth desktop.
