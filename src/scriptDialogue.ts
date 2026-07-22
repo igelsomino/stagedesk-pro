@@ -16,6 +16,7 @@ type CharacterOption = {
 
 type ScriptDialogueWindow = Window & {
   __STAGEDESK_CHARACTER_OPTIONS__?: CharacterOption[]
+  __STAGEDESK_DIALOGUE_OPTIONS__?: CharacterOption[]
   __STAGEDESK_DRAG_PAYLOAD__?: {
     type: string
     value: string
@@ -34,7 +35,11 @@ const DIALOGUE_ID_DND_TYPE = 'application/x-stagedesk-dialogue-id'
 const DIALOGUE_ID_DND_PREFIX = 'stagedesk-dialogue:'
 
 const characterOptions = (currentId: string, currentName: string) => {
-  const options = [...((window as ScriptDialogueWindow).__STAGEDESK_CHARACTER_OPTIONS__ ?? [])]
+  const options = [...(
+    (window as ScriptDialogueWindow).__STAGEDESK_DIALOGUE_OPTIONS__ ??
+    (window as ScriptDialogueWindow).__STAGEDESK_CHARACTER_OPTIONS__ ??
+    []
+  )]
   if (currentId && currentName && !options.some((item) => item.id === currentId)) {
     options.unshift({ id: currentId, name: currentName })
   }

@@ -1,5 +1,15 @@
 # Novità
 
+## Versione 1.0.30
+
+> Corretto il catalogo Store e l'importazione dei copioni completi.
+
+- Le tabelle dei personaggi mostrano solo i personaggi effettivamente presenti nelle battute.
+- La colonna **Interprete** usa il valore compatto `D/A` e la colonna Note è stata rimossa dalle tabelle dei copioni pubblicati.
+- Corretta l'interpretazione dei ruoli secondari e collettivi nei copioni classici, evitando battute assegnate al personaggio precedente.
+- Rimossi dagli import i caratteri residui delle note editoriali e interrotta la lettura del testo al termine dell'opera.
+- Rigenerati e pubblicati nello Storage Store tutti i pacchetti `.stagedesk` aggiornati.
+
 ## Versione 1.0.29
 
 > Aggiornata la verifica formale della struttura del copione.
