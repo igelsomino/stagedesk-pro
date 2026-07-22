@@ -171,9 +171,9 @@ const demoMedia = (): MediaAsset[] => [
 
 const demoScriptContent = () => `| Personaggio | Interprete | Presenza | Note |
 | --- | --- | --- | --- |
-| MIRANDOLINA | Da assegnare | In scena | Guida il ritmo della scena. |
-| CAVALIERE | Da assegnare | In scena | Resiste, poi si lascia incuriosire. |
-| SERVITORE | Da assegnare | Fuori scena | Ha appena lasciato la camera. |
+| MIRANDOLINA | Da assegnare | Atto 1, Scena XV | Guida il ritmo della scena. |
+| CAVALIERE | Da assegnare | Atto 1, Scena XV | Resiste, poi si lascia incuriosire. |
+| SERVITORE | Da assegnare | Nessuna battuta rilevata | Ha appena lasciato la camera. |
 
 # Atto 1
 
@@ -276,7 +276,7 @@ Effetto secco da lanciare manualmente quando richiesto.
 
 const blankScriptContent = (projectName: string) => `| Personaggio | Interprete | Presenza | Note |
 | --- | --- | --- | --- |
-| PERSONAGGIO 1 | Da assegnare | In scena | Primo personaggio della scena. |
+| PERSONAGGIO 1 | Da assegnare | Atto 1, Scena 1 | Primo personaggio della scena. |
 
 # ${projectName}
 

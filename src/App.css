@@ -3404,6 +3404,32 @@ button.danger:hover {
   margin-top: 14px;
 }
 
+.store-rating-modal .eyebrow {
+  margin: 0 0 6px;
+}
+
+.store-rating-options {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.store-rating-options button {
+  min-height: 40px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-tertiary);
+  color: var(--text-normal);
+  font-weight: 700;
+}
+
+.store-rating-options button:hover,
+.store-rating-options button:focus-visible {
+  border-color: var(--interactive-accent);
+  color: var(--interactive-accent);
+}
+
 .project-picker-modal {
   width: min(560px, calc(100vw - 32px));
 }

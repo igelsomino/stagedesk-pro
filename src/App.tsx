@@ -79,7 +79,7 @@ import type {
 } from 'react'
 import './App.css'
 import { appDocumentContent, fetchAppDocumentContent, getAppDocument, isAppDocumentPath } from './appDocs'
-import { supabase } from './auth'
+import { supabase, supabaseUrl } from './auth'
 import { useAuth } from './authContext'
 import { SCRIPT_ROOT_PATH } from './domain'
 import type { DirectorNote, MediaAsset, MediaCue, NotePanelMode, NoteType, Project, ProjectTreeNode } from './domain'
@@ -135,10 +135,25 @@ const SHARE_URL_BASE = 'https://stagedesk-pro.aigconsulting.it/share'
 const SHARED_SCRIPT_NOTE_TYPES = ['movement', 'position', 'characters', 'tone'] as const
 const CUE_PAGE_SIZE = 5
 const STORE_TAB_PATH = 'web://stagedesk-store'
-const STORE_URL = 'https://stagedesk-pro.aigconsulting.it/store/'
+const STORE_URL = 'https://stagedesk-pro.aigconsulting.it/store/?embedded=1'
 const STORE_ORIGIN = 'https://stagedesk-pro.aigconsulting.it'
+// Public Supabase project origin used by the Store package bucket. This is not a credential.
+const STORE_STORAGE_ORIGIN = 'https://insoqzhjmrbrgfrsmlnj.supabase.co'
 const STORE_IMPORT_MESSAGE = 'stagedesk-store-import'
 const STORE_CONTEXT_MESSAGE = 'stagedesk-store-context'
+const SUPABASE_STORAGE_ORIGIN = (() => {
+  try {
+    return supabaseUrl ? new URL(supabaseUrl).origin : ''
+  } catch {
+    return ''
+  }
+})()
+
+const isTrustedStorePackageUrl = (url: URL) =>
+  (url.origin === STORE_ORIGIN && url.pathname.startsWith('/store/copioni/') && url.pathname.endsWith('.stagedesk')) ||
+  (url.origin === (SUPABASE_STORAGE_ORIGIN || STORE_STORAGE_ORIGIN) &&
+    url.pathname.startsWith('/storage/v1/object/public/store-packages/') &&
+    url.pathname.endsWith('.stagedesk'))
 type EditorCueState = 'playing' | 'paused' | 'stopped'
 type EditorCueStateWindow = Window & {
   __STAGEDESK_EDITOR_CUE_STATE__?: { id: string; state: EditorCueState }
@@ -151,6 +166,7 @@ type PublishedScriptDialogue = {
   id: string
   characterId: string
   characterName: string
+  collective?: boolean
   sceneId?: string
   text: string
   sourceLine?: number
@@ -203,6 +219,7 @@ type ShareIndicatorState = {
 }
 type CharacterOptionsWindow = Window & {
   __STAGEDESK_CHARACTER_OPTIONS__?: CharacterOption[]
+  __STAGEDESK_DIALOGUE_OPTIONS__?: CharacterOption[]
 }
 type StopPreviewPlaybackDetail = {
   sourceId?: string
@@ -361,6 +378,8 @@ function App() {
   const [projectPickerOpen, setProjectPickerOpen] = useState(false)
   const [projectPickerEntries, setProjectPickerEntries] = useState<ProjectEntry[]>([])
   const [storeLoading, setStoreLoading] = useState(false)
+  const [storeRating, setStoreRating] = useState<{ scriptId: string; title: string }>()
+  const [storeRatingStatus, setStoreRatingStatus] = useState('')
   const [toolbarState, setToolbarState] = useState<ToolbarState>(emptyToolbarState)
   const [tableContextActive, setTableContextActive] = useState(false)
   const [activeEditorSceneId, setActiveEditorSceneId] = useState('')
@@ -533,6 +552,10 @@ function App() {
 
   useEffect(() => {
     ;(window as CharacterOptionsWindow).__STAGEDESK_CHARACTER_OPTIONS__ = activeCharacters
+    ;(window as CharacterOptionsWindow).__STAGEDESK_DIALOGUE_OPTIONS__ = [
+      ...activeCharacters,
+      { id: 'tutti', name: 'TUTTI' },
+    ]
     window.dispatchEvent(new CustomEvent('stagedesk-characters-updated'))
   }, [activeCharacters])
 
@@ -1984,10 +2007,10 @@ function App() {
       .catch((error) => setStorageStatus(`Creazione progetto non riuscita: ${String(error)}`))
   }
 
-  const importStorePackage = async (packageUrl: string, packageTitle: string) => {
+  const importStorePackage = async (packageUrl: string, packageTitle: string, storeScriptId?: string) => {
     try {
       const url = new URL(packageUrl)
-      if (url.origin !== STORE_ORIGIN || !url.pathname.startsWith('/store/copioni/') || !url.pathname.endsWith('.stagedesk')) {
+      if (!isTrustedStorePackageUrl(url)) {
         throw new Error('Pacchetto Store non riconosciuto')
       }
 
@@ -2035,11 +2058,32 @@ function App() {
       activateProject(projectInFolder)
       persistProject(projectInFolder)
       setStorageStatus(`Copione importato: ${compactPath(path)}`)
+      if (storeScriptId) {
+        setStoreRatingStatus('')
+        setStoreRating({ scriptId: storeScriptId, title: projectName })
+      }
     } catch (error) {
       setStorageStatus(`Importazione Store non riuscita: ${String(error)}`)
     } finally {
       setStoreLoading(false)
     }
+  }
+
+  const submitStoreRating = async (score: number) => {
+    if (!storeRating) return
+    setStoreRatingStatus('Invio valutazione…')
+    const { error } = await supabase.rpc('rate_store_script', {
+      p_script_id: storeRating.scriptId,
+      p_score: score,
+      p_comment: '',
+    })
+    if (error) {
+      setStoreRatingStatus(`Valutazione non riuscita: ${error.message}`)
+      return
+    }
+    setStoreRating(undefined)
+    setStoreRatingStatus('')
+    setToastMessage('Valutazione registrata')
   }
 
   const openProjectFile = () => {
@@ -2102,19 +2146,20 @@ function App() {
       .catch((error) => setStorageStatus(`Rinomina progetto non riuscita: ${String(error)}`))
   }
 
-  const deleteProjectEntry = (entry: ProjectEntry) => {
+  const deleteProjectEntry = async (entry: ProjectEntry) => {
     if (!confirm(`Eliminare definitivamente il progetto "${entry.name}"?`)) return
-    storage.deleteProjectFolder(entry.path)
-      .then(() => {
-        setProjectPickerEntries((current) => current.filter((item) => item.path !== entry.path))
-        setStorageStatus(`Progetto eliminato: ${entry.name}`)
-        if (project.rootPath === entry.path) {
-          const nextProject = storage.reset()
-          activateProject(nextProject)
-        }
-        void refreshProjectPickerEntries()
-      })
-      .catch((error) => setStorageStatus(`Eliminazione progetto non riuscita: ${String(error)}`))
+    try {
+      await storage.deleteProjectFolder(entry.path)
+      setProjectPickerEntries((current) => current.filter((item) => item.path !== entry.path))
+      setStorageStatus(`Progetto eliminato: ${entry.name}`)
+      if (project.rootPath === entry.path) {
+        const nextProject = storage.reset()
+        activateProject(nextProject)
+      }
+      await refreshProjectPickerEntries()
+    } catch (error) {
+      setStorageStatus(`Eliminazione progetto non riuscita: ${String(error)}`)
+    }
   }
 
   const openMarkdownTab = (path: string) => {
@@ -2154,10 +2199,17 @@ function App() {
   }
 
   useEffect(() => {
-    const onStoreMessage = (event: MessageEvent<{ type?: string; url?: string; title?: string }>) => {
-      if (!isTauriRuntime() || event.source !== storeFrameRef.current?.contentWindow) return
+    const onStoreMessage = (event: MessageEvent<{ type?: string; url?: string; title?: string; scriptId?: string }>) => {
+      if (event.source !== storeFrameRef.current?.contentWindow) return
+      if (event.data?.type === 'stagedesk-store-ready') {
+        storeFrameRef.current?.contentWindow?.postMessage(
+          { type: STORE_CONTEXT_MESSAGE, canImport: true },
+          STORE_ORIGIN,
+        )
+        return
+      }
       if (event.data?.type !== STORE_IMPORT_MESSAGE || !event.data.url) return
-      void importStorePackage(event.data.url, event.data.title ?? '')
+      void importStorePackage(event.data.url, event.data.title ?? '', event.data.scriptId)
     }
 
     window.addEventListener('message', onStoreMessage)
@@ -2257,7 +2309,7 @@ function App() {
       name: safeName,
       path,
       kind: 'markdown',
-      content: `| Personaggio | Interprete | Presenza | Note |\n| --- | --- | --- | --- |\n| PERSONAGGIO 1 | Da assegnare | In scena | Primo personaggio della scena. |\n\n# ${stripMarkdownExtension(safeName)}\n\n## Scena 1\n\n::regia{id="note-characters" type="characters" color="blue" title="Personaggi in scena" sceneId="scena-1" anchorId="note-characters"}\nIn scena: PERSONAGGIO 1.\n::\n\n### Sinossi\n\n::battuta{id="battuta-1" characterId="personaggio-1" character="PERSONAGGIO 1" sceneId="scena-1"}\nBattuta 1\n::\n`,
+      content: `| Personaggio | Interprete | Presenza | Note |\n| --- | --- | --- | --- |\n| PERSONAGGIO 1 | Da assegnare | Atto 1, Scena 1 | Primo personaggio della scena. |\n\n# ${stripMarkdownExtension(safeName)}\n\n## Scena 1\n\n::regia{id="note-characters" type="characters" color="blue" title="Personaggi in scena" sceneId="scena-1" anchorId="note-characters"}\nIn scena: PERSONAGGIO 1.\n::\n\n### Sinossi\n\n::battuta{id="battuta-1" characterId="personaggio-1" character="PERSONAGGIO 1" sceneId="scena-1"}\nBattuta 1\n::\n`,
       dirty: false,
     }
     const scripts = insertTreeChild(project.scripts, folderPath, file)
@@ -2789,9 +2841,12 @@ function App() {
   }
 
   const dialogueCharacters = useMemo(
-    () => activeCharacters.length > 0
-      ? activeCharacters
-      : [{ id: 'personaggio-1', name: 'PERSONAGGIO 1' }],
+    () => [
+      ...(activeCharacters.length > 0
+        ? activeCharacters
+        : [{ id: 'personaggio-1', name: 'PERSONAGGIO 1' }]),
+      { id: 'tutti', name: 'TUTTI' },
+    ],
     [activeCharacters],
   )
 
@@ -3851,12 +3906,10 @@ function App() {
                 src={STORE_URL}
                 onLoad={() => {
                   setStoreLoading(false)
-                  if (isTauriRuntime()) {
-                    storeFrameRef.current?.contentWindow?.postMessage(
-                      { type: STORE_CONTEXT_MESSAGE, canImport: true },
-                      STORE_ORIGIN,
-                    )
-                  }
+                  storeFrameRef.current?.contentWindow?.postMessage(
+                    { type: STORE_CONTEXT_MESSAGE, canImport: true },
+                    STORE_ORIGIN,
+                  )
                 }}
               />
             </div>
@@ -4442,6 +4495,17 @@ function App() {
           onConfirm={submitScriptDialog}
         />
       ) : null}
+      {storeRating ? (
+        <StoreRatingModal
+          title={storeRating.title}
+          status={storeRatingStatus}
+          onClose={() => {
+            setStoreRating(undefined)
+            setStoreRatingStatus('')
+          }}
+          onRate={(score) => void submitStoreRating(score)}
+        />
+      ) : null}
       {projectPickerOpen ? (
         <ProjectPickerModal
           entries={projectPickerEntries}
@@ -4769,6 +4833,45 @@ function ScriptActionModal({
   )
 }
 
+function StoreRatingModal({
+  title,
+  status,
+  onClose,
+  onRate,
+}: {
+  title: string
+  status: string
+  onClose: () => void
+  onRate: (score: number) => void
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="action-modal store-rating-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="store-rating-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <p className="eyebrow">STAGEDESK STORE</p>
+        <h2 id="store-rating-title">Valuta il copione importato</h2>
+        <p>Hai importato “{title}”. Esprimi una valutazione da 1 a 5.</p>
+        <div className="store-rating-options" aria-label="Valutazione da 1 a 5">
+          {[1, 2, 3, 4, 5].map((score) => (
+            <button key={score} type="button" onClick={() => onRate(score)} aria-label={`Valuta ${score} su 5`}>
+              {score}
+            </button>
+          ))}
+        </div>
+        {status ? <p className="form-status">{status}</p> : null}
+        <div className="modal-actions">
+          <button type="button" onClick={onClose}>Salta</button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 function ProjectPickerModal({
   entries,
   onCancel,
@@ -4881,7 +4984,10 @@ function ProjectPickerModal({
                     <button
                       type="button"
                       role="menuitem"
-                      onClick={() => {
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
                         setOpenMenuPath('')
                         setRenameEntry(entry)
                         setRenameValue(entry.name)
@@ -4894,7 +5000,10 @@ function ProjectPickerModal({
                       type="button"
                       role="menuitem"
                       className="danger"
-                      onClick={() => {
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
                         setOpenMenuPath('')
                         onDelete(entry)
                       }}
@@ -6870,7 +6979,7 @@ const validateScriptForFullscreen = (markdown: string, project: Project): Script
       } else {
         const characterById = knownCharacterOptions.find((item) => item.id === structuredDialogue.characterId)
         const characterByName = knownCharacterOptions.find((item) => normalizeCharacterName(item.name) === normalizedCharacter)
-        if (!characterById && !characterByName) {
+        if (!characterById && !characterByName && !isCollectiveCharacterName(character)) {
           addIssue(index, 'Personaggio', 'Il personaggio della battuta non è presente nella tabella personaggi.', character)
         } else if (characterById && normalizeCharacterName(characterById.name) !== normalizedCharacter) {
           addIssue(index, 'Personaggio', `Nome personaggio non allineato alla tabella: "${characterById.name}".`, character, 'warning')
@@ -6987,7 +7096,7 @@ const charactersFromMarkdown = (markdown: string, fallbackCharacters: CharacterO
       const cells = splitMarkdownTableCells(rows[index])
       const name = cells[nameIndex]?.trim()
       const id = cells[idIndex]?.trim() || slug(name)
-      if (isValidCharacterOption(id, name)) {
+      if (isValidCharacterOption(id, name) && !isCollectiveCharacterName(name)) {
         tableCharacters.set(id, { id, name })
       }
       index += 1
@@ -6997,7 +7106,7 @@ const charactersFromMarkdown = (markdown: string, fallbackCharacters: CharacterO
 
   const characters = new Map<string, CharacterOption>()
   for (const character of fallbackCharacters) {
-    if (isValidCharacterOption(character.id, character.name) && !characters.has(character.id)) {
+    if (isValidCharacterOption(character.id, character.name) && !isCollectiveCharacterName(character.name) && !characters.has(character.id)) {
       characters.set(character.id, { id: character.id, name: character.name })
     }
   }
@@ -7025,6 +7134,11 @@ const normalizeCharacterHeader = (value: string) =>
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]/gi, '')
     .toLowerCase()
+
+const COLLECTIVE_CHARACTER_KEYS = new Set(['tutti', 'tutte', 'coro', 'ensemble', 'tuttiinsieme'])
+
+const isCollectiveCharacterName = (value: string) =>
+  COLLECTIVE_CHARACTER_KEYS.has(normalizeCharacterHeader(value))
 
 const isMarkdownTableSeparatorValue = (value: string) =>
   /^:?-{3,}:?$/.test(value.trim())
@@ -8780,19 +8894,21 @@ const parsePublishedScriptItems = (
       const fallbackCharacterName = readDirectiveAttr(attrs, 'character') || readDirectiveAttr(attrs, 'characterId') || 'PERSONAGGIO'
       const characterId = readDirectiveAttr(attrs, 'characterId') || slug(fallbackCharacterName)
       const existingCharacter = characterMap.get(characterId)
+      const collective = isCollectiveCharacterName(fallbackCharacterName)
       const characterName = existingCharacter?.name ?? fallbackCharacterName
-      if (!existingCharacter) characterMap.set(characterId, { id: characterId, name: characterName, dialogues: [] })
+      if (!existingCharacter && !collective) characterMap.set(characterId, { id: characterId, name: characterName, dialogues: [] })
       const dialogue: PublishedScriptDialogue = {
         id: readDirectiveAttr(attrs, 'id') || `battuta-${dialogueCount + 1}`,
         characterId,
         characterName,
+        collective,
         sceneId: readDirectiveAttr(attrs, 'sceneId') || sceneId,
         text: contentLines.join('\n').trim(),
         sourceLine,
       }
       dialogueCount += 1
       items.push({ kind: 'dialogue', ...dialogue })
-      characterMap.get(characterId)?.dialogues.push(dialogue)
+      if (!collective) characterMap.get(characterId)?.dialogues.push(dialogue)
       continue
     }
 
@@ -9184,6 +9300,8 @@ const stampPdfPages = (doc: JsPDF, marginX: number, generatedAt: Date) => {
     doc.setTextColor('#2563eb')
     doc.text(STAGEDESK_SITE_URL, linkX, stampY)
     doc.link(linkX, stampY - 8, doc.getTextWidth(STAGEDESK_SITE_URL), 10, { url: STAGEDESK_SITE_URL })
+    doc.setTextColor('#64748b')
+    doc.text(`${pageNumber} di ${pageCount}`, pageWidth - marginX, stampY, { align: 'right' })
   }
 }
 

@@ -64,7 +64,7 @@ describe('default project', () => {
     expect(script).toContain('# Prova regia')
     expect(script).toContain('## Scena 1')
     expect(script).toContain('### Sinossi')
-    expect(script).toContain('| PERSONAGGIO 1 | Da assegnare | In scena | Primo personaggio della scena. |')
+    expect(script).toContain('| PERSONAGGIO 1 | Da assegnare | Atto 1, Scena 1 | Primo personaggio della scena. |')
     expect(script).toContain('| Personaggio | Interprete | Presenza | Note |')
     expect(script).not.toContain('| ID | Personaggio | Interprete | Presenza | Note |')
     expect(script.indexOf('| Personaggio | Interprete | Presenza | Note |')).toBe(0)
