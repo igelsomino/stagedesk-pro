@@ -58,6 +58,7 @@ import {
   SkipBack,
   SkipForward,
   Square,
+  Star,
   Table2,
   Trash2,
   Type,
@@ -141,6 +142,7 @@ const STORE_ORIGIN = 'https://stagedesk-pro.aigconsulting.it'
 const STORE_STORAGE_ORIGIN = 'https://insoqzhjmrbrgfrsmlnj.supabase.co'
 const STORE_IMPORT_MESSAGE = 'stagedesk-store-import'
 const STORE_CONTEXT_MESSAGE = 'stagedesk-store-context'
+const STORE_RATING_TARGET_KEY = 'stagedesk-store-rating-target'
 const SUPABASE_STORAGE_ORIGIN = (() => {
   try {
     return supabaseUrl ? new URL(supabaseUrl).origin : ''
@@ -211,6 +213,21 @@ type PublishState = {
   pinAvailable?: boolean
   publishedAt?: string
   error?: string
+}
+type StorePublicationState = {
+  status: 'idle' | 'checking' | 'publishing' | 'published' | 'error'
+  scriptId?: string
+  versionNumber?: number
+  publishedAt?: string
+  packageName?: string
+  history: StorePublicationVersion[]
+  error?: string
+}
+type StorePublicationVersion = {
+  versionNumber: number
+  publishedAt: string
+  packageName?: string
+  releaseNotes?: string
 }
 type ShareIndicatorState = {
   status: 'disabled' | 'checking' | 'shared' | 'not-shared' | 'error'
@@ -365,6 +382,8 @@ function App() {
   const [scriptDialog, setScriptDialog] = useState<ScriptActionDialog | undefined>()
   const [publishDialogOpen, setPublishDialogOpen] = useState(false)
   const [publishState, setPublishState] = useState<PublishState>({ status: 'idle' })
+  const [storePublicationDialogOpen, setStorePublicationDialogOpen] = useState(false)
+  const [storePublicationState, setStorePublicationState] = useState<StorePublicationState>({ status: 'idle', history: [] })
   const [shareIndicators, setShareIndicators] = useState<Record<string, ShareIndicatorState>>({})
   const [theaterMenuOpen, setTheaterMenuOpen] = useState(false)
   const [theaterMenuPosition, setTheaterMenuPosition] = useState<{ top: number; left: number } | undefined>()
@@ -379,6 +398,18 @@ function App() {
   const [projectPickerEntries, setProjectPickerEntries] = useState<ProjectEntry[]>([])
   const [storeLoading, setStoreLoading] = useState(false)
   const [storeRating, setStoreRating] = useState<{ scriptId: string; title: string }>()
+  const [storeRatingTarget, setStoreRatingTarget] = useState<{ scriptId: string; title: string } | undefined>(() => {
+    try {
+      const stored = localStorage.getItem(STORE_RATING_TARGET_KEY)
+      if (!stored) return undefined
+      const target = JSON.parse(stored) as { scriptId?: unknown; title?: unknown }
+      return typeof target.scriptId === 'string' && typeof target.title === 'string'
+        ? { scriptId: target.scriptId, title: target.title }
+        : undefined
+    } catch {
+      return undefined
+    }
+  })
   const [storeRatingStatus, setStoreRatingStatus] = useState('')
   const [toolbarState, setToolbarState] = useState<ToolbarState>(emptyToolbarState)
   const [tableContextActive, setTableContextActive] = useState(false)
@@ -600,6 +631,72 @@ function App() {
       active = false
     }
   }, [activeAppDocument, activeFile, project.id, setShareIndicatorForPath, user])
+
+  const loadStorePublicationState = useCallback(async (file: ProjectTreeNode | undefined = activeFile) => {
+    if (!user || !file || activeAppDocument || activeStoreTab) {
+      setStorePublicationState({ status: 'idle', history: [] })
+      return
+    }
+
+    setStorePublicationState({ status: 'checking', history: [] })
+    try {
+      const fields = 'id, author_id, current_version, published_at, package_name, is_published'
+      const byTitle = await supabase
+        .from('store_scripts')
+        .select(fields)
+        .eq('author_id', user.id)
+        .eq('title', project.name)
+        .limit(1)
+        .maybeSingle()
+      if (byTitle.error) throw byTitle.error
+
+      let data = byTitle.data
+      if (!data) {
+        const byPackage = await supabase
+          .from('store_scripts')
+          .select(fields)
+          .eq('author_id', user.id)
+          .eq('package_name', file.name.replace(/\.md$/i, '.stagedesk'))
+          .limit(1)
+          .maybeSingle()
+        if (byPackage.error) throw byPackage.error
+        data = byPackage.data
+      }
+
+      if (!data || data.author_id !== user.id) {
+        setStorePublicationState({ status: 'idle', history: [] })
+        return
+      }
+
+      const versions = await supabase
+        .from('store_script_versions')
+        .select('version_number, published_at, package_name, release_notes')
+        .eq('script_id', data.id)
+        .order('version_number', { ascending: false })
+        .limit(20)
+      if (versions.error) throw versions.error
+
+      setStorePublicationState({
+        status: 'published',
+        scriptId: data.id,
+        versionNumber: typeof data.current_version === 'number' ? data.current_version : undefined,
+        publishedAt: typeof data.published_at === 'string' ? data.published_at : undefined,
+        packageName: typeof data.package_name === 'string' ? data.package_name : undefined,
+        history: (versions.data ?? []).map((version) => ({
+          versionNumber: Number(version.version_number),
+          publishedAt: String(version.published_at ?? ''),
+          packageName: typeof version.package_name === 'string' ? version.package_name : undefined,
+          releaseNotes: typeof version.release_notes === 'string' ? version.release_notes : undefined,
+        })),
+      })
+    } catch (error) {
+      setStorePublicationState({ status: 'error', history: [], error: publishErrorMessage(error) })
+    }
+  }, [activeAppDocument, activeFile, activeStoreTab, project.name, user])
+
+  useEffect(() => {
+    void loadStorePublicationState()
+  }, [loadStorePublicationState])
 
   useEffect(() => {
     const installedVersion = window.localStorage.getItem(INSTALLED_UPDATE_VERSION_KEY)
@@ -2059,8 +2156,20 @@ function App() {
       persistProject(projectInFolder)
       setStorageStatus(`Copione importato: ${compactPath(path)}`)
       if (storeScriptId) {
-        setStoreRatingStatus('')
-        setStoreRating({ scriptId: storeScriptId, title: projectName })
+        const target = { scriptId: storeScriptId, title: projectName }
+        setStoreRatingTarget(target)
+        try {
+          localStorage.setItem(STORE_RATING_TARGET_KEY, JSON.stringify(target))
+        } catch {
+          // The rating action remains available for the current session.
+        }
+      } else {
+        setStoreRatingTarget(undefined)
+        try {
+          localStorage.removeItem(STORE_RATING_TARGET_KEY)
+        } catch {
+          // Ignore unavailable browser storage.
+        }
       }
     } catch (error) {
       setStorageStatus(`Importazione Store non riuscita: ${String(error)}`)
@@ -2082,6 +2191,12 @@ function App() {
       return
     }
     setStoreRating(undefined)
+    setStoreRatingTarget(undefined)
+    try {
+      localStorage.removeItem(STORE_RATING_TARGET_KEY)
+    } catch {
+      // Ignore unavailable browser storage.
+    }
     setStoreRatingStatus('')
     setToastMessage('Valutazione registrata')
   }
@@ -3370,6 +3485,76 @@ function App() {
     void loadShareState()
   }
 
+  const openStorePublicationDialog = () => {
+    setStorePublicationDialogOpen(true)
+    void loadStorePublicationState()
+  }
+
+  const publishStoreScript = async (releaseNotes: string) => {
+    if (!activeFile || activeAppDocument || !user || !storePublicationState.scriptId) {
+      setStorePublicationState({ status: 'error', history: [], error: 'Il file attivo non è associato a un copione pubblicabile.' })
+      return
+    }
+
+    const markdown = buildActiveExtendedMarkdown()
+    if (!markdown?.trim()) {
+      setStorePublicationState({ status: 'error', history: [], error: 'Il copione attivo è vuoto.' })
+      return
+    }
+
+    const packagePath = `${user.id}/${storePublicationState.scriptId}/${crypto.randomUUID()}.stagedesk`
+    const packageName = `${stripMarkdownExtension(activeFile.name)}.stagedesk`
+    setStorePublicationState((current) => ({ ...current, status: 'publishing', error: undefined }))
+
+    let uploaded = false
+    try {
+      const { error: uploadError } = await supabase.storage
+        .from('store-packages')
+        .upload(packagePath, markdown, {
+          contentType: 'application/octet-stream',
+          cacheControl: '3600',
+          upsert: false,
+        })
+      if (uploadError) throw uploadError
+      uploaded = true
+
+      const { data, error } = await supabase.rpc('publish_store_script', {
+        p_script_id: storePublicationState.scriptId,
+        p_package_path: packagePath,
+        p_package_name: packageName,
+        p_release_notes: releaseNotes.trim(),
+      })
+      if (error) throw error
+
+      const versionNumber = typeof data?.version_number === 'number' ? data.version_number : undefined
+      const publishedAt = typeof data?.published_at === 'string' ? data.published_at : new Date().toISOString()
+      setStorePublicationState({
+        status: 'published',
+        scriptId: storePublicationState.scriptId,
+        versionNumber,
+        publishedAt,
+        packageName,
+        history: [
+          {
+            versionNumber: versionNumber ?? storePublicationState.versionNumber ?? 1,
+            publishedAt,
+            packageName,
+            releaseNotes: releaseNotes.trim() || undefined,
+          },
+          ...storePublicationState.history.filter((version) => version.versionNumber !== versionNumber),
+        ],
+      })
+      showStatus(versionNumber ? `Copione pubblicato nello Store: versione ${versionNumber}` : 'Copione pubblicato nello Store')
+    } catch (error) {
+      if (uploaded) {
+        await supabase.storage.from('store-packages').remove([packagePath]).catch(() => undefined)
+      }
+      const message = publishErrorMessage(error)
+      setStorePublicationState((current) => ({ ...current, status: 'error', error: message }))
+      showStatus(`Pubblicazione nello Store non riuscita: ${message}`, 12000)
+    }
+  }
+
   const publishScriptJson = async (mode: 'publish' | 'update' = 'publish', resetPin = false) => {
     if (!activeFile || activeAppDocument) {
       setPublishState({ status: 'error', error: 'Apri un file copione del progetto prima di condividere.' })
@@ -3634,6 +3819,21 @@ function App() {
                   <BookOpen size={15} />
                   Documentazione
                 </button>
+                {storeRatingTarget ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setAppMenuOpen(false)
+                      setAppMenuPosition(undefined)
+                      setStoreRatingStatus('')
+                      setStoreRating(storeRatingTarget)
+                    }}
+                  >
+                    <Star size={15} />
+                    Valuta copione
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   role="menuitem"
@@ -4232,6 +4432,21 @@ function App() {
                     <CloudUpload size={14} />
                     Condividi
                   </button>
+                  {storePublicationState.scriptId ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={!activeFile || Boolean(activeAppDocument) || storePublicationState.status === 'checking'}
+                      onClick={() => {
+                        setTheaterMenuOpen(false)
+                        setTheaterMenuPosition(undefined)
+                        openStorePublicationDialog()
+                      }}
+                    >
+                      <CloudCheck size={14} />
+                      Pubblica nello Store
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -4559,6 +4774,14 @@ function App() {
           onCopyLink={() => void copyPublishedLink()}
         />
       ) : null}
+      {storePublicationDialogOpen ? (
+        <StorePublicationModal
+          state={storePublicationState}
+          title={project.name}
+          onClose={() => setStorePublicationDialogOpen(false)}
+          onPublish={(releaseNotes) => void publishStoreScript(releaseNotes)}
+        />
+      ) : null}
       {toastMessage ? (
         <div className="app-toast" role="status">
           <span>{toastMessage}</span>
@@ -4590,6 +4813,112 @@ function ShareStatusIndicator({ state }: { state: ShareIndicatorState }) {
       {state.status === 'checking' ? <RefreshCw size={14} /> : null}
       {state.status === 'error' ? <AlertTriangle size={14} /> : null}
     </span>
+  )
+}
+
+function StorePublicationModal({
+  state,
+  title,
+  onClose,
+  onPublish,
+}: {
+  state: StorePublicationState
+  title: string
+  onClose: () => void
+  onPublish: (releaseNotes: string) => void
+}) {
+  const [releaseNotes, setReleaseNotes] = useState('')
+  const busy = state.status === 'checking' || state.status === 'publishing'
+  const statusLabel =
+    state.status === 'checking'
+      ? 'Verifica pubblicazione in corso'
+      : state.status === 'publishing'
+        ? 'Pubblicazione in corso'
+        : state.status === 'error'
+          ? 'Errore'
+          : state.versionNumber
+            ? 'Pubblicato nello Store'
+            : 'Pronto per la pubblicazione'
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="action-modal store-publication-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="store-publication-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="store-publication-header">
+          <div>
+            <span className="publish-kicker">StageDesk Store</span>
+            <h2 id="store-publication-title">Pubblica nello Store</h2>
+            <p>Pubblica una nuova versione del copione associato al tuo account.</p>
+          </div>
+          <button type="button" className="publish-close" aria-label="Chiudi" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </header>
+        <div className="store-publication-body">
+          <div className="store-publication-script">
+            <FileText size={17} />
+            <div>
+              <strong>{title}</strong>
+              <span>Il file attivo verrà pubblicato come pacchetto StageDesk.</span>
+            </div>
+          </div>
+          <div className="store-publication-status" data-state={state.status}>
+            <span className="publish-status-dot" />
+            <div>
+              <strong>{statusLabel}</strong>
+              {state.versionNumber && state.publishedAt ? (
+                <span>Versione {state.versionNumber} · {formatDateTime(state.publishedAt)}</span>
+              ) : null}
+              {state.error ? <span>{state.error}</span> : null}
+            </div>
+          </div>
+          <label className="store-publication-notes">
+            Note di versione
+            <textarea
+              value={releaseNotes}
+              onChange={(event) => setReleaseNotes(event.target.value)}
+              placeholder="Descrivi brevemente le modifiche di questa versione (facoltativo)."
+              rows={3}
+              disabled={busy}
+            />
+          </label>
+          {state.history.length ? (
+            <section className="store-publication-history" aria-labelledby="store-publication-history-title">
+              <div className="store-publication-history-heading">
+                <strong id="store-publication-history-title">Storico pubblicazioni</strong>
+                <span>{state.history.length} versioni</span>
+              </div>
+              <div className="store-publication-history-list">
+                {state.history.map((version) => (
+                  <div className="store-publication-history-row" key={`${version.versionNumber}-${version.publishedAt}`}>
+                    <strong>Versione {version.versionNumber}</strong>
+                    <span>{formatDateTime(version.publishedAt)}</span>
+                    {version.releaseNotes ? <small>{version.releaseNotes}</small> : null}
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </div>
+        <footer className="store-publication-actions">
+          <button type="button" onClick={onClose} disabled={busy}>Annulla</button>
+          <button
+            type="button"
+            className="store-publication-primary"
+            onClick={() => onPublish(releaseNotes)}
+            disabled={busy || state.status === 'idle' || !state.scriptId}
+          >
+            <CloudUpload size={15} />
+            Pubblica aggiornamento
+          </button>
+        </footer>
+      </section>
+    </div>
   )
 }
 
@@ -4854,12 +5183,12 @@ function StoreRatingModal({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <p className="eyebrow">STAGEDESK STORE</p>
-        <h2 id="store-rating-title">Valuta il copione importato</h2>
-        <p>Hai importato “{title}”. Esprimi una valutazione da 1 a 5.</p>
+        <h2 id="store-rating-title">Valuta il copione</h2>
+        <p>Hai letto “{title}”. Esprimi ora una valutazione da 1 a 5.</p>
         <div className="store-rating-options" aria-label="Valutazione da 1 a 5">
           {[1, 2, 3, 4, 5].map((score) => (
             <button key={score} type="button" onClick={() => onRate(score)} aria-label={`Valuta ${score} su 5`}>
-              {score}
+              <span aria-hidden="true">★</span>
             </button>
           ))}
         </div>

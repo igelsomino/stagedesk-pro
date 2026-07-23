@@ -137,6 +137,14 @@ La versione desktop registra il percorso dell'ultimo progetto aperto nel data di
 
 La dialog di apertura progetti usa l'elenco delle cartelle progetto disponibili, supporta ricerca, paginazione, rinomina ed eliminazione, e permette l'apertura dello Store pubblico in un tab dedicato dell'editor.
 
+## Pubblicazione nello StageDesk Store
+
+**Condividi** e **Pubblica nello Store** sono flussi distinti. Condividi prepara il copione per gli attori tramite link, QR code e PIN; Pubblica nello Store aggiorna il pacchetto catalogato associato all'autore.
+
+Il comando di pubblicazione viene mostrato solo se il file attivo appartiene a un record `store_scripts` con `author_id` uguale all'utente autenticato. Ogni conferma carica un nuovo pacchetto `.stagedesk` e crea una versione incrementale con numero, data, autore e note di rilascio. Il catalogo conserva il pacchetto corrente mentre lo storico resta disponibile in `store_script_versions`.
+
+Per attivare il flusso eseguire `docs/supabase-store-publication-versions.sql` dopo `docs/supabase-store.sql`. La migrazione aggiunge policy RLS e la funzione transazionale `publish_store_script`, che verifica la proprietà del copione e del percorso Storage prima di registrare la nuova versione.
+
 ## Filtri cue
 
 La colonna Cue distingue tre ambiti:

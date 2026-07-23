@@ -1,5 +1,25 @@
 # Novità
 
+## Versione 1.0.35
+
+> Pubblicazione versionata dei copioni nello StageDesk Store.
+
+- Separati in modo esplicito i flussi **Condividi** e **Pubblica nello Store**.
+- Aggiunta una dialog per pubblicare una nuova versione del copione, inserire note di rilascio e consultare lo storico.
+- Ogni pubblicazione crea un pacchetto `.stagedesk` numerato con data e autore.
+- Aggiunta la migration Supabase per storico versioni, policy RLS e pubblicazione transazionale.
+- Lo Store mostra il numero e la data dell'ultima versione pubblicata.
+
+## Versione 1.0.31
+
+> Separata la condivisione per gli attori dalla pubblicazione versionata nello StageDesk Store.
+
+- Aggiunto il comando **Pubblica nello Store** nel menu teatrale, visibile solo quando il copione attivo è associato all'account autore.
+- Ogni pubblicazione crea una nuova versione del pacchetto `.stagedesk`, mantenendo numero versione, data, autore e note di rilascio.
+- La dialog di pubblicazione mostra lo stato corrente e l'ultima versione pubblicata, evitando di confondere pubblicazione e condivisione.
+- Aggiunta la migrazione `docs/supabase-store-publication-versions.sql` con storico versioni, policy RLS e funzione transazionale di pubblicazione.
+- Lo Store mostra nella scheda del copione il numero e la data dell'ultima versione pubblicata.
+
 ## Versione 1.0.30
 
 > Corretto il catalogo Store e l'importazione dei copioni completi.

@@ -70,6 +70,23 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.35
+
+> Pubblicazione versionata dei copioni nello StageDesk Store.
+
+- Separati i flussi **Condividi** e **Pubblica nello Store**.
+- Aggiunta una dialog con note di rilascio, numero versione, data e storico delle pubblicazioni.
+- Ogni pubblicazione crea un pacchetto \\.stagedesk\\ con versione e autore.
+- Lo Store mostra la versione pubblicata più recente.
+
+## Versione 1.0.31
+
+> Separata la condivisione per gli attori dalla pubblicazione versionata nello StageDesk Store.
+
+- Aggiunto il comando **Pubblica nello Store** nel menu teatrale per i copioni associati all'account autore.
+- Ogni pubblicazione crea una nuova versione del pacchetto \`.stagedesk\` con numero e data.
+- La dialog mostra lo stato e l'ultima versione pubblicata, mentre lo Store mostra la stessa informazione nella scheda del copione.
+
 ## Versione 1.0.30
 
 > Corretto il catalogo Store e l'importazione dei copioni completi.
