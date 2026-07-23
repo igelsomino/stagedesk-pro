@@ -212,6 +212,19 @@ type PublishState = {
   publishedAt?: string
   error?: string
 }
+type StoreScriptRecord = {
+  id: string
+  author_id: string | null
+  title: string
+  package_name: string
+  package_path: string
+}
+type StorePublishState = {
+  status: 'idle' | 'checking' | 'ready' | 'publishing' | 'published' | 'error'
+  record?: StoreScriptRecord
+  publishedAt?: string
+  error?: string
+}
 type ShareIndicatorState = {
   status: 'disabled' | 'checking' | 'shared' | 'not-shared' | 'error'
   url?: string
@@ -365,6 +378,8 @@ function App() {
   const [scriptDialog, setScriptDialog] = useState<ScriptActionDialog | undefined>()
   const [publishDialogOpen, setPublishDialogOpen] = useState(false)
   const [publishState, setPublishState] = useState<PublishState>({ status: 'idle' })
+  const [storePublishDialogOpen, setStorePublishDialogOpen] = useState(false)
+  const [storePublishState, setStorePublishState] = useState<StorePublishState>({ status: 'idle' })
   const [shareIndicators, setShareIndicators] = useState<Record<string, ShareIndicatorState>>({})
   const [theaterMenuOpen, setTheaterMenuOpen] = useState(false)
   const [theaterMenuPosition, setTheaterMenuPosition] = useState<{ top: number; left: number } | undefined>()
@@ -600,6 +615,42 @@ function App() {
       active = false
     }
   }, [activeAppDocument, activeFile, project.id, setShareIndicatorForPath, user])
+
+  useEffect(() => {
+    let active = true
+    if (!user || !activeFile || activeAppDocument || activeStoreTab) {
+      setStorePublishState({ status: 'idle' })
+      return undefined
+    }
+
+    setStorePublishState({ status: 'checking' })
+    const expectedPackageName = `${slug(stripMarkdownExtension(activeFile.name)) || 'copione'}.stagedesk`
+    const checkStoreOwnership = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('store_scripts')
+          .select('id, author_id, title, package_name, package_path')
+          .eq('author_id', user.id)
+        if (error) throw error
+        const records = (data ?? []) as StoreScriptRecord[]
+        const fileSlug = slug(stripMarkdownExtension(activeFile.name))
+        const record = records.find((item) => item.package_name.toLowerCase() === expectedPackageName.toLowerCase())
+          ?? records.find((item) => slug(item.title) === fileSlug)
+        if (!active) return
+        setStorePublishState(record
+          ? { status: 'ready', record }
+          : { status: 'idle' })
+      } catch (error) {
+        if (!active) return
+        setStorePublishState({ status: 'error', error: publishErrorMessage(error) })
+      }
+    }
+
+    void checkStoreOwnership()
+    return () => {
+      active = false
+    }
+  }, [activeAppDocument, activeFile, activeStoreTab, user])
 
   useEffect(() => {
     const installedVersion = window.localStorage.getItem(INSTALLED_UPDATE_VERSION_KEY)
@@ -3369,6 +3420,60 @@ function App() {
     void loadShareState()
   }
 
+  const openStorePublishDialog = () => {
+    if (storePublishState.status !== 'ready' && storePublishState.status !== 'published') return
+    setStorePublishDialogOpen(true)
+  }
+
+  const publishActiveStoreScript = async () => {
+    if (!user || !activeFile || activeAppDocument || !storePublishState.record) return
+
+    const record = storePublishState.record
+    const markdown = buildActiveExtendedMarkdown() ?? editorMarkdown
+    const actCount = markdown.split('\n').filter((line) => /^#\s+(?:atto|act)\b/i.test(line.trim())).length
+    const sceneCount = markdown.split('\n').filter((line) => /^##\s+(?:scena|scene)\b/i.test(line.trim())).length
+    const actorCount = new Set(activeCharacters.filter((character) => !isCollectiveCharacterName(character.name)).map((character) => character.id)).size
+    setStorePublishState((current) => ({ ...current, status: 'publishing', error: undefined }))
+
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError) throw sessionError
+      if (sessionData.session?.user?.id !== user.id) {
+        throw new Error('Sessione Supabase non disponibile: esegui nuovamente l’accesso.')
+      }
+
+      const { error: uploadError } = await supabase.storage
+        .from('store-packages')
+        .upload(record.package_path, new Blob([markdown], { type: 'application/vnd.stagedesk.script' }), {
+          contentType: 'application/vnd.stagedesk.script',
+          upsert: true,
+        })
+      if (uploadError) throw uploadError
+
+      const { error: metadataError } = await supabase
+        .from('store_scripts')
+        .update({
+          package_name: record.package_name || `${slug(stripMarkdownExtension(activeFile.name))}.stagedesk`,
+          package_path: record.package_path,
+          actor_count: actorCount,
+          act_count: actCount,
+          scene_count: sceneCount,
+          is_published: true,
+        })
+        .eq('id', record.id)
+        .eq('author_id', user.id)
+      if (metadataError) throw metadataError
+
+      const publishedAt = new Date().toISOString()
+      setStorePublishState({ status: 'published', record, publishedAt })
+      showStatus(`Copione aggiornato nello Store: ${record.title}`)
+    } catch (error) {
+      const message = publishErrorMessage(error)
+      setStorePublishState((current) => ({ ...current, status: 'error', error: message }))
+      showStatus(`Pubblicazione Store non riuscita: ${message}`, 12000)
+    }
+  }
+
   const publishScriptJson = async (mode: 'publish' | 'update' = 'publish', resetPin = false) => {
     if (!activeFile || activeAppDocument) {
       setPublishState({ status: 'error', error: 'Apri un file copione del progetto prima di condividere.' })
@@ -4231,6 +4336,21 @@ function App() {
                     <CloudUpload size={14} />
                     Condividi
                   </button>
+                  {storePublishState.status === 'ready' || storePublishState.status === 'published' ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={!activeFile || Boolean(activeAppDocument)}
+                      onClick={() => {
+                        setTheaterMenuOpen(false)
+                        setTheaterMenuPosition(undefined)
+                        openStorePublishDialog()
+                      }}
+                    >
+                      <Upload size={14} />
+                      Pubblica
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -4558,6 +4678,13 @@ function App() {
           onCopyLink={() => void copyPublishedLink()}
         />
       ) : null}
+      {storePublishDialogOpen ? (
+        <StorePublishModal
+          state={storePublishState}
+          onClose={() => setStorePublishDialogOpen(false)}
+          onPublish={() => void publishActiveStoreScript()}
+        />
+      ) : null}
       {toastMessage ? (
         <div className="app-toast" role="status">
           <span>{toastMessage}</span>
@@ -4589,6 +4716,75 @@ function ShareStatusIndicator({ state }: { state: ShareIndicatorState }) {
       {state.status === 'checking' ? <RefreshCw size={14} /> : null}
       {state.status === 'error' ? <AlertTriangle size={14} /> : null}
     </span>
+  )
+}
+
+function StorePublishModal({
+  state,
+  onClose,
+  onPublish,
+}: {
+  state: StorePublishState
+  onClose: () => void
+  onPublish: () => void
+}) {
+  const busy = state.status === 'publishing'
+  const statusLabel = state.status === 'publishing'
+    ? 'Pubblicazione in corso'
+    : state.status === 'published'
+      ? 'Pubblicato'
+      : state.status === 'error'
+        ? 'Errore'
+        : 'Pronto per la pubblicazione'
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="action-modal publish-modal store-publish-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="store-publish-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="publish-modal-header">
+          <div>
+            <span className="publish-kicker">StageDesk Store</span>
+            <h2 id="store-publish-title">Pubblica copione</h2>
+            <p>Aggiorna nello Store il file del catalogo associato al tuo account.</p>
+          </div>
+          <button type="button" className="publish-close" aria-label="Chiudi" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+        <div className="publish-summary" data-state={state.status}>
+          <span className="publish-status-dot" />
+          <div>
+            <strong>{statusLabel}</strong>
+            <span>
+              {state.status === 'published' && state.publishedAt
+                ? `Ultimo aggiornamento: ${formatDateTime(state.publishedAt)}`
+                : state.status === 'error'
+                  ? state.error
+                  : state.record
+                    ? `Versione Store: ${state.record.title}`
+                    : 'Il file attivo non è associato a una scheda Store pubblicabile.'}
+            </span>
+          </div>
+        </div>
+        <p className="store-publish-warning">
+          Il pacchetto corrente sostituirà la versione pubblicata. Titolo, autore, licenza e copertina restano quelli del catalogo.
+        </p>
+        <div className="publish-actions">
+          <button type="button" className="publish-primary" disabled={!state.record || busy} onClick={onPublish}>
+            <Upload size={15} />
+            Pubblica
+          </button>
+          <button type="button" disabled={busy} onClick={onClose}>
+            Annulla
+          </button>
+        </div>
+      </section>
+    </div>
   )
 }
 
@@ -7013,7 +7209,13 @@ const validateScriptForFullscreen = (markdown: string, project: Project): Script
       if (!structuredDialogue.sceneId) {
         addIssue(index, 'Scena', 'La battuta strutturata non è associata a una scena.', character, 'warning')
       }
-      const expectedName = closestKnownCharacter(character, [...knownCharacters, ...seenCharacters])
+      const characterById = structuredDialogue.characterId
+        ? knownCharacterOptions.find((item) => item.id === structuredDialogue.characterId)
+        : undefined
+      const characterByName = knownCharacterOptions.find((item) => normalizeCharacterName(item.name) === normalizedCharacter)
+      const expectedName = !characterById && !characterByName && !isCollectiveCharacterName(character)
+        ? closestKnownCharacter(character, [...knownCharacters, ...seenCharacters])
+        : undefined
       if (expectedName && normalizeCharacterName(expectedName) !== normalizedCharacter) {
         addIssue(index, 'Personaggio', `Nome personaggio sospetto: forse intendevi "${expectedName}".`, character, 'warning')
       }
@@ -7056,7 +7258,10 @@ const validateScriptForFullscreen = (markdown: string, project: Project): Script
       if (!spoken) {
         addIssue(index, 'Battuta', 'La battuta è vuota dopo il nome del personaggio.', rawLine.replace(spoken, '').trim())
       }
-      const expectedName = closestKnownCharacter(character, [...knownCharacters, ...seenCharacters])
+      const characterIsKnown = knownCharacterOptions.some((item) => normalizeCharacterName(item.name) === normalizeCharacterName(character))
+      const expectedName = !characterIsKnown && !isCollectiveCharacterName(character)
+        ? closestKnownCharacter(character, [...knownCharacters, ...seenCharacters])
+        : undefined
       if (expectedName && normalizeCharacterName(expectedName) !== normalizeCharacterName(character)) {
         addIssue(index, 'Personaggio', `Nome personaggio sospetto: forse intendevi "${expectedName}".`, character, 'warning')
       }
@@ -8978,6 +9183,9 @@ const publishErrorMessage = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)
   if (/function .*upsert_script_share.*does not exist|could not find the function/i.test(message)) {
     return 'Condivisione non configurata: esegui la migrazione docs/supabase-sharing.sql in Supabase.'
+  }
+  if (/store-packages/i.test(message) && /row-level security|violates.*security policy/i.test(message)) {
+    return 'Permessi Store mancanti: esegui la migrazione docs/supabase-store-publish.sql per abilitare la pubblicazione.'
   }
   if (/row-level security|violates.*security policy/i.test(message)) {
     return 'Permessi condivisione mancanti: verifica le policy RLS e le funzioni della migrazione Supabase.'

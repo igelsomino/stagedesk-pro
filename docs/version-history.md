@@ -1,5 +1,13 @@
 # Novità
 
+## Versione 1.0.34
+
+> Aggiunta la pubblicazione diretta dei copioni nello StageDesk Store.
+
+- Il menu **Pubblica** è disponibile per i copioni associati all'account autore.
+- Il pacchetto `.stagedesk` viene aggiornato nello Storage Store mantenendo la scheda catalogo, la copertina, la licenza e i metadati già pubblicati.
+- Aggiornate le policy Supabase per consentire al proprietario della scheda di sostituire il relativo pacchetto senza esporre l'elenco dei file del bucket.
+
 ## Versione 1.0.33
 
 > Corretto l'export PDF e la gestione dei progetti su macOS.
