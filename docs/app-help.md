@@ -21,7 +21,9 @@ Usa il pulsante Nuovo per creare un progetto. L'app chiede il nome e prepara un 
 
 Usa Apri progetto per rientrare in un progetto già creato. La dialog permette di cercare il progetto, scorrere la lista a pagine, aprirlo con un click, rinominarlo o eliminarlo dal menu con i tre puntini verticali.
 
-Il pulsante Importa nella stessa dialog apre lo Store in un tab dello spazio editor. Lo Store è predisposto per contenuti importabili e, nella versione corrente, mostra una pagina pubblica "Under Construction".
+Il pulsante Importa nella stessa dialog apre lo Store in un tab dello spazio editor. Dallo Store puoi consultare le schede dei copioni e importare direttamente i pacchetti StageDesk disponibili.
+
+Se il copione attivo è stato pubblicato nel catalogo dal tuo account, nel menu teatrale compare anche **Pubblica nello Store**. La pubblicazione è distinta da Condividi: crea una nuova versione del copione nel catalogo e mostra il numero e la data dell'ultima versione pubblicata. Puoi aggiungere facoltativamente una nota di versione prima di confermare.
 
 Il salvataggio è automatico.
 
