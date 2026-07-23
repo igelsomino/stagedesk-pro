@@ -216,6 +216,7 @@ type PublishState = {
 }
 type StorePublicationState = {
   status: 'idle' | 'checking' | 'publishing' | 'published' | 'error'
+  filePath?: string
   scriptId?: string
   versionNumber?: number
   publishedAt?: string
@@ -384,6 +385,7 @@ function App() {
   const [publishState, setPublishState] = useState<PublishState>({ status: 'idle' })
   const [storePublicationDialogOpen, setStorePublicationDialogOpen] = useState(false)
   const [storePublicationState, setStorePublicationState] = useState<StorePublicationState>({ status: 'idle', history: [] })
+  const storePublicationRequestRef = useRef(0)
   const [shareIndicators, setShareIndicators] = useState<Record<string, ShareIndicatorState>>({})
   const [theaterMenuOpen, setTheaterMenuOpen] = useState(false)
   const [theaterMenuPosition, setTheaterMenuPosition] = useState<{ top: number; left: number } | undefined>()
@@ -633,12 +635,14 @@ function App() {
   }, [activeAppDocument, activeFile, project.id, setShareIndicatorForPath, user])
 
   const loadStorePublicationState = useCallback(async (file: ProjectTreeNode | undefined = activeFile) => {
+    const requestId = storePublicationRequestRef.current + 1
+    storePublicationRequestRef.current = requestId
     if (!user || !file || activeAppDocument || activeStoreTab || isExampleScriptFile(file, editorMarkdown)) {
       setStorePublicationState({ status: 'idle', history: [] })
       return
     }
 
-    setStorePublicationState({ status: 'checking', history: [] })
+    setStorePublicationState({ status: 'checking', filePath: file.path, history: [] })
     try {
       const fields = 'id, author_id, current_version, published_at, package_name, is_published'
       const byPackage = await supabase
@@ -652,8 +656,9 @@ function App() {
 
       const data = byPackage.data
 
+      if (requestId !== storePublicationRequestRef.current) return
       if (!data || data.author_id !== user.id) {
-        setStorePublicationState({ status: 'idle', history: [] })
+        setStorePublicationState({ status: 'idle', filePath: file.path, history: [] })
         return
       }
 
@@ -664,9 +669,11 @@ function App() {
         .order('version_number', { ascending: false })
         .limit(20)
       if (versions.error) throw versions.error
+      if (requestId !== storePublicationRequestRef.current) return
 
       setStorePublicationState({
         status: 'published',
+        filePath: file.path,
         scriptId: data.id,
         versionNumber: typeof data.current_version === 'number' ? data.current_version : undefined,
         publishedAt: typeof data.published_at === 'string' ? data.published_at : undefined,
@@ -679,6 +686,7 @@ function App() {
         })),
       })
     } catch (error) {
+      if (requestId !== storePublicationRequestRef.current) return
       setStorePublicationState({ status: 'error', history: [], error: publishErrorMessage(error) })
     }
   }, [activeAppDocument, activeFile, activeStoreTab, editorMarkdown, user])
@@ -686,6 +694,13 @@ function App() {
   useEffect(() => {
     void loadStorePublicationState()
   }, [loadStorePublicationState])
+
+  useEffect(() => {
+    if (!activeFile || isExampleScriptFile(activeFile, editorMarkdown)) {
+      setStorePublicationDialogOpen(false)
+      setStorePublicationState({ status: 'idle', history: [] })
+    }
+  }, [activeFile, editorMarkdown])
 
   useEffect(() => {
     const installedVersion = window.localStorage.getItem(INSTALLED_UPDATE_VERSION_KEY)
@@ -3523,6 +3538,7 @@ function App() {
       const publishedAt = typeof data?.published_at === 'string' ? data.published_at : new Date().toISOString()
       setStorePublicationState({
         status: 'published',
+        filePath: activeFile.path,
         scriptId: storePublicationState.scriptId,
         versionNumber,
         publishedAt,
@@ -4425,7 +4441,7 @@ function App() {
                     <CloudUpload size={14} />
                     Condividi
                   </button>
-                  {storePublicationState.scriptId && !isExampleScriptFile(activeFile, editorMarkdown) ? (
+                  {storePublicationState.scriptId && storePublicationState.filePath === activeFile?.path && !isExampleScriptFile(activeFile, editorMarkdown) ? (
                     <button
                       type="button"
                       role="menuitem"
@@ -9160,7 +9176,7 @@ const stripMarkdownExtension = (name: string) => name.replace(/\.md$/i, '')
 
 const isExampleScriptFile = (file: ProjectTreeNode | undefined, editorContent = '') =>
   file?.kind === 'markdown' &&
-  file.path === '/copioni/la locandiera.md' &&
+  (file.path === '/copioni/la locandiera.md' || file.name.toLowerCase() === 'la locandiera.md') &&
   (file.content?.includes('AVVISO IMPORTANTE') === true || editorContent.includes('AVVISO IMPORTANTE'))
 
 const buildPublishedScriptPayload = (

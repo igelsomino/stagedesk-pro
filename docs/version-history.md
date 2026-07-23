@@ -1,5 +1,13 @@
 # Novità
 
+## Versione 1.0.37
+
+> Stato di pubblicazione vincolato al file attivo.
+
+- Il comando **Pubblica nello Store** non viene più mostrato per il file di esempio, anche durante il cambio rapido di tab o file.
+- Evitata la riapertura della dialog di pubblicazione con lo stato del copione precedente.
+- La versione web e la versione desktop usano lo stesso flusso di pubblicazione del file attivo.
+
 ## Versione 1.0.36
 
 > Dialog e navigazione dell'editor più coerenti.
