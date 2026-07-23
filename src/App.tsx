@@ -4890,6 +4890,7 @@ function ProjectPickerModal({
   const [openMenuPath, setOpenMenuPath] = useState('')
   const [renameEntry, setRenameEntry] = useState<ProjectEntry | undefined>()
   const [renameValue, setRenameValue] = useState('')
+  const [deleteEntry, setDeleteEntry] = useState<ProjectEntry | undefined>()
   const [projectSearch, setProjectSearch] = useState('')
   const [page, setPage] = useState(0)
   const pageSize = 6
@@ -4914,6 +4915,10 @@ function ProjectPickerModal({
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       if (renameEntry) return
+      if (deleteEntry) {
+        setDeleteEntry(undefined)
+        return
+      }
       if (openMenuPath) {
         setOpenMenuPath('')
         return
@@ -4922,7 +4927,7 @@ function ProjectPickerModal({
     }
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
-  }, [onCancel, openMenuPath, renameEntry])
+  }, [deleteEntry, onCancel, openMenuPath, renameEntry])
   const submitRename = () => {
     if (!renameEntry) return
     onRename(renameEntry, renameValue)
@@ -5005,7 +5010,7 @@ function ProjectPickerModal({
                         event.preventDefault()
                         event.stopPropagation()
                         setOpenMenuPath('')
-                        onDelete(entry)
+                        setDeleteEntry(entry)
                       }}
                     >
                       <Trash2 size={14} />
@@ -5073,6 +5078,27 @@ function ProjectPickerModal({
               </button>
               <button type="button" className="primary" disabled={!renameValue.trim() || renameValue.trim() === renameEntry.name} onClick={submitRename}>
                 Rinomina
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {deleteEntry ? (
+          <div className="project-delete-panel" role="alertdialog" aria-labelledby="project-delete-title">
+            <strong id="project-delete-title">Eliminare il progetto?</strong>
+            <p>Il progetto “{deleteEntry.name}” e tutti i suoi file verranno rimossi dal dispositivo.</p>
+            <div className="project-rename-actions">
+              <button type="button" onClick={() => setDeleteEntry(undefined)}>Annulla</button>
+              <button
+                type="button"
+                className="danger"
+                onClick={() => {
+                  const entry = deleteEntry
+                  setDeleteEntry(undefined)
+                  onDelete(entry)
+                }}
+              >
+                <Trash2 size={14} />
+                Elimina
               </button>
             </div>
           </div>

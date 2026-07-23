@@ -1,5 +1,13 @@
 # Novità
 
+## Versione 1.0.32
+
+> Corrette la cancellazione dei progetti desktop e le policy di lettura dello Storage.
+
+- La cancellazione dei progetti usa una conferma interna alla dialog, compatibile con il WebView macOS.
+- Rimosse le policy `SELECT` pubbliche che permettevano di elencare tutti i file nei bucket pubblici.
+- Gli URL pubblici dello Store restano disponibili; upload, modifica e cancellazione restano limitati al proprietario.
+
 ## Versione 1.0.31
 
 > Migliorata la leggibilità dell'editor e aggiornato il copione dimostrativo.

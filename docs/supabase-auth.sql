@@ -219,12 +219,6 @@ set
   file_size_limit = excluded.file_size_limit,
   allowed_mime_types = excluded.allowed_mime_types;
 
-drop policy if exists "published_scripts_public_read" on storage.objects;
-create policy "published_scripts_public_read"
-on storage.objects for select
-to public
-using (bucket_id = 'published-scripts');
-
 drop policy if exists "published_scripts_insert_own" on storage.objects;
 create policy "published_scripts_insert_own"
 on storage.objects for insert

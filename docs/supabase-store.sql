@@ -9,12 +9,6 @@ values
   ('store-covers', 'store-covers', true)
 on conflict (id) do update set public = excluded.public;
 
-drop policy if exists "store_packages_public_read" on storage.objects;
-create policy "store_packages_public_read"
-on storage.objects for select
-to anon, authenticated
-using (bucket_id = 'store-packages');
-
 drop policy if exists "store_packages_owner_insert" on storage.objects;
 create policy "store_packages_owner_insert"
 on storage.objects for insert
@@ -36,12 +30,6 @@ create policy "store_packages_owner_delete"
 on storage.objects for delete
 to authenticated
 using (bucket_id = 'store-packages' and (storage.foldername(name))[1] = auth.uid()::text);
-
-drop policy if exists "store_covers_public_read" on storage.objects;
-create policy "store_covers_public_read"
-on storage.objects for select
-to anon, authenticated
-using (bucket_id = 'store-covers');
 
 drop policy if exists "store_covers_owner_insert" on storage.objects;
 create policy "store_covers_owner_insert"
