@@ -1,5 +1,12 @@
 # Novità
 
+## Versione 1.0.33
+
+> Corretto l'export PDF e la gestione dei progetti su macOS.
+
+- La cancellazione dei progetti dalla dialog **Apri progetto** non usa più il dialog nativo del browser/WebView, evitando il blocco del comando nell'app macOS.
+- Le interruzioni orizzontali (`hr`) nell'export PDF vengono interpretate come interruzioni di pagina.
+
 ## Versione 1.0.32
 
 > Corrette la cancellazione dei progetti desktop e le policy di lettura dello Storage.

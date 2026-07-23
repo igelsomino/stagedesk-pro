@@ -2147,7 +2147,6 @@ function App() {
   }
 
   const deleteProjectEntry = async (entry: ProjectEntry) => {
-    if (!confirm(`Eliminare definitivamente il progetto "${entry.name}"?`)) return
     try {
       await storage.deleteProjectFolder(entry.path)
       setProjectPickerEntries((current) => current.filter((item) => item.path !== entry.path))
@@ -9211,11 +9210,9 @@ const downloadPdf = async (name: string, markdown: string, title: string, mode: 
     }
 
     if (block.type === 'hr') {
-      y = ensurePdfSpace(doc, y, pageBottom, marginTop, 18)
-      doc.setDrawColor(148, 163, 184)
-      doc.setLineWidth(0.8)
-      doc.line(marginX, y + 5, marginX + maxWidth, y + 5)
-      y += 18
+      // In PDF l'hr rappresenta un separatore di pagina, non una linea decorativa.
+      if (y > marginTop + 1) doc.addPage()
+      y = marginTop
       continue
     }
 
