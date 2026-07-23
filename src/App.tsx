@@ -633,7 +633,7 @@ function App() {
   }, [activeAppDocument, activeFile, project.id, setShareIndicatorForPath, user])
 
   const loadStorePublicationState = useCallback(async (file: ProjectTreeNode | undefined = activeFile) => {
-    if (!user || !file || activeAppDocument || activeStoreTab) {
+    if (!user || !file || activeAppDocument || activeStoreTab || isExampleScriptFile(file, editorMarkdown)) {
       setStorePublicationState({ status: 'idle', history: [] })
       return
     }
@@ -641,27 +641,16 @@ function App() {
     setStorePublicationState({ status: 'checking', history: [] })
     try {
       const fields = 'id, author_id, current_version, published_at, package_name, is_published'
-      const byTitle = await supabase
+      const byPackage = await supabase
         .from('store_scripts')
         .select(fields)
         .eq('author_id', user.id)
-        .eq('title', project.name)
+        .eq('package_name', file.name.replace(/\.md$/i, '.stagedesk'))
         .limit(1)
         .maybeSingle()
-      if (byTitle.error) throw byTitle.error
+      if (byPackage.error) throw byPackage.error
 
-      let data = byTitle.data
-      if (!data) {
-        const byPackage = await supabase
-          .from('store_scripts')
-          .select(fields)
-          .eq('author_id', user.id)
-          .eq('package_name', file.name.replace(/\.md$/i, '.stagedesk'))
-          .limit(1)
-          .maybeSingle()
-        if (byPackage.error) throw byPackage.error
-        data = byPackage.data
-      }
+      const data = byPackage.data
 
       if (!data || data.author_id !== user.id) {
         setStorePublicationState({ status: 'idle', history: [] })
@@ -692,7 +681,7 @@ function App() {
     } catch (error) {
       setStorePublicationState({ status: 'error', history: [], error: publishErrorMessage(error) })
     }
-  }, [activeAppDocument, activeFile, activeStoreTab, project.name, user])
+  }, [activeAppDocument, activeFile, activeStoreTab, editorMarkdown, user])
 
   useEffect(() => {
     void loadStorePublicationState()
@@ -3486,6 +3475,10 @@ function App() {
   }
 
   const openStorePublicationDialog = () => {
+    if (!activeFile || isExampleScriptFile(activeFile, editorMarkdown)) {
+      showStatus('Il file di esempio non è pubblicabile nello Store.')
+      return
+    }
     setStorePublicationDialogOpen(true)
     void loadStorePublicationState()
   }
@@ -4432,7 +4425,7 @@ function App() {
                     <CloudUpload size={14} />
                     Condividi
                   </button>
-                  {storePublicationState.scriptId ? (
+                  {storePublicationState.scriptId && !isExampleScriptFile(activeFile, editorMarkdown) ? (
                     <button
                       type="button"
                       role="menuitem"
@@ -4992,50 +4985,52 @@ function PublishScriptModal({
             <X size={16} />
           </button>
         </div>
-        {state.url ? (
-          <div className="publish-qr">
-            {qrUrl ? <img src={qrUrl} alt="QR code del link condiviso" /> : <div className="publish-qr-placeholder" aria-hidden="true" />}
+        <div className="publish-modal-body">
+          {state.url ? (
+            <div className="publish-qr">
+              {qrUrl ? <img src={qrUrl} alt="QR code del link condiviso" /> : <div className="publish-qr-placeholder" aria-hidden="true" />}
+            </div>
+          ) : null}
+          <div className="publish-summary" data-state={state.status}>
+            <span className="publish-status-dot" />
+            <div>
+              <strong>{statusLabel}</strong>
+              <span>
+                {state.status === 'published' && state.publishedAt
+                  ? `Ultima versione: ${formatDateTime(state.publishedAt)}`
+                : state.status === 'error'
+                    ? state.error
+                : state.status === 'idle'
+                  ? 'Il file non risulta condiviso in questa sessione.'
+                  : 'Attendere il completamento dell’operazione.'}
+              </span>
+            </div>
           </div>
-        ) : null}
-        <div className="publish-summary" data-state={state.status}>
-          <span className="publish-status-dot" />
-          <div>
-            <strong>{statusLabel}</strong>
-            <span>
-              {state.status === 'published' && state.publishedAt
-                ? `Ultima versione: ${formatDateTime(state.publishedAt)}`
-              : state.status === 'error'
-                  ? state.error
-              : state.status === 'idle'
-                ? 'Il file non risulta condiviso in questa sessione.'
-                : 'Attendere il completamento dell’operazione.'}
-            </span>
-          </div>
+          {state.url ? (
+            <div className="publish-share">
+              <label>
+                Link condivisione
+                <div className="publish-link-row">
+                  <input readOnly value={state.url} onFocus={(event) => event.currentTarget.select()} />
+                  <button type="button" onClick={onCopyLink}>
+                    <Copy size={14} />
+                    Copia
+                  </button>
+                </div>
+              </label>
+              <label className="publish-pin-field">
+                PIN attore
+                <div className="publish-link-row">
+                  <input readOnly value={state.pin ?? ''} placeholder={state.pinAvailable ? '' : 'Non disponibile: reimposta il PIN'} />
+                  <button type="button" disabled={busy} onClick={onResetPin}>
+                    <RefreshCw size={14} />
+                    Reimposta
+                  </button>
+                </div>
+              </label>
+            </div>
+          ) : null}
         </div>
-        {state.url ? (
-          <div className="publish-share">
-            <label>
-              Link condivisione
-              <div className="publish-link-row">
-                <input readOnly value={state.url} onFocus={(event) => event.currentTarget.select()} />
-                <button type="button" onClick={onCopyLink}>
-                  <Copy size={14} />
-                  Copia
-                </button>
-              </div>
-            </label>
-            <label className="publish-pin-field">
-              PIN attore
-              <div className="publish-link-row">
-                <input readOnly value={state.pin ?? ''} placeholder={state.pinAvailable ? '' : 'Non disponibile: reimposta il PIN'} />
-                <button type="button" disabled={busy} onClick={onResetPin}>
-                  <RefreshCw size={14} />
-                  Reimposta
-                </button>
-              </div>
-            </label>
-          </div>
-        ) : null}
         <div className="publish-actions">
           <button type="button" className="publish-primary" disabled={disabled || busy} onClick={onPublish}>
             <CloudUpload size={15} />
@@ -9162,6 +9157,11 @@ const scheduleNativeCueEnd = (
 }
 
 const stripMarkdownExtension = (name: string) => name.replace(/\.md$/i, '')
+
+const isExampleScriptFile = (file: ProjectTreeNode | undefined, editorContent = '') =>
+  file?.kind === 'markdown' &&
+  file.path === '/copioni/la locandiera.md' &&
+  (file.content?.includes('AVVISO IMPORTANTE') === true || editorContent.includes('AVVISO IMPORTANTE'))
 
 const buildPublishedScriptPayload = (
   project: Project,

@@ -1,5 +1,15 @@
 # Novità
 
+## Versione 1.0.36
+
+> Dialog e navigazione dell'editor più coerenti.
+
+- Il comando **Pubblica nello Store** viene associato esclusivamente al file Markdown attivo e non compare per il copione dimostrativo.
+- Uniformati layout, spaziature e comportamento responsive delle dialog **Condividi** e **Pubblica nello Store**.
+- La condivisione riduce lo spazio tra descrizione e stato del file e mantiene QR code, stato, link e PIN in un unico corpo ordinato.
+- Le frecce su/giù nelle textarea spostano il focus al blocco di nota o battuta adiacente anche quando il blocco successivo è di tipo diverso.
+- Ridotta la distanza tra i controlli dei caroselli dello Store.
+
 ## Versione 1.0.35
 
 > Pubblicazione versionata dei copioni nello StageDesk Store.

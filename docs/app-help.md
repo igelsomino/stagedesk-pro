@@ -23,7 +23,7 @@ Usa Apri progetto per rientrare in un progetto già creato. La dialog permette d
 
 Il pulsante Importa nella stessa dialog apre lo Store in un tab dello spazio editor. Dallo Store puoi consultare le schede dei copioni e importare direttamente i pacchetti StageDesk disponibili.
 
-Se il copione attivo è stato pubblicato nel catalogo dal tuo account, nel menu teatrale compare anche **Pubblica nello Store**. La pubblicazione è distinta da Condividi: crea una nuova versione del copione nel catalogo e mostra il numero e la data dell'ultima versione pubblicata. Puoi aggiungere facoltativamente una nota di versione prima di confermare.
+Se il file attivo è stato pubblicato nel catalogo dal tuo account, nel menu teatrale compare anche **Pubblica nello Store**. Il comando è riferito al singolo file e non compare per il copione dimostrativo. La pubblicazione è distinta da Condividi: crea una nuova versione del copione nel catalogo e mostra il numero e la data dell'ultima versione pubblicata. Puoi aggiungere facoltativamente una nota di versione prima di confermare.
 
 Il salvataggio è automatico.
 
@@ -52,6 +52,8 @@ Per una battuta usa questo formato:
 È accettato anche il formato con i due punti inclusi nel grassetto:
 
 `**MIRANDOLINA:** A pranzo, che cosa comanda?`
+
+Nelle textarea di note e battute, quando il cursore è all'inizio o alla fine del testo, usa Freccia su o Freccia giù per passare al blocco di regia adiacente. La navigazione comprende sia note sia battute.
 
 I link Markdown come `[sito](https://esempio.it)` vengono visualizzati come collegamenti cliccabili e aperti nel browser predefinito del sistema.
 

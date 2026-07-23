@@ -213,6 +213,7 @@ export const ScriptNote = TiptapNode.create({
       body.className = 'script-note-body'
       contentTextarea.className = 'script-note-content'
       contentTextarea.rows = 4
+      contentTextarea.draggable = false
 
       header.append(collapseButton, titleInput, typeDropdown, deleteButton)
       body.append(contentTextarea)
@@ -240,6 +241,22 @@ export const ScriptNote = TiptapNode.create({
         transaction.scrollIntoView()
         editor.view.dispatch(transaction)
         editor.view.focus()
+      }
+
+      const focusAdjacentScriptBlock = (direction: 'next' | 'previous') => {
+        const blocks = Array.from(document.querySelectorAll<HTMLElement>('[data-ref-id], [data-dialogue-id]'))
+        const currentIndex = blocks.indexOf(dom)
+        const targetIndex = currentIndex + (direction === 'next' ? 1 : -1)
+        const targetElement = currentIndex < 0 ? undefined : blocks[targetIndex]
+        const targetTextarea = targetElement?.querySelector<HTMLTextAreaElement>('textarea')
+        if (!targetTextarea) return false
+        window.requestAnimationFrame(() => {
+          targetTextarea.focus({ preventScroll: true })
+          const caret = direction === 'next' ? 0 : targetTextarea.value.length
+          targetTextarea.setSelectionRange(caret, caret)
+          targetTextarea.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+        })
+        return true
       }
 
       const resizeTextarea = () => {
@@ -359,11 +376,23 @@ export const ScriptNote = TiptapNode.create({
         updateAttrs({ content: contentTextarea.value })
       })
       contentTextarea.addEventListener('keydown', (event) => {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          const atBoundary = event.key === 'ArrowDown'
+            ? contentTextarea.selectionStart === contentTextarea.value.length && contentTextarea.selectionEnd === contentTextarea.value.length
+            : contentTextarea.selectionStart === 0 && contentTextarea.selectionEnd === 0
+          if (atBoundary && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey && focusAdjacentScriptBlock(event.key === 'ArrowDown' ? 'next' : 'previous')) {
+            event.preventDefault()
+            event.stopPropagation()
+            return
+          }
+        }
         if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) return
         event.preventDefault()
         event.stopPropagation()
         insertParagraphAfterNote()
       })
+      const preventTextDrag = (event: DragEvent) => event.preventDefault()
+      contentTextarea.addEventListener('dragstart', preventTextDrag)
 
       render()
 
@@ -381,6 +410,7 @@ export const ScriptNote = TiptapNode.create({
         },
         destroy() {
           document.removeEventListener('pointerdown', closeTypeMenuOnOutsideClick)
+          contentTextarea.removeEventListener('dragstart', preventTextDrag)
         },
       }
     }
