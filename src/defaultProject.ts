@@ -169,15 +169,29 @@ const demoMedia = (): MediaAsset[] => [
   },
 ]
 
-const demoScriptContent = () => `| Personaggio | Interprete | Presenza | Note |
+const demoScriptContent = () => `> **Sinossi**
+>
+> "La locandiera" di Carlo Goldoni si svolge a Firenze, nella locanda gestita dall'affascinante e indipendente Mirandolina. Attorno a lei ruotano diversi corteggiatori, tra cui il Marchese di Forlipopoli, un nobile decaduto che le offre una vana protezione, il Conte d'Albafiorita, un ricco mercante che cerca di conquistarla con doni costosi, e Fabrizio, il cameriere sinceramente legato a lei. L'equilibrio della vicenda viene stravolto dall'arrivo del Cavaliere di Ripafratta, un aristocratico superbo e dichiaratamente misogino che tratta la donna con totale disprezzo. Ferita nell'orgoglio, Mirandolina decide di impartirgli una lezione e di farlo innamorare di sé usando unicamente il proprio ingegno. Attraverso finta dedizione, conversazioni stimolanti e un'apparente modestia, riesce a far crollare le difese del Cavaliere, che finisce per invaghirsi perdutamente di lei fino a perdere il controllo. Una volta dimostrato che anche il più fiero dei misogini può essere piegato dall'intelligenza femminile, Mirandolina comprende che la situazione rischia di compromettere la sua reputazione e la gestione degli affari. Decide così di rifiutare tutti i nobili pretendenti e di sposare il fedele Fabrizio, scelta che le garantisce stabilità sociale e la sicurezza necessaria per continuare a guidare la locanda in piena autonomia.
+
+### Personaggi
+
+| Personaggio | Interprete | Presenza | Note |
 | --- | --- | --- | --- |
-| MIRANDOLINA | Da assegnare | Atto 1, Scena XV | Guida il ritmo della scena. |
-| CAVALIERE | Da assegnare | Atto 1, Scena XV | Resiste, poi si lascia incuriosire. |
-| SERVITORE | Da assegnare | Nessuna battuta rilevata | Ha appena lasciato la camera. |
+| MIRANDOLINA | D/A | 1-XV | |
+| CAVALIERE | D/A | 1-XV | |
+| SERVITORE | D/A | 1-XV | |
+
+---
+
+| Personaggio | Descrizione |
+| --- | --- |
+| MIRANDOLINA | Mirandolina, la protagonista de "La locandiera" di Carlo Goldoni, è un personaggio rivoluzionario e l'incarnazione perfetta dello spirito borghese del Settecento. Indipendente, pragmatica e dotata di una straordinaria intelligenza psicologica, gestisce la sua locanda con spiccato senso degli affari. Non conquista gli uomini con la sola bellezza, ma con l'acutezza dell'ingegno, riuscendo a piegare persino la fiera misoginia del Cavaliere di Ripafratta solo per orgoglio e sfida personale. Senza mai lasciarsi travolgere dalle emozioni, sceglie infine di sposare il cameriere Fabrizio per tutelare la propria reputazione, la stabilità economica e la sua preziosa autonomia. |
+| CAVALIERE | Il Cavaliere di Ripafratta rappresenta la nobiltà superba, aristocratica e ostinatamente misogina. Persuaso che le donne siano solo una fonte di inganno e di disturbo per la libertà maschile, ostenta una freddezza incrollabile e un disprezzo aperto verso Mirandolina, ritenendosi del tutto immune al fascino femminile. Questa sua granitica certezza si rivela tuttavia la sua più grande debolezza: proprio la sua arroganza lo spinge a sottovalutare la padrona di casa, cadendo dritto nella trappola della sua raffinata seduzione. In breve tempo, il Cavaliere crolla di fronte alle attenzioni della locandiera, perdendo completamente la testa, la dignità e l'autocontrollo, fino a trasformarsi in un amante geloso e disperato. La sua parabola incarna la satira goldoniana verso un'aristocrazia presuntuosa, destinata a essere smascherata e ridicolizzata dall'intelligenza pratica della borghesia. |
+| SERVITORE | Fabrizio, il cameriere della locanda, rappresenta la fedeltà, la classe lavoratrice e il pragmatismo borghese. Sinceramente innamorato di Mirandolina e destinato a lei già dalle ultime volontà del padre di quest'ultima, Fabrizio vive la commedia in un costante stato di gelosia e sofferenza di fronte alle attenzioni dei nobili clienti. Nonostante i dubbi e l'orgoglio ferito, incarna la pazienza e la dedizione assoluta. Alla fine, la sua fedeltà viene premiata: sposando la protagonista, garantisce a Mirandolina la stabilità e la rispettoabilità sociale necessarie, diventando il partner ideale per la gestione della locanda e l'alleato perfetto della sua ritrovata serenità. |
 
 # Atto 1
 
-> **AVVISO IMPORTANTE**: questo è un file di esempio e non è registrato sul dispositivo. Per lavorare con dati reali crea un nuovo progetto dall'apposito pulsante.
+> **AVVISO IMPORTANTE**: questo è un file di esempio e non viene registrato sul dispositivo. Per lavorare con dati reali crea un nuovo progetto dal pulsante **Nuovo**, oppure importa un copione dallo Store di StageDesk tramite il pulsante **Importa** nella finestra **Apri progetto**.
 
 ::regia{id="note-general" type="general" color="cyan" title="Nota generale" sceneId="${sceneId}" anchorId="note-general"}
 ${demoNoteContent.general}
@@ -185,12 +199,12 @@ ${demoNoteContent.general}
 
 ## Scena XV
 
-::regia{id="note-characters" type="characters" color="blue" title="Personaggi in scena" sceneId="${sceneId}" anchorId="note-characters"}
-${demoNoteContent.characters}
+::regia{id="note-position" type="position" color="blue" title="Posizione" sceneId="${sceneId}" anchorId="note-position"}
+${demoNoteContent.position}
 ::
 
-::regia{id="note-7d903ab2" type="position" color="blue" title="Posizione" sceneId="scena-xv" anchorId="2d89799c-c7df-4224-b898-b9585dcd07e3"}
-Mirandolina conversa con il Cavaliere e usa cortesia, ironia e apparente sincerità per incrinare la sua diffidenza verso le donne.
+::regia{id="note-tone" type="tone" color="purple" title="Tono" sceneId="${sceneId}" anchorId="note-tone"}
+${demoNoteContent.tone}
 ::
 
 ::regia{id="note-movement" type="movement" color="green" title="Movimento" sceneId="${sceneId}" anchorId="note-movement"}

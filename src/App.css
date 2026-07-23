@@ -2059,21 +2059,18 @@ body.stagedesk-pointer-dragging * {
   display: block;
   margin: 12px 0;
   overflow: visible;
-  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, var(--interactive-accent));
-  border-radius: var(--radius-m);
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--interactive-accent) 7%, transparent), transparent 42%),
-    color-mix(in srgb, var(--background-primary) 82%, var(--background-secondary));
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--interactive-accent) 68%, transparent);
+  border: 0;
+  border-left: 4px solid var(--interactive-accent);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .script-dialogue-block.ProseMirror-selectednode {
   outline: 0 !important;
-  border-color: color-mix(in srgb, var(--background-modifier-border) 88%, var(--interactive-accent));
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--interactive-accent) 7%, transparent), transparent 42%),
-    color-mix(in srgb, var(--background-primary) 82%, var(--background-secondary));
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--interactive-accent) 68%, transparent);
+  border-left-color: var(--interactive-accent);
+  background: transparent;
+  box-shadow: none;
 }
 
 .script-dialogue-header {
@@ -2121,7 +2118,8 @@ body.stagedesk-pointer-dragging * {
   padding: 0;
   background: transparent;
   color: var(--text-normal);
-  font-size: 0.74rem;
+  font-size: 0.88rem;
+  font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
@@ -2131,22 +2129,6 @@ body.stagedesk-pointer-dragging * {
   border-color: transparent;
   background: transparent;
   color: var(--text-normal);
-}
-
-.script-dialogue-character .script-note-type-icon {
-  width: 6px;
-  height: 6px;
-  margin-left: 3px;
-  border: 0;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  border-radius: 0;
-  opacity: 0.65;
-  transform: rotate(45deg) translateY(-2px);
-}
-
-.script-dialogue-character[data-open='true'] .script-note-type-icon {
-  transform: rotate(225deg) translateY(-1px);
 }
 
 .script-dialogue-character .script-note-type-menu {

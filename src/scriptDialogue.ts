@@ -111,7 +111,6 @@ export const ScriptDialogue = TiptapNode.create({
       const characterDropdown = document.createElement('div')
       const characterButton = document.createElement('button')
       const characterLabel = document.createElement('span')
-      const characterIcon = document.createElement('span')
       const characterMenu = document.createElement('div')
       const body = document.createElement('textarea')
       const closeButton = document.createElement('button')
@@ -134,8 +133,7 @@ export const ScriptDialogue = TiptapNode.create({
       characterButton.setAttribute('aria-expanded', 'false')
       characterButton.setAttribute('aria-label', 'Personaggio')
       characterLabel.className = 'script-note-type-label'
-      characterIcon.className = 'script-note-type-icon'
-      characterButton.append(characterLabel, characterIcon)
+      characterButton.append(characterLabel)
       characterMenu.className = 'script-note-type-menu'
       characterMenu.setAttribute('role', 'menu')
       characterDropdown.append(characterButton, characterMenu)

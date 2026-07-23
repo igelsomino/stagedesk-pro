@@ -1,5 +1,14 @@
 # Novità
 
+## Versione 1.0.31
+
+> Migliorata la leggibilità dell'editor e aggiornato il copione dimostrativo.
+
+- Aumentata la dimensione del nome del personaggio nelle battute dell'editor.
+- Rimosso il controllo visivo superfluo dal menu del personaggio, mantenendo il dropdown operativo.
+- Aggiornato il file demo con sinossi, tabelle dei personaggi, note, cue e battute coerenti con il documento visualizzato nell'app.
+- L'avviso del file demo indica ora come creare un progetto reale o importare un copione dallo Store dalla finestra **Apri progetto**.
+
 ## Versione 1.0.30
 
 > Corretto il catalogo Store e l'importazione dei copioni completi.
