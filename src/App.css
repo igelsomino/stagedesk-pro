@@ -1630,21 +1630,24 @@ body.stagedesk-pointer-dragging * {
   background: var(--background-modifier-border);
 }
 
-.publish-modal {
+.publish-modal,
+.store-publication-modal {
   width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
   overflow: hidden;
   padding: 0;
   background: var(--background-primary);
 }
 
-.publish-modal-header {
+.publish-modal-header,
+.store-publication-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 20px 20px 16px;
+  padding: 22px 24px 18px;
   border-bottom: 1px solid var(--background-modifier-border);
-  background: linear-gradient(135deg, color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary)), var(--background-secondary));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--interactive-accent) 8%, var(--background-secondary)), var(--background-secondary));
 }
 
 .publish-kicker {
@@ -1657,13 +1660,15 @@ body.stagedesk-pointer-dragging * {
   text-transform: uppercase;
 }
 
-.publish-modal-header h2 {
+.publish-modal-header h2,
+.store-publication-header h2 {
   margin: 0 0 6px;
   font-size: 1.3rem;
   line-height: 1.15;
 }
 
-.publish-modal-header p {
+.publish-modal-header p,
+.store-publication-header p {
   margin: 0;
   max-width: 390px;
   color: var(--text-muted);
@@ -1696,7 +1701,7 @@ body.stagedesk-pointer-dragging * {
   grid-template-columns: 10px minmax(0, 1fr);
   align-items: start;
   gap: 10px;
-  margin: 16px 20px 0;
+  margin: 0;
   border: 1px solid color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border));
   border-left: 3px solid var(--interactive-accent);
   border-radius: var(--radius-m);
@@ -1744,8 +1749,8 @@ body.stagedesk-pointer-dragging * {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  margin: 18px 20px 20px;
-  padding-top: 16px;
+  margin: 18px 24px 22px;
+  padding-top: 18px;
   border-top: 1px solid var(--background-modifier-border);
 }
 
@@ -1780,8 +1785,8 @@ body.stagedesk-pointer-dragging * {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  margin: 16px 20px 0;
-  padding-top: 16px;
+  margin: 0;
+  padding-top: 14px;
   border-top: 1px solid var(--background-modifier-border);
 }
 
@@ -1790,7 +1795,7 @@ body.stagedesk-pointer-dragging * {
   gap: 7px;
   justify-items: center;
   width: fit-content;
-  margin: 16px auto 0;
+  margin: 0 auto;
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
   padding: 8px;
@@ -1841,39 +1846,23 @@ body.stagedesk-pointer-dragging * {
   line-height: 1.45;
 }
 
+.publish-modal-body {
+  display: grid;
+  gap: 14px;
+  max-height: min(54vh, 520px);
+  overflow: auto;
+  padding: 10px 24px 0;
+}
+
 .store-publication-modal {
-  width: min(520px, calc(100vw - 32px));
-  overflow: hidden;
-  padding: 0;
-}
-
-.store-publication-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 20px;
-  border-bottom: 1px solid var(--background-modifier-border);
-  background: linear-gradient(135deg, color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary)), var(--background-secondary));
-}
-
-.store-publication-header h2 {
-  margin: 0 0 6px;
-  font-size: 1.3rem;
-}
-
-.store-publication-header p {
-  margin: 0;
-  max-width: 390px;
-  color: var(--text-muted);
-  font-size: 0.86rem;
-  line-height: 1.45;
+  width: min(560px, calc(100vw - 32px));
 }
 
 .store-publication-body {
   display: grid;
-  gap: 12px;
-  padding: 16px 20px 18px;
+  gap: 16px;
+  overflow: auto;
+  padding: 18px 24px 20px;
 }
 
 .store-publication-script,
@@ -1883,9 +1872,9 @@ body.stagedesk-pointer-dragging * {
   align-items: start;
   gap: 10px;
   border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-m);
-  padding: 12px;
-  background: var(--background-tertiary);
+  border-radius: var(--radius-s);
+  padding: 13px 14px;
+  background: var(--background-secondary);
 }
 
 .store-publication-script > svg {
@@ -1935,7 +1924,7 @@ body.stagedesk-pointer-dragging * {
   resize: vertical;
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
-  padding: 9px;
+  padding: 10px 11px;
   background: var(--background-primary);
   color: var(--text-normal);
   font: inherit;
@@ -2007,8 +1996,12 @@ body.stagedesk-pointer-dragging * {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 14px 20px 20px;
+  padding: 16px 24px 22px;
   border-top: 1px solid var(--background-modifier-border);
+}
+
+.store-publication-actions > button:first-child {
+  margin-left: auto;
 }
 
 .store-publication-actions button {
@@ -2042,7 +2035,23 @@ body.stagedesk-pointer-dragging * {
   }
 
   .publish-qr {
-    justify-self: start;
+    justify-self: center;
+  }
+
+  .publish-modal-body {
+    max-height: min(58vh, 520px);
+    padding: 10px 16px 0;
+  }
+
+  .publish-modal-header,
+  .store-publication-header {
+    padding-inline: 16px;
+  }
+
+  .publish-actions,
+  .store-publication-actions {
+    margin-inline: 16px;
+    padding-inline: 0;
   }
 
   .store-publication-actions {
@@ -2277,21 +2286,19 @@ body.stagedesk-pointer-dragging * {
   display: block;
   margin: 12px 0;
   overflow: visible;
-  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, var(--interactive-accent));
-  border-radius: var(--radius-m);
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--interactive-accent) 7%, transparent), transparent 42%),
-    color-mix(in srgb, var(--background-primary) 82%, var(--background-secondary));
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--interactive-accent) 68%, transparent);
+  border: 0;
+  border-left: 4px solid var(--interactive-accent);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .script-dialogue-block.ProseMirror-selectednode {
   outline: 0 !important;
-  border-color: color-mix(in srgb, var(--background-modifier-border) 88%, var(--interactive-accent));
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--interactive-accent) 7%, transparent), transparent 42%),
-    color-mix(in srgb, var(--background-primary) 82%, var(--background-secondary));
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--interactive-accent) 68%, transparent);
+  border: 0;
+  border-left: 4px solid var(--interactive-accent);
+  background: transparent;
+  box-shadow: none;
 }
 
 .script-dialogue-header {
@@ -2352,19 +2359,7 @@ body.stagedesk-pointer-dragging * {
 }
 
 .script-dialogue-character .script-note-type-icon {
-  width: 6px;
-  height: 6px;
-  margin-left: 3px;
-  border: 0;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  border-radius: 0;
-  opacity: 0.65;
-  transform: rotate(45deg) translateY(-2px);
-}
-
-.script-dialogue-character[data-open='true'] .script-note-type-icon {
-  transform: rotate(225deg) translateY(-1px);
+  display: none;
 }
 
 .script-dialogue-character .script-note-type-menu {
@@ -2372,6 +2367,11 @@ body.stagedesk-pointer-dragging * {
   left: 0;
   right: auto;
   min-width: 178px;
+  background: var(--background-secondary);
+  background-color: var(--background-secondary);
+  background-image: none;
+  opacity: 1;
+  isolation: isolate;
 }
 
 .script-dialogue-character .script-dialogue-character-option::before {
@@ -2392,6 +2392,8 @@ body.stagedesk-pointer-dragging * {
   font-size: 1rem;
   line-height: 1.55;
   resize: none;
+  user-select: text;
+  -webkit-user-drag: none;
 }
 
 .script-dialogue-text:focus {
@@ -2638,6 +2640,9 @@ body.stagedesk-pointer-dragging * {
   border-radius: var(--radius-m);
   padding: 4px;
   background: var(--background-secondary);
+  background-color: var(--background-secondary);
+  background-image: none;
+  opacity: 1;
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
 }
 
@@ -2870,6 +2875,8 @@ body.stagedesk-pointer-dragging * {
   color: var(--text-normal);
   line-height: 1.45;
   resize: none;
+  user-select: text;
+  -webkit-user-drag: none;
 }
 
 .script-editor span[data-chip] {
@@ -3856,6 +3863,7 @@ button.danger:hover {
   align-items: center;
   justify-content: center;
   width: 30px;
+  height: 30px;
   min-height: 30px;
   padding: 0;
   border-color: var(--background-modifier-border);
@@ -3863,6 +3871,12 @@ button.danger:hover {
   color: var(--text-muted);
   font-size: 0.76rem;
   font-weight: 700;
+  line-height: 0;
+}
+
+.project-picker-pagination button svg {
+  display: block;
+  flex: 0 0 auto;
 }
 
 .project-picker-pagination button:hover:not(:disabled) {

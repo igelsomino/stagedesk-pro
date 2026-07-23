@@ -147,6 +147,7 @@ export const ScriptDialogue = TiptapNode.create({
       body.className = 'script-dialogue-text'
       body.rows = 1
       body.placeholder = 'Battuta'
+      body.draggable = false
       header.append(characterDropdown, closeButton)
       dom.append(header, body)
 
@@ -228,6 +229,22 @@ export const ScriptDialogue = TiptapNode.create({
         editor.view.focus()
       }
 
+      const focusAdjacentScriptBlock = (direction: 'next' | 'previous') => {
+        const blocks = Array.from(editor.view.dom.querySelectorAll<HTMLElement>('[data-ref-id], [data-dialogue-id]'))
+        const currentIndex = blocks.indexOf(dom)
+        const targetIndex = currentIndex + (direction === 'next' ? 1 : -1)
+        const targetElement = currentIndex < 0 ? undefined : blocks[targetIndex]
+        const targetTextarea = targetElement?.querySelector<HTMLTextAreaElement>('textarea')
+        if (!targetTextarea) return false
+        window.requestAnimationFrame(() => {
+          targetTextarea.focus({ preventScroll: true })
+          const caret = direction === 'next' ? 0 : targetTextarea.value.length
+          targetTextarea.setSelectionRange(caret, caret)
+          targetTextarea.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+        })
+        return true
+      }
+
       const setCharacterMenuOpen = (open: boolean) => {
         characterMenuOpen = open
         characterDropdown.dataset.open = String(open)
@@ -304,11 +321,23 @@ export const ScriptDialogue = TiptapNode.create({
         updateAttrs({ text: body.value })
       })
       body.addEventListener('keydown', (event) => {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          const atBoundary = event.key === 'ArrowDown'
+            ? body.selectionStart === body.value.length && body.selectionEnd === body.value.length
+            : body.selectionStart === 0 && body.selectionEnd === 0
+          if (atBoundary && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey && focusAdjacentScriptBlock(event.key === 'ArrowDown' ? 'next' : 'previous')) {
+            event.preventDefault()
+            event.stopPropagation()
+            return
+          }
+        }
         if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) return
         event.preventDefault()
         event.stopPropagation()
         insertParagraphAfterDialogue()
       })
+      const preventTextDrag = (event: DragEvent) => event.preventDefault()
+      body.addEventListener('dragstart', preventTextDrag)
       body.addEventListener('focus', selectDialogueNode)
       body.addEventListener('pointerdown', selectDialogueNode)
       body.addEventListener('click', selectDialogueNode)
@@ -342,6 +371,7 @@ export const ScriptDialogue = TiptapNode.create({
           header.removeEventListener('mousedown', writePointerDragPayload)
           header.removeEventListener('dragstart', startNativeDrag)
           header.removeEventListener('dragend', clearDialogueDragPayload)
+          body.removeEventListener('dragstart', preventTextDrag)
         },
       }
     }
