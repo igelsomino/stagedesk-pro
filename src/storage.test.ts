@@ -70,6 +70,20 @@ describe('browser project storage recovery', () => {
     expect(recoveredScript).not.toContain('| mirandolina | MIRANDOLINA |')
   })
 
+  it('refreshes an outdated sample with the current synopsis', () => {
+    const project = defaultProject()
+    const script = project.scripts[0]?.children?.[0]
+    if (!script) throw new Error('Missing sample script')
+    project.sampleVersion = 2
+    script.content = script.content?.replace(/### Sinossi[\s\S]*?\n\n(?=::regia)/, '')
+
+    browserProjectStorage.save(project)
+
+    const refreshedScript = browserProjectStorage.load().scripts[0]?.children?.[0]?.content ?? ''
+    expect(browserProjectStorage.load().sampleVersion).toBe(3)
+    expect(refreshedScript).toContain('### Sinossi')
+  })
+
   it('migrates legacy script paths to the copioni root', () => {
     const project = defaultProject()
     const root = project.scripts[0]

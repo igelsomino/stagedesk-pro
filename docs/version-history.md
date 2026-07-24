@@ -1,11 +1,23 @@
 # Novità
 
+## Versione 1.0.40
+
+> Trascinamento coerente tra editor, cue e raccolta multimediale.
+
+- Uniformato il payload di trascinamento per note, battute, cue e file multimediali.
+- Aggiunto un ghost nativo coerente, con tipo e titolo dell'elemento trascinato.
+- Resi trascinabili anche i cue della colonna laterale e i file della struttura multimediale.
+- Allineati gli indicatori di rilascio nell'editor e nella struttura, con gestione comune di dragover, drop e annullamento.
+
 ## Versione 1.0.39
 
 > Allineamento della documentazione incorporata e della release desktop.
 
 - Aggiornato il fallback offline della **Version history** visualizzata nel menu Aiuto.
 - Allineati versione dell'app, documentazione locale e artefatti pubblicati.
+- Resa più robusta l'importazione dei pacchetti `.stagedesk`: supportati i pacchetti Markdown delle versioni precedenti e il nuovo contenitore versionato.
+- Normalizzati BOM, ritorni a capo e separatori Unicode; un download HTML o un contenuto non StageDesk produce ora un errore esplicito invece di una diagnosi generica.
+- Mantenuta la validazione strutturale per evitare di importare pagine di errore, JSON non pertinenti o file incompleti.
 
 ## Versione 1.0.38
 

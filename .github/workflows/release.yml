@@ -6,7 +6,7 @@ on:
       version:
         description: "Versione da pubblicare, senza prefisso v"
         required: true
-        default: "1.0.17"
+        default: "1.0.40"
   push:
     tags:
       - "v*"

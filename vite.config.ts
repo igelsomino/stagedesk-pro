@@ -300,7 +300,14 @@ const listProjectFolders = async () => {
       .map(async (entry) => {
         const folderPath = path.join(projectsRoot, entry.name)
         const stat = await fs.stat(folderPath)
-        return { name: entry.name, path: folderPath, updatedAt: stat.mtime.toISOString() }
+        let projectId: string | undefined
+        try {
+          const project = JSON.parse(await fs.readFile(path.join(folderPath, 'project.json'), 'utf8')) as StoredProject
+          projectId = typeof project.id === 'string' ? project.id : undefined
+        } catch {
+          projectId = undefined
+        }
+        return { name: entry.name, path: folderPath, projectId, updatedAt: stat.mtime.toISOString() }
       }),
   )
   return folders.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))

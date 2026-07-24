@@ -1,7 +1,7 @@
 import { SCRIPT_ROOT_PATH } from './domain'
 import type { DirectorNote, MediaAsset, MediaCue, NoteType, Project } from './domain'
 
-export const CURRENT_SAMPLE_VERSION = 2
+export const CURRENT_SAMPLE_VERSION = 3
 
 const now = () => new Date().toISOString()
 

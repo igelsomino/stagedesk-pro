@@ -10,6 +10,7 @@ type ProjectOpenResult = {
 export type ProjectEntry = {
   name: string
   path: string
+  projectId?: string
   updatedAt?: string
 }
 

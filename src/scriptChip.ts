@@ -1,5 +1,6 @@
 import { mergeAttributes, Node } from '@tiptap/core'
 import { sanitizeChipLabel } from './chipText'
+import { setNativeDragPreview } from './dragPreview'
 
 type CuePlaybackState = {
   id: string
@@ -87,7 +88,7 @@ export const ScriptChip = Node.create({
       let stopHandledOnPointerDown = false
 
       dom.contentEditable = 'false'
-      dom.draggable = false
+      dom.draggable = currentNode.attrs.kind === 'cue' || currentNode.attrs.kind === 'note'
       label.className = 'script-chip-label'
       playButton.type = 'button'
       playButton.className = 'script-chip-play'
@@ -236,7 +237,13 @@ export const ScriptChip = Node.create({
             type: 'application/x-stagedesk-cue-id',
             value: refId,
             startedAt: Date.now(),
+            label: String(currentNode.attrs.label ?? 'Cue'),
+            tone: 'cue',
           }
+          setNativeDragPreview(event.dataTransfer, {
+            label: String(currentNode.attrs.label ?? 'Cue'),
+            tone: 'cue',
+          })
           event.dataTransfer.effectAllowed = 'move'
           return
         }
@@ -248,7 +255,13 @@ export const ScriptChip = Node.create({
             type: 'application/x-stagedesk-note-id',
             value: refId,
             startedAt: Date.now(),
+            label: String(currentNode.attrs.label ?? 'Nota'),
+            tone: 'note',
           }
+          setNativeDragPreview(event.dataTransfer, {
+            label: String(currentNode.attrs.label ?? 'Nota'),
+            tone: 'note',
+          })
           event.dataTransfer.effectAllowed = 'move'
         }
       })

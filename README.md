@@ -2,7 +2,7 @@
 
 Applicazione desktop/web per scrittura, organizzazione e messa in scena di copioni teatrali con note di regia, cue multimediali, raccolta media, modalità schermo intero ed export PDF.
 
-Versione desktop corrente: **1.0.39**.
+Versione desktop corrente: **1.0.40**.
 
 ## Scopo
 
@@ -73,6 +73,8 @@ Implementato:
 40. navigazione da tastiera tra note e battute adiacenti, anche quando cambia il tipo di blocco;
 41. comando **Valuta copione** nella toolbar, disponibile solo per il file importato dallo StageDesk Store;
 42. trascinamento unificato di note, battute e cue nell'editor con indicatore della posizione di rilascio;
+43. ghost nativo e indicatori di rilascio uniformi per note, battute, cue e file multimediali;
+44. drag nativo dei cue laterali e dei file media con destinazioni compatibili evidenziate durante il trascinamento;
 
 ## Sviluppo
 

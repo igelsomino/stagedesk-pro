@@ -1,5 +1,6 @@
 import { mergeAttributes, Node as TiptapNode } from '@tiptap/core'
 import { TextSelection } from '@tiptap/pm/state'
+import { setNativeDragPreview } from './dragPreview'
 
 type ScriptNoteAttrs = {
   type: string
@@ -376,6 +377,11 @@ export const ScriptNote = TiptapNode.create({
         dragEvent.dataTransfer.setData('text/plain', `stagedesk-note:${refId}`)
         dragEvent.dataTransfer.setData('application/x-stagedesk-note-id', refId)
         writePointerDragPayload(dragEvent)
+        setNativeDragPreview(dragEvent.dataTransfer, {
+          label: String(currentNode.attrs.title ?? 'Nota regia'),
+          detail: noteTypes.find((item) => item.id === currentNode.attrs.type)?.label ?? 'Nota regia',
+          tone: 'note',
+        })
       }
       const clearNoteDragPayload = () => {
         const payload = (window as ScriptNoteWindow).__STAGEDESK_DRAG_PAYLOAD__

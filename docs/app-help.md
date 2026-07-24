@@ -25,6 +25,10 @@ Il pulsante Importa nella stessa dialog apre lo Store in un tab dello spazio edi
 
 Se il file attivo è stato pubblicato nel catalogo dal tuo account, nel menu teatrale compare anche **Pubblica nello Store**. Il comando è riferito al singolo file e non compare per il copione dimostrativo. La pubblicazione è distinta da Condividi: crea una nuova versione del copione nel catalogo e mostra il numero e la data dell'ultima versione pubblicata. Puoi aggiungere facoltativamente una nota di versione prima di confermare.
 
+I pacchetti `.stagedesk` possono essere importati sia nel formato Markdown esteso usato dalle versioni precedenti sia nel nuovo contenitore versionato. L'importazione normalizza automaticamente BOM e ritorni a capo, verifica che il contenuto abbia una struttura StageDesk riconoscibile e segnala esplicitamente eventuali risposte HTML o pacchetti non validi.
+
+Note, battute, cue e file multimediali condividono ora lo stesso comportamento di trascinamento: il ghost mostra l'elemento in movimento e la destinazione possibile viene evidenziata prima del rilascio.
+
 Il salvataggio è automatico.
 
 Nella versione desktop l'app riapre automaticamente l'ultimo progetto usato. Se non trova un progetto precedente, mostra il file di esempio iniziale.

@@ -1,5 +1,6 @@
 import { mergeAttributes, Node as TiptapNode } from '@tiptap/core'
 import { NodeSelection, TextSelection } from '@tiptap/pm/state'
+import { setNativeDragPreview } from './dragPreview'
 
 type ScriptDialogueAttrs = {
   id: string
@@ -182,6 +183,11 @@ export const ScriptDialogue = TiptapNode.create({
         dragEvent.dataTransfer.setData('text/plain', `${DIALOGUE_ID_DND_PREFIX}${id}`)
         dragEvent.dataTransfer.setData(DIALOGUE_ID_DND_TYPE, id)
         writePointerDragPayload(dragEvent)
+        setNativeDragPreview(dragEvent.dataTransfer, {
+          label: String(currentNode.attrs.character || 'Battuta'),
+          detail: 'Battuta',
+          tone: 'cue',
+        })
       }
 
       const clearDialogueDragPayload = () => {

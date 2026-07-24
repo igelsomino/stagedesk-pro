@@ -142,6 +142,8 @@ where
 struct ProjectEntry {
     name: String,
     path: String,
+    #[serde(rename = "projectId")]
+    project_id: Option<String>,
     #[serde(rename = "updatedAt")]
     updated_at: Option<String>,
 }
@@ -187,12 +189,18 @@ fn list_project_folders(app: AppHandle) -> Result<Vec<ProjectEntry>, String> {
             .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
             .map(|duration| duration.as_secs().to_string());
 
+        let project_id = fs::read_to_string(path.join(PROJECT_FILE_NAME))
+            .ok()
+            .and_then(|contents| serde_json::from_str::<Value>(&contents).ok())
+            .and_then(|project| project.get("id").and_then(Value::as_str).map(str::to_string));
+
         entries.push(ProjectEntry {
             name: path
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| "progetto".to_string()),
             path: path.to_string_lossy().to_string(),
+            project_id,
             updated_at: modified,
         });
     }
@@ -294,6 +302,7 @@ fn rename_project_folder(
     Ok(ProjectEntry {
         name: project_name,
         path: target_path.to_string_lossy().to_string(),
+        project_id: project.get("id").and_then(Value::as_str).map(str::to_string),
         updated_at: project_updated_at(&target_path),
     })
 }

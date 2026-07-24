@@ -43,6 +43,8 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 - Cerca, rinomina o elimina progetti dalla dialog Apri progetto.
 - Apri lo Store dal pulsante Importa nella dialog Apri progetto.
 - Dallo Store aperto nell'app desktop importa direttamente i pacchetti \`.stagedesk\`, senza scaricare file Markdown.
+- I pacchetti \`.stagedesk\` legacy in Markdown e quelli versionati vengono riconosciuti dallo stesso importatore; BOM, ritorni a capo e separatori Unicode vengono normalizzati automaticamente.
+- Se il download restituisce HTML, JSON non pertinente o un contenuto senza struttura StageDesk, l'importazione viene bloccata con un messaggio esplicito.
 - Nella versione desktop viene riaperto automaticamente l'ultimo progetto usato.
 - Scrivi il copione nell'editor centrale.
 - Organizza copioni, media e bookmark dalla colonna Struttura.
@@ -76,6 +78,7 @@ const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
 - Aggiornato il fallback offline della **Version history** visualizzata nel menu Aiuto.
 - Allineati versione dell'app, documentazione locale e artefatti pubblicati.
+- Resa più robusta l'importazione dei pacchetti \`.stagedesk\`, mantenendo compatibilità con i pacchetti Markdown delle versioni precedenti.
 
 ## Versione 1.0.38
 

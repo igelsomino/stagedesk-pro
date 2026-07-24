@@ -10,12 +10,12 @@ import { TableKit } from '@tiptap/extension-table'
 import type { jsPDF as JsPDF } from 'jspdf'
 import QRCode from 'qrcode'
 import {
-  BookOpen,
   Bookmark,
   Bold,
   AlertTriangle,
-  Binoculars,
+  BookOpen,
   ChevronDown,
+  ChevronUp,
   ChevronRight,
   CloudCheck,
   CloudOff,
@@ -87,6 +87,7 @@ import { useAuth } from './authContext'
 import { SCRIPT_ROOT_PATH } from './domain'
 import type { DirectorNote, MediaAsset, MediaCue, NotePanelMode, NoteType, Project, ProjectTreeNode } from './domain'
 import { blankProject } from './defaultProject'
+import { setNativeDragPreview } from './dragPreview'
 import {
   cleanScriptMarkdown,
   cueLabel,
@@ -103,6 +104,7 @@ import { ScriptChip } from './scriptChip'
 import { sanitizeChipLabel } from './chipText'
 import { ScriptDialogue } from './scriptDialogue'
 import { ScriptNote } from './scriptNote'
+import { decodeStageDeskPackage, encodeStageDeskPackage } from './storePackage'
 import { browserProjectStorage, readBrowserMediaAssetObjectUrl } from './storage'
 import type { ProjectEntry } from './storage'
 import { diagnosticLog } from './diagnostics'
@@ -162,10 +164,20 @@ const SUPABASE_STORAGE_ORIGIN = (() => {
 })()
 
 const isTrustedStorePackageUrl = (url: URL) =>
-  (url.origin === STORE_ORIGIN && url.pathname.startsWith('/store/copioni/') && url.pathname.endsWith('.stagedesk')) ||
-  (url.origin === (SUPABASE_STORAGE_ORIGIN || STORE_STORAGE_ORIGIN) &&
-    url.pathname.startsWith('/storage/v1/object/public/store-packages/') &&
-    url.pathname.endsWith('.stagedesk'))
+  (() => {
+    let pathname = url.pathname
+    try {
+      pathname = decodeURIComponent(pathname)
+    } catch {
+      // Keep the encoded pathname when a malformed URL is received.
+    }
+    return (
+      (url.origin === STORE_ORIGIN && pathname.startsWith('/store/copioni/') && pathname.endsWith('.stagedesk')) ||
+      (url.origin === (SUPABASE_STORAGE_ORIGIN || STORE_STORAGE_ORIGIN) &&
+        pathname.startsWith('/storage/v1/object/public/store-packages/') &&
+        pathname.endsWith('.stagedesk'))
+    )
+  })()
 type EditorCueState = 'playing' | 'paused' | 'stopped'
 type EditorCueStateWindow = Window & {
   __STAGEDESK_EDITOR_CUE_STATE__?: { id: string; state: EditorCueState }
@@ -315,7 +327,7 @@ type ScriptValidationIssue = {
 type PointerDropTarget =
   | { kind: 'editor'; position: number; element: HTMLElement }
   | { kind: 'media'; folderPath: string; element: HTMLElement }
-type InternalDragEvent = PointerEvent | MouseEvent
+type InternalDragEvent = PointerEvent | MouseEvent | DragEvent
 type PointerDragPreview = {
   x: number
   y: number
@@ -337,7 +349,7 @@ type PersistedUiState = {
   selectedScriptPath: string
   selectedMediaPath: string
   expandedPaths: string[]
-  leftTab: 'outline' | 'script' | 'media' | 'bookmarks'
+  leftTab: 'outline' | 'script' | 'media' | 'bookmarks' | 'search'
   editorSelection?: number
 }
 const tableExtensions = TableKit.configure({
@@ -372,7 +384,7 @@ function App() {
     '/media',
     ...project.media.map((asset) => asset.path),
   ])
-  const [leftTab, setLeftTab] = useState<'outline' | 'script' | 'media' | 'bookmarks'>('outline')
+  const [leftTab, setLeftTab] = useState<'outline' | 'script' | 'media' | 'bookmarks' | 'search'>('outline')
   const [noteMode, setNoteMode] = useState<NotePanelMode>('context')
   const [cuePage, setCuePage] = useState(0)
   const cuePageRef = useRef(cuePage)
@@ -381,7 +393,6 @@ function App() {
   const [selectedNoteTypeId, setSelectedNoteTypeId] = useState(initialNoteTypeId)
   const [selectedCueId, setSelectedCueId] = useState(project.cues[0]?.id ?? '')
   const [search, setSearch] = useState('')
-  const [editorSearchOpen, setEditorSearchOpen] = useState(false)
   const [editorSearchQuery, setEditorSearchQuery] = useState('')
   const [editorSearchMatchIndex, setEditorSearchMatchIndex] = useState(0)
   const [isFullscreen, setFullscreen] = useState(false)
@@ -466,6 +477,7 @@ function App() {
   const [editorCueRefIds, setEditorCueRefIds] = useState<string[]>([])
   const [currentEditorCueRefIds, setCurrentEditorCueRefIds] = useState<string[]>([])
   const editorSearchInputRef = useRef<HTMLInputElement>(null)
+  const editorSearchHighlightTimerRef = useRef<number | null>(null)
 
   const markdownFiles = useMemo(() => flattenMarkdownFiles(project.scripts), [project.scripts])
   const activeFile = useMemo(() => findMarkdownNode(project.scripts, activePath), [activePath, project.scripts])
@@ -1473,12 +1485,43 @@ function App() {
     },
     [editor, editorMarkdown, editorSearchQuery],
   )
+  const editorSearchResults = useMemo(() => {
+    const normalizedQuery = editorSearchQuery.trim().toLocaleLowerCase('it-IT')
+    if (!normalizedQuery) return []
+
+    return editorSearchMatches.map((match) => {
+      const text = match.text.replace(/\s+/g, ' ').trim()
+      const normalizedText = text.toLocaleLowerCase('it-IT')
+      const matchStart = match.matchStart ?? normalizedText.indexOf(normalizedQuery)
+      if (matchStart < 0) {
+        return { match, before: '', hit: text, after: '', leading: false, trailing: false }
+      }
+
+      const contextLength = 34
+      const start = Math.max(0, matchStart - contextLength)
+      const matchLength = match.matchLength ?? normalizedQuery.length
+      const end = Math.min(text.length, matchStart + matchLength + contextLength)
+      return {
+        match,
+        before: text.slice(start, matchStart),
+        hit: text.slice(matchStart, matchStart + matchLength),
+        after: text.slice(matchStart + matchLength, end),
+        leading: start > 0,
+        trailing: end < text.length,
+      }
+    })
+  }, [editorSearchMatches, editorSearchQuery])
 
   useEffect(() => {
-    setEditorSearchOpen(false)
     setEditorSearchQuery('')
     setEditorSearchMatchIndex(0)
   }, [activePath])
+
+  useEffect(() => {
+    if (leftTab !== 'search') return undefined
+    const focusTimer = window.setTimeout(() => editorSearchInputRef.current?.focus(), 0)
+    return () => window.clearTimeout(focusTimer)
+  }, [activePath, editor, leftTab])
 
   useEffect(() => {
     setEditorSearchMatchIndex((current) => Math.min(current, Math.max(0, editorSearchMatches.length - 1)))
@@ -2174,12 +2217,8 @@ function App() {
       setStoreLoading(true)
       const response = await fetch(url, { cache: 'no-store' })
       if (!response.ok) throw new Error(`Download non riuscito (${response.status})`)
-      const content = await response.text()
-      const hasCharactersTable = /(?:^|\n)\s*\|\s*Personaggio\s*\|/m.test(content)
-      const hasDialogueDirective = /(?:^|\n)\s*:{2,3}battuta\{/m.test(content)
-      if (!hasCharactersTable || !hasDialogueDirective) {
-        throw new Error('Il pacchetto non contiene un copione StageDesk valido')
-      }
+      const decodedPackage = await decodeStageDeskPackage(await response.arrayBuffer())
+      const content = decodedPackage.content
 
       const projectName = packageTitle.trim() || 'Copione importato'
       const fileName = `${slug(projectName) || 'copione-importato'}.md`
@@ -2334,12 +2373,58 @@ function App() {
       .catch((error) => setStorageStatus(`Rinomina progetto non riuscita: ${String(error)}`))
   }
 
+  const removeProjectShares = async (projectId: string) => {
+    if (!user) return
+
+    const { data, error } = await supabase
+      .from(SCRIPT_SHARE_TABLE)
+      .select('uid, storage_path')
+      .eq('owner_id', user.id)
+      .eq('project_id', projectId)
+    if (error) throw error
+
+    const shares = (data ?? []) as Array<{ uid?: string; storage_path?: string | null }>
+    const storagePaths = uniqueValues(
+      shares
+        .map((share) => {
+          if (typeof share.storage_path === 'string' && share.storage_path.trim()) return share.storage_path
+          return typeof share.uid === 'string' ? `${user.id}/${share.uid}.json` : undefined
+        })
+        .filter((path): path is string => Boolean(path)),
+    )
+    if (storagePaths.length > 0) {
+      const { error: storageError } = await supabase.storage
+        .from(SCRIPT_SHARE_BUCKET)
+        .remove(storagePaths)
+      if (storageError) throw storageError
+    }
+
+    const { error: deleteError } = await supabase
+      .from(SCRIPT_SHARE_TABLE)
+      .delete()
+      .eq('owner_id', user.id)
+      .eq('project_id', projectId)
+    if (deleteError) throw deleteError
+
+    shares.forEach((share) => {
+      if (typeof share.uid === 'string') {
+        window.localStorage.removeItem(`${SHARE_PIN_STORAGE_PREFIX}${share.uid}`)
+      }
+    })
+  }
+
   const deleteProjectEntryConfirmed = async (entry: ProjectEntry) => {
     try {
+      const projectIsActive = project.rootPath === entry.path
+      const projectId = projectIsActive ? project.id : entry.projectId
+      if (projectId && user) {
+        await removeProjectShares(projectId)
+      }
       await storage.deleteProjectFolder(entry.path)
       setProjectPickerEntries((current) => current.filter((item) => item.path !== entry.path))
-      setStorageStatus(`Progetto eliminato: ${entry.name}`)
-      if (project.rootPath === entry.path) {
+      setStorageStatus(projectId && user ? `Progetto eliminato e condivisioni interrotte: ${entry.name}` : `Progetto eliminato: ${entry.name}`)
+      if (projectIsActive) {
+        setPublishState({ status: 'idle' })
         const nextProject = storage.reset()
         activateProject(nextProject)
       }
@@ -2971,6 +3056,14 @@ function App() {
     }
 
     const onPointerCancel = () => clearPointerDrag()
+    const onNativeDragOver = (event: DragEvent) => {
+      const payload = readAnyGlobalDragPayload()
+      if (!payload || !event.dataTransfer) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'move'
+      onPointerMove(event)
+    }
+    const onNativeDragEnd = () => clearPointerDrag()
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') clearPointerDrag()
     }
@@ -2982,6 +3075,8 @@ function App() {
     window.addEventListener('mouseup', onPointerUp, { passive: false })
     window.addEventListener('blur', onPointerCancel)
     window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('dragover', onNativeDragOver, { passive: false })
+    window.addEventListener('dragend', onNativeDragEnd)
     return () => {
       window.removeEventListener('pointermove', onPointerMove)
       window.removeEventListener('pointerup', onPointerUp)
@@ -2990,6 +3085,8 @@ function App() {
       window.removeEventListener('mouseup', onPointerUp)
       window.removeEventListener('blur', onPointerCancel)
       window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('dragover', onNativeDragOver)
+      window.removeEventListener('dragend', onNativeDragEnd)
       clearPointerDrag()
     }
   }, [editor, showStatus])
@@ -3309,29 +3406,108 @@ function App() {
 
     try {
       const nextTable = editor.schema.nodeFromJSON(nextTableJson)
+      const selectionBefore = editor.state.selection
+      const selectionOffset = selectionBefore.from - tableContext.tablePosition
+      const nextTablePosition = tableContext.tablePosition
+      const nextTableEnd = nextTablePosition + nextTable.nodeSize - 1
       const transaction = editor.state.tr.replaceWith(
         tableContext.tablePosition,
         tableContext.tablePosition + table.nodeSize,
         nextTable,
       )
+      const restoredPosition = Math.max(
+        nextTablePosition + 1,
+        Math.min(nextTableEnd, nextTablePosition + selectionOffset),
+      )
+      transaction.setSelection(Selection.near(transaction.doc.resolve(restoredPosition)))
+      transaction.scrollIntoView()
       editor.view.dispatch(transaction)
-      editor.chain().focus().scrollIntoView().run()
+      editor.view.focus()
+      lastEditorSelectionRef.current = editor.state.selection.from
       showStatus('Tabella personaggi aggiornata')
     } catch (error) {
       showStatus(`Aggiornamento tabella non riuscito: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
-  const focusEditorSearchMatch = (direction: 1 | -1 = 1) => {
+  const focusEditorSearchResult = (index: number) => {
     if (!editor || editorSearchMatches.length === 0) return
-    const nextIndex = (editorSearchMatchIndex + direction + editorSearchMatches.length) % editorSearchMatches.length
-    const match = editorSearchMatches[nextIndex]
-    setEditorSearchMatchIndex(nextIndex)
+    const match = editorSearchMatches[index]
+    if (!match) return
+    setEditorSearchMatchIndex(index)
+
+    const highlightMatchInDom = () => {
+      if (!editor || !match.target) return
+      if (editorSearchHighlightTimerRef.current !== null) {
+        window.clearTimeout(editorSearchHighlightTimerRef.current)
+        editorSearchHighlightTimerRef.current = null
+      }
+
+      editor.view.dom.querySelectorAll('.stagedesk-search-highlight, .stagedesk-search-field-highlight').forEach((element) => {
+        element.classList.remove('stagedesk-search-highlight', 'stagedesk-search-field-highlight')
+      })
+
+      const candidates = Array.from(editor.view.dom.querySelectorAll<HTMLElement>('[data-note-block], [data-dialogue-block], [data-chip]'))
+      const root = candidates.find((element) => {
+        if (match.nodeType === 'scriptNote') return element.dataset.noteBlock === 'true' && element.dataset.refId === match.nodeId
+        if (match.nodeType === 'scriptDialogue') return element.dataset.dialogueBlock === 'true' && element.dataset.dialogueId === match.nodeId
+        if (match.nodeType === 'scriptChip') return element.dataset.chip !== undefined && element.dataset.refId === match.nodeId
+        return false
+      })
+      if (!root) return
+
+      let field: HTMLElement | null = null
+      if (match.target === 'dialogue-character') {
+        field = root.querySelector<HTMLElement>('.script-dialogue-character .script-note-type-label')
+      } else if (match.target === 'dialogue-text') {
+        field = root.querySelector<HTMLElement>('.script-dialogue-text')
+      } else if (match.target === 'note-title') {
+        field = root.querySelector<HTMLElement>('.script-note-title')
+      } else if (match.target === 'note-content') {
+        field = root.querySelector<HTMLElement>('.script-note-content')
+      } else {
+        field = root
+      }
+
+      root.classList.add('stagedesk-search-highlight')
+      field?.classList.add('stagedesk-search-field-highlight')
+
+      if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+        const start = Math.max(0, Math.min(match.matchStart ?? 0, field.value.length))
+        const end = Math.max(start, Math.min(start + (match.matchLength ?? 0), field.value.length))
+        field.focus({ preventScroll: true })
+        field.setSelectionRange(start, end)
+      }
+
+      root.scrollIntoView({ block: 'center', inline: 'nearest' })
+      editorSearchHighlightTimerRef.current = window.setTimeout(() => {
+        root.classList.remove('stagedesk-search-highlight')
+        field?.classList.remove('stagedesk-search-field-highlight')
+        editorSearchHighlightTimerRef.current = null
+      }, 2200)
+    }
+
     if (match.nodeSelection) {
-      editor.chain().focus().setNodeSelection(match.from).scrollIntoView().run()
+      const node = editor.state.doc.nodeAt(match.from)
+      if (match.nodeType === 'scriptNote' && node?.type.name === 'scriptNote' && node.attrs.collapsed) {
+        const transaction = editor.state.tr.setNodeMarkup(match.from, undefined, { ...node.attrs, collapsed: false })
+        transaction.setSelection(NodeSelection.create(transaction.doc, match.from))
+        transaction.scrollIntoView()
+        editor.view.dispatch(transaction)
+        editor.view.focus()
+      } else {
+        editor.chain().focus().setNodeSelection(match.from).scrollIntoView().run()
+      }
+      window.requestAnimationFrame(highlightMatchInDom)
     } else {
       editor.chain().focus().setTextSelection({ from: match.from, to: match.to }).scrollIntoView().run()
     }
+  }
+
+  const focusEditorSearchMatch = (direction: 1 | -1 = 1) => {
+    if (!editor || editorSearchMatches.length === 0) return
+    const nextIndex = (editorSearchMatchIndex + direction + editorSearchMatches.length) % editorSearchMatches.length
+    focusEditorSearchResult(nextIndex)
   }
 
   const selectCueFromInspector = (cue: MediaCue) => {
@@ -3698,7 +3874,7 @@ function App() {
     try {
       const { error: uploadError } = await supabase.storage
         .from('store-packages')
-        .upload(packagePath, markdown, {
+        .upload(packagePath, encodeStageDeskPackage(markdown, stripMarkdownExtension(activeFile.name)), {
           contentType: 'application/octet-stream',
           cacheControl: '3600',
           upsert: false,
@@ -4094,6 +4270,16 @@ function App() {
               <Bookmark size={16} />
               <span className="sr-only">Bookmark</span>
             </button>
+            <button
+              type="button"
+              className={leftTab === 'search' ? 'active' : ''}
+              title="Cerca nel file"
+              aria-label="Cerca nel file"
+              onClick={() => selectLeftTab('search')}
+            >
+              <Search size={16} />
+              <span className="sr-only">Cerca nel file</span>
+            </button>
           </div>
 
           {leftTab === 'outline' ? (
@@ -4200,6 +4386,104 @@ function App() {
               activeFileName={activeDocumentTitle}
               onSelect={focusBookmarkItem}
             />
+          ) : null}
+
+          {leftTab === 'search' ? (
+            <section className="structure-search-panel" aria-label="Cerca nel file attivo">
+              <div className="structure-search-heading">
+                <div className="structure-search-title">
+                  <Search size={15} aria-hidden="true" />
+                  <strong>Cerca nel file</strong>
+                </div>
+                <button
+                  type="button"
+                  className="structure-search-close"
+                  title="Chiudi ricerca"
+                  aria-label="Chiudi ricerca"
+                  onClick={() => {
+                    setEditorSearchQuery('')
+                    setEditorSearchMatchIndex(0)
+                    selectLeftTab('outline')
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <div className="structure-search-control">
+                <Search size={14} aria-hidden="true" />
+                <input
+                  ref={editorSearchInputRef}
+                  value={editorSearchQuery}
+                  onChange={(event) => {
+                    setEditorSearchQuery(event.target.value)
+                    setEditorSearchMatchIndex(0)
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      focusEditorSearchMatch(event.shiftKey ? -1 : 1)
+                    }
+                    if (event.key === 'Escape') {
+                      event.preventDefault()
+                      setEditorSearchQuery('')
+                      setEditorSearchMatchIndex(0)
+                    }
+                  }}
+                  placeholder="Cerca nel file"
+                  aria-label="Cerca nel file attivo"
+                  disabled={editorEditingDisabled}
+                />
+                <span className="structure-search-count" aria-live="polite">
+                  {editorSearchQuery.trim() ? `${editorSearchMatches.length ? editorSearchMatchIndex + 1 : 0}/${editorSearchMatches.length}` : ''}
+                </span>
+                <button
+                  type="button"
+                  title="Risultato precedente"
+                  aria-label="Risultato precedente"
+                  onClick={() => focusEditorSearchMatch(-1)}
+                  disabled={editorSearchMatches.length === 0}
+                >
+                  <ChevronUp size={14} />
+                </button>
+                <button
+                  type="button"
+                  title="Risultato successivo"
+                  aria-label="Risultato successivo"
+                  onClick={() => focusEditorSearchMatch(1)}
+                  disabled={editorSearchMatches.length === 0}
+                >
+                  <ChevronDown size={14} />
+                </button>
+                {editorSearchQuery.trim() && editorSearchMatches.length === 0 ? (
+                  <span className="structure-search-empty">Nessun risultato</span>
+                ) : null}
+              </div>
+              {editorSearchResults.length > 0 ? (
+                <div className="structure-search-results" aria-label="Occorrenze trovate">
+                  {editorSearchResults.map((result, index) => (
+                    <button
+                      key={`${result.match.from}-${result.match.to}-${index}`}
+                      type="button"
+                      className={`structure-search-result${index === editorSearchMatchIndex ? ' active' : ''}`}
+                      onClick={() => focusEditorSearchResult(index)}
+                      aria-label={`Vai all'occorrenza ${index + 1}`}
+                    >
+                      <span className="structure-search-result-index">{index + 1}</span>
+                      <span className="structure-search-result-excerpt">
+                        {result.leading ? '…' : ''}
+                        {result.before}
+                        <mark>{result.hit}</mark>
+                        {result.after}
+                        {result.trailing ? '…' : ''}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {!editorSearchQuery.trim() ? (
+                <p className="structure-search-hint">Cerca testo, personaggi, note e cue nel documento attivo.</p>
+              ) : null}
+            </section>
           ) : null}
         </aside>
 
@@ -4317,7 +4601,7 @@ function App() {
             </div>
           ) : (
             <>
-          <div className={`editor-toolbar${editorSearchOpen ? ' search-open' : ''}`}>
+          <div className="editor-toolbar">
             <div className="toolbar-group" aria-label="Cronologia">
               <button type="button" title="Annulla" aria-label="Annulla" onClick={() => editor?.chain().focus().undo().run()} disabled={editorEditingDisabled}>
                 <Undo2 size={15} />
@@ -4422,83 +4706,18 @@ function App() {
               >
                 <Bookmark size={15} />
               </button>
-              <div className={`editor-search-toolbar ${editorSearchOpen ? 'is-open' : ''}`}>
-                <button
-                  type="button"
-                  className="toolbar-menu-trigger icon-only"
-                  title="Cerca nel file attivo"
-                  aria-label="Cerca nel file attivo"
-                  aria-expanded={editorSearchOpen}
-                  onClick={() => {
-                    setEditorSearchOpen((current) => !current)
-                    window.setTimeout(() => editorSearchInputRef.current?.focus(), 0)
-                  }}
-                  disabled={!editor || Boolean(activeAppDocument) || activeEmbeddedTab}
-                >
-                  <Binoculars size={16} />
-                </button>
-                {editorSearchOpen ? (
-                  <div className="editor-search-control">
-                    <Binoculars size={14} aria-hidden="true" />
-                    <input
-                      ref={editorSearchInputRef}
-                      value={editorSearchQuery}
-                      onChange={(event) => {
-                        setEditorSearchQuery(event.target.value)
-                        setEditorSearchMatchIndex(0)
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault()
-                          focusEditorSearchMatch(event.shiftKey ? -1 : 1)
-                        }
-                        if (event.key === 'Escape') {
-                          setEditorSearchOpen(false)
-                          setEditorSearchQuery('')
-                        }
-                      }}
-                      placeholder="Cerca nel file"
-                      aria-label="Cerca nel file attivo"
-                    />
-                    <span className="editor-search-count" aria-live="polite">
-                      {editorSearchQuery.trim() ? `${editorSearchMatches.length ? editorSearchMatchIndex + 1 : 0}/${editorSearchMatches.length}` : ''}
-                    </span>
-                    <button
-                      type="button"
-                      className="editor-search-next"
-                      title="Risultato successivo"
-                      aria-label="Risultato successivo"
-                      onClick={() => focusEditorSearchMatch(1)}
-                      disabled={editorSearchMatches.length === 0}
-                    >
-                      <ChevronDown size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      className="editor-search-close"
-                      title="Chiudi ricerca"
-                      aria-label="Chiudi ricerca"
-                      onClick={() => {
-                        setEditorSearchOpen(false)
-                        setEditorSearchQuery('')
-                      }}
-                    >
-                      <X size={13} />
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-              <span className="toolbar-inline-divider" aria-hidden="true" />
-              <button
-                type="button"
-                title={toggleAllNotesLabel}
-                aria-label={toggleAllNotesLabel}
-                onClick={toggleAllEditorNotes}
-                disabled={editorEditingDisabled || editorNoteCollapseSummaryValue.total === 0}
-              >
-                {allEditorNotesCollapsed ? <BookOpen size={15} /> : <PanelTopClose size={15} />}
-              </button>
-              <div className="toolbar-menu table-insert-toolbar-menu" ref={tableInsertMenuRef}>
+            </div>
+            <span className="toolbar-inline-divider" aria-hidden="true" />
+            <button
+              type="button"
+              title={toggleAllNotesLabel}
+              aria-label={toggleAllNotesLabel}
+              onClick={toggleAllEditorNotes}
+              disabled={editorEditingDisabled || editorNoteCollapseSummaryValue.total === 0}
+            >
+              {allEditorNotesCollapsed ? <BookOpen size={15} /> : <PanelTopClose size={15} />}
+            </button>
+            <div className="toolbar-menu table-insert-toolbar-menu" ref={tableInsertMenuRef}>
                 <button
                   type="button"
                   className="toolbar-menu-trigger icon-only table-insert-menu-trigger"
@@ -4545,7 +4764,6 @@ function App() {
                   </div>
                 ) : null}
               </div>
-            </div>
             <span className="toolbar-divider" aria-hidden="true" />
             <div className="toolbar-menu" ref={theaterMenuRef}>
               <button
@@ -4863,6 +5081,7 @@ function App() {
             {paginatedCues.map((cue) => (
               <button
                 type="button"
+                draggable
                 key={cue.id}
                 title="Trascina nell'editor o clicca per selezionare"
                 className={cue.id === selectedCueId ? 'note-card active' : 'note-card'}
@@ -4883,6 +5102,16 @@ function App() {
                 onDragStart={(event: ReactDragEvent<HTMLButtonElement>) => {
                   event.dataTransfer.effectAllowed = 'move'
                   writeDragPayload(event.dataTransfer, CUE_ID_DND_TYPE, CUE_ID_DND_PREFIX, cue.id)
+                  writeGlobalDragPayload(CUE_ID_DND_TYPE, cue.id, {
+                    label: cue.title || cue.src.split('/').pop() || 'Cue',
+                    detail: cue.src,
+                    tone: 'cue',
+                  })
+                  setNativeDragPreview(event.dataTransfer, {
+                    label: cue.title || cue.src.split('/').pop() || 'Cue',
+                    detail: cue.src,
+                    tone: 'cue',
+                  })
                 }}
                 onDragEnd={clearGlobalDragPayload}
                 onClick={() => selectCueFromInspector(cue)}
@@ -5194,23 +5423,6 @@ function StorePublicationModal({
               disabled={busy}
             />
           </label>
-          {state.history.length ? (
-            <section className="store-publication-history" aria-labelledby="store-publication-history-title">
-              <div className="store-publication-history-heading">
-                <strong id="store-publication-history-title">Storico pubblicazioni</strong>
-                <span>{state.history.length} versioni</span>
-              </div>
-              <div className="store-publication-history-list">
-                {state.history.map((version) => (
-                  <div className="store-publication-history-row" key={`${version.versionNumber}-${version.publishedAt}`}>
-                    <strong>Versione {version.versionNumber}</strong>
-                    <span>{formatDateTime(version.publishedAt)}</span>
-                    {version.releaseNotes ? <small>{version.releaseNotes}</small> : null}
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
         </div>
         <footer className="store-publication-actions">
           <button
@@ -5327,21 +5539,27 @@ function PublishScriptModal({
             <div className="publish-share">
               <label>
                 Link condivisione
-                <div className="publish-link-row publish-share-link-row">
+                <div className="publish-link-editor">
                   <input readOnly value={state.url} onFocus={(event) => event.currentTarget.select()} />
-                  <button
-                    type="button"
-                    className="publish-link-open"
-                    aria-label="Apri condivisione in un nuovo tab"
-                    title="Apri condivisione in un nuovo tab"
-                    onClick={onOpenLink}
-                  >
-                    <ExternalLink size={14} />
-                  </button>
-                  <button type="button" onClick={onCopyLink}>
-                    <Copy size={14} />
-                    Copia
-                  </button>
+                  <div className="publish-link-editor-actions">
+                    <button
+                      type="button"
+                      className="publish-link-open"
+                      aria-label="Apri condivisione in un nuovo tab"
+                      title="Apri condivisione in un nuovo tab"
+                      onClick={onOpenLink}
+                    >
+                      <ExternalLink size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Copia link condivisione"
+                      title="Copia link condivisione"
+                      onClick={onCopyLink}
+                    >
+                      <Copy size={14} />
+                    </button>
+                  </div>
                 </div>
               </label>
               <label className="publish-pin-field">
@@ -5508,27 +5726,43 @@ function StoreRatingModal({
         aria-labelledby="store-rating-title"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <p className="eyebrow">STAGEDESK STORE</p>
-        <h2 id="store-rating-title">Valuta il copione</h2>
-        <p>Hai letto “{title}”. Seleziona le stelle e conferma la valutazione da 1 a 5.</p>
-        <div className="store-rating-options" aria-label="Valutazione da 1 a 5">
-          {[1, 2, 3, 4, 5].map((score) => (
-            <button
-              key={score}
-              type="button"
-              className={selectedScore >= score ? 'selected' : ''}
-              onClick={() => setSelectedScore(score)}
-              aria-label={`Seleziona ${score} stelle su 5`}
-              aria-pressed={selectedScore === score}
-              disabled={submitting}
-            >
-              <Star size={26} fill="currentColor" aria-hidden="true" />
-            </button>
-          ))}
+        <header className="store-rating-header">
+          <div>
+            <p className="eyebrow">STAGEDESK STORE</p>
+            <h2 id="store-rating-title">Valuta il copione</h2>
+          </div>
+          <button type="button" className="store-rating-close" onClick={onClose} disabled={submitting} aria-label="Chiudi">
+            <X size={17} aria-hidden="true" />
+          </button>
+        </header>
+        <div className="store-rating-intro">
+          <div className="store-rating-intro-icon" aria-hidden="true"><BookOpen size={18} /></div>
+          <div>
+            <strong>{title}</strong>
+            <span>La tua valutazione aiuta a migliorare il catalogo.</span>
+          </div>
         </div>
-        <p className="store-rating-selection" aria-live="polite">
-          {selectedScore ? `${selectedScore} di 5 stelle selezionate` : 'Seleziona una valutazione'}
-        </p>
+        <div className="store-rating-panel">
+          <span className="store-rating-panel-label">La tua valutazione</span>
+          <div className="store-rating-options" aria-label="Valutazione da 1 a 5">
+            {[1, 2, 3, 4, 5].map((score) => (
+              <button
+                key={score}
+                type="button"
+                className={selectedScore >= score ? 'selected' : ''}
+                onClick={() => setSelectedScore(score)}
+                aria-label={`Seleziona ${score} stelle su 5`}
+                aria-pressed={selectedScore === score}
+                disabled={submitting}
+              >
+                <Star size={25} fill="currentColor" aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+          <p className="store-rating-selection" aria-live="polite">
+            {selectedScore ? `${selectedScore} di 5 stelle` : 'Seleziona da 1 a 5 stelle'}
+          </p>
+        </div>
         {status ? <p className="form-status">{status}</p> : null}
         <div className="modal-actions">
           <button type="button" onClick={onClose} disabled={submitting}>Salta</button>
@@ -5957,7 +6191,7 @@ function MediaExplorerTree({
             <div
               role="treeitem"
               tabIndex={0}
-              draggable={false}
+              draggable={!isFolder}
               data-media-drop-path={asset.path}
               data-media-kind={asset.kind}
               className={asset.path === selectedPath ? 'tree-node media-node selected' : 'tree-node media-node'}
@@ -5979,6 +6213,16 @@ function MediaExplorerTree({
                 if (asset.kind === 'folder') return
                 event.dataTransfer.effectAllowed = 'copyMove'
                 writeDragPayload(event.dataTransfer, MEDIA_PATH_DND_TYPE, MEDIA_PATH_DND_PREFIX, asset.path)
+                writeGlobalDragPayload(MEDIA_PATH_DND_TYPE, asset.path, {
+                  label: asset.name,
+                  detail: asset.path,
+                  tone: 'media',
+                })
+                setNativeDragPreview(event.dataTransfer, {
+                  label: asset.name,
+                  detail: asset.path,
+                  tone: 'media',
+                })
               }}
               onDragEnd={clearGlobalDragPayload}
               onDragOver={(event: ReactDragEvent<HTMLDivElement>) => {
@@ -8093,7 +8337,7 @@ const tableIsCharacterTable = (table: ProseMirrorNode) => {
     cells[0] === 'personaggio' &&
     (cells[1] === 'attore' || cells[1] === 'interprete') &&
     cells[2] === 'presenza' &&
-    cells[3] === 'note'
+    (cells.length === 3 || cells[3] === 'note')
   )
 }
 
@@ -8112,10 +8356,18 @@ const normalizeTableHeaderText = (value: string) =>
     .trim()
     .toLowerCase()
 
+type EditorSearchTarget = 'text' | 'dialogue-character' | 'dialogue-text' | 'note-title' | 'note-content' | 'chip'
+
 type EditorSearchMatch = {
   from: number
   to: number
+  text: string
   nodeSelection?: boolean
+  nodeType?: 'scriptDialogue' | 'scriptNote' | 'scriptChip'
+  nodeId?: string
+  target?: EditorSearchTarget
+  matchStart?: number
+  matchLength?: number
 }
 
 const searchEditorDocument = (editor: Editor, query: string): EditorSearchMatch[] => {
@@ -8123,35 +8375,65 @@ const searchEditorDocument = (editor: Editor, query: string): EditorSearchMatch[
   if (!normalizedQuery) return []
 
   const matches: EditorSearchMatch[] = []
-  editor.state.doc.descendants((node, position) => {
-    let text = ''
-    let nodeSelection = false
-    if (node.type.name === 'text') {
-      text = node.text ?? ''
-    } else if (node.type.name === 'scriptDialogue') {
-      text = `${String(node.attrs.character ?? '')} ${String(node.attrs.text ?? '')}`.trim()
-      nodeSelection = true
-    } else if (node.type.name === 'scriptNote') {
-      text = `${String(node.attrs.title ?? '')} ${String(node.attrs.content ?? '')}`.trim()
-      nodeSelection = true
-    } else if (node.type.name === 'scriptChip') {
-      text = String(node.attrs.label ?? '')
-      nodeSelection = true
-    }
-    if (!text) return
-
+  const addMatches = (
+    text: string,
+    options: Omit<EditorSearchMatch, 'from' | 'to' | 'text' | 'matchStart' | 'matchLength'> & { position: number; nodeSize?: number },
+  ) => {
     const searchableText = text.toLocaleLowerCase('it-IT')
     let fromIndex = 0
     while (fromIndex < searchableText.length) {
       const matchIndex = searchableText.indexOf(normalizedQuery, fromIndex)
       if (matchIndex < 0) break
+      const nodeSelection = Boolean(options.nodeSelection)
       matches.push({
-        from: position + (nodeSelection ? 0 : matchIndex),
-        to: position + (nodeSelection ? node.nodeSize : matchIndex + normalizedQuery.length),
-        nodeSelection,
+        ...options,
+        from: nodeSelection ? options.position : options.position + matchIndex,
+        to: nodeSelection ? options.position + (options.nodeSize ?? 1) : options.position + matchIndex + normalizedQuery.length,
+        text,
+        matchStart: matchIndex,
+        matchLength: normalizedQuery.length,
       })
       fromIndex = matchIndex + Math.max(normalizedQuery.length, 1)
       if (nodeSelection) break
+    }
+  }
+
+  editor.state.doc.descendants((node, position) => {
+    if (node.type.name === 'text') {
+      addMatches(node.text ?? '', { position, target: 'text' })
+      return
+    } else if (node.type.name === 'scriptDialogue') {
+      const common = {
+        position,
+        nodeSize: node.nodeSize,
+        nodeSelection: true,
+        nodeType: 'scriptDialogue' as const,
+        nodeId: String(node.attrs.id ?? ''),
+      }
+      addMatches(String(node.attrs.character ?? ''), { ...common, target: 'dialogue-character' })
+      addMatches(String(node.attrs.text ?? ''), { ...common, target: 'dialogue-text' })
+      return
+    } else if (node.type.name === 'scriptNote') {
+      const common = {
+        position,
+        nodeSize: node.nodeSize,
+        nodeSelection: true,
+        nodeType: 'scriptNote' as const,
+        nodeId: String(node.attrs.refId ?? ''),
+      }
+      addMatches(String(node.attrs.title ?? ''), { ...common, target: 'note-title' })
+      addMatches(String(node.attrs.content ?? ''), { ...common, target: 'note-content' })
+      return
+    } else if (node.type.name === 'scriptChip') {
+      addMatches(String(node.attrs.label ?? ''), {
+        position,
+        nodeSize: node.nodeSize,
+        nodeSelection: true,
+        nodeType: 'scriptChip',
+        nodeId: String(node.attrs.refId ?? ''),
+        target: 'chip',
+      })
+      return
     }
   })
   return matches
@@ -9132,7 +9414,7 @@ const loadPersistedUiState = (projectId: string): PersistedUiState | undefined =
       selectedScriptPath: state.selectedScriptPath,
       selectedMediaPath: state.selectedMediaPath,
       expandedPaths: state.expandedPaths.filter((path): path is string => typeof path === 'string'),
-      leftTab: ['outline', 'script', 'media', 'bookmarks'].includes(String(state.leftTab))
+      leftTab: ['outline', 'script', 'media', 'bookmarks', 'search'].includes(String(state.leftTab))
         ? state.leftTab as PersistedUiState['leftTab']
         : 'outline',
       editorSelection: typeof state.editorSelection === 'number' ? state.editorSelection : undefined,
