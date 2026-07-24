@@ -230,6 +230,11 @@ type StorePublicationVersion = {
   packageName?: string
   releaseNotes?: string
 }
+type StoreRatingTarget = {
+  scriptId: string
+  title: string
+  filePath: string
+}
 type ShareIndicatorState = {
   status: 'disabled' | 'checking' | 'shared' | 'not-shared' | 'error'
   url?: string
@@ -399,20 +404,30 @@ function App() {
   const [projectPickerOpen, setProjectPickerOpen] = useState(false)
   const [projectPickerEntries, setProjectPickerEntries] = useState<ProjectEntry[]>([])
   const [storeLoading, setStoreLoading] = useState(false)
-  const [storeRating, setStoreRating] = useState<{ scriptId: string; title: string }>()
-  const [storeRatingTarget, setStoreRatingTarget] = useState<{ scriptId: string; title: string } | undefined>(() => {
+  const [storeRating, setStoreRating] = useState<StoreRatingTarget>()
+  const [storeRatingTarget, setStoreRatingTarget] = useState<StoreRatingTarget | undefined>(() => {
     try {
       const stored = localStorage.getItem(STORE_RATING_TARGET_KEY)
       if (!stored) return undefined
-      const target = JSON.parse(stored) as { scriptId?: unknown; title?: unknown }
-      return typeof target.scriptId === 'string' && typeof target.title === 'string'
-        ? { scriptId: target.scriptId, title: target.title }
+      const target = JSON.parse(stored) as { scriptId?: unknown; title?: unknown; filePath?: unknown }
+      if (typeof target.scriptId !== 'string' || typeof target.title !== 'string') return undefined
+      const scriptId = target.scriptId
+      const title = target.title
+      if (typeof target.filePath === 'string') {
+        return { scriptId, title, filePath: target.filePath }
+      }
+      const legacyFile = flattenMarkdownFiles(project.scripts).find((file) =>
+        slug(stripMarkdownExtension(file.name)) === slug(title),
+      )
+      return legacyFile
+        ? { scriptId, title, filePath: legacyFile.path }
         : undefined
     } catch {
       return undefined
     }
   })
   const [storeRatingStatus, setStoreRatingStatus] = useState('')
+  const [storeRatingSubmitting, setStoreRatingSubmitting] = useState(false)
   const [toolbarState, setToolbarState] = useState<ToolbarState>(emptyToolbarState)
   const [tableContextActive, setTableContextActive] = useState(false)
   const [activeEditorSceneId, setActiveEditorSceneId] = useState('')
@@ -431,6 +446,13 @@ function App() {
   const activeFile = useMemo(() => findMarkdownNode(project.scripts, activePath), [activePath, project.scripts])
   const activeAppDocument = useMemo(() => getAppDocument(activePath), [activePath])
   const activeStoreTab = activePath === STORE_TAB_PATH
+  const canRateActiveStoreScript = Boolean(
+    storeRatingTarget &&
+    activeFile &&
+    storeRatingTarget.filePath === activeFile.path &&
+    !activeAppDocument &&
+    !activeStoreTab,
+  )
   const selectedScriptNode = useMemo(
     () => findTreeNode(project.scripts, selectedScriptPath),
     [project.scripts, selectedScriptPath],
@@ -644,17 +666,34 @@ function App() {
 
     setStorePublicationState({ status: 'checking', filePath: file.path, history: [] })
     try {
-      const fields = 'id, author_id, current_version, published_at, package_name, is_published'
-      const byPackage = await supabase
+      const fields = 'id, author_id, title, current_version, published_at, package_name, is_published'
+      const packageName = `${stripMarkdownExtension(file.name)}.stagedesk`
+      const authoredScripts = await supabase
         .from('store_scripts')
         .select(fields)
         .eq('author_id', user.id)
-        .eq('package_name', file.name.replace(/\.md$/i, '.stagedesk'))
-        .limit(1)
-        .maybeSingle()
-      if (byPackage.error) throw byPackage.error
+        .order('updated_at', { ascending: false })
+        .limit(100)
+      if (authoredScripts.error) throw authoredScripts.error
 
-      const data = byPackage.data
+      const normalisePackageName = (value: string) => value
+        .toLocaleLowerCase('it-IT')
+        .replace(/\.stagedesk$/i, '')
+        .replace(/\.md$/i, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+      const targetPackage = normalisePackageName(packageName)
+      const targetTitle = normalisePackageName(file.name)
+      const documentTitle = normalisePackageName(
+        editorMarkdown.match(/^#\s+(.+)$/m)?.[1]?.replace(/\*+/g, '').trim() ?? '',
+      )
+      const matchingScripts = (authoredScripts.data ?? []).filter((script) =>
+        normalisePackageName(String(script.package_name ?? '')) === targetPackage,
+      )
+      const data = matchingScripts[0]
+        ?? (authoredScripts.data ?? []).find((script) => normalisePackageName(String(script.package_name ?? '')) === targetTitle)
+        ?? (authoredScripts.data ?? []).find((script) => normalisePackageName(String(script.title ?? '')) === documentTitle)
+        ?? ((authoredScripts.data ?? []).length === 1 ? authoredScripts.data?.[0] : undefined)
 
       if (requestId !== storePublicationRequestRef.current) return
       if (!data || data.author_id !== user.id) {
@@ -1328,60 +1367,23 @@ function App() {
 
         const dropPosition = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
         if (dropPosition === undefined) return false
+        const payload = readEditorDragPayload(dataTransfer)
+        if (!payload) return false
 
-        const noteId = readDragPayload(dataTransfer, NOTE_ID_DND_TYPE, NOTE_ID_DND_PREFIX)
-        if (noteId) {
-          const note = projectRef.current.notes.find((item) => item.id === noteId && item.filePath === activeFilePathRef.current)
-          const match = nodeMatchByRef(view.state.doc, 'scriptNote', noteId)
-          if (!note || !match) return false
-          if (dropPosition >= match.position && dropPosition <= match.position + match.nodeSize) return true
-
-          event.preventDefault()
-          if (!moveEditorNode(view, match, dropPosition)) return true
-          clearGlobalDragPayload()
-          setSelectedNoteId(note.id)
-          showStatus(`Nota spostata: ${note.title}`)
-          return true
-        }
-
-        const dialogueId = readDragPayload(dataTransfer, DIALOGUE_ID_DND_TYPE, DIALOGUE_ID_DND_PREFIX)
-        if (dialogueId) {
-          const match = nodeMatchByAttr(view.state.doc, 'scriptDialogue', 'id', dialogueId)
-          if (!match) return false
-          if (dropPosition >= match.position && dropPosition <= match.position + match.nodeSize) return true
-
-          event.preventDefault()
-          if (!moveEditorNode(view, match, dropPosition)) return true
-          clearGlobalDragPayload()
-          showStatus(`Battuta spostata`)
-          return true
-        }
-
-        const cueId = readDragPayload(dataTransfer, CUE_ID_DND_TYPE, CUE_ID_DND_PREFIX)
-        if (cueId) {
-          const cue = projectRef.current.cues.find((item) => item.id === cueId && item.filePath === activeFilePathRef.current)
-          if (!cue) return false
-          event.preventDefault()
-          if (!moveCueChip(view, cue.id, dropPosition)) {
-            cueDropActionsRef.current.insertExistingCue(cue, dropPosition)
-          }
-          clearGlobalDragPayload()
-          setSelectedCueId(cue.id)
-          showStatus(`Cue spostato: ${cue.title || cue.src}`)
-          return true
-        }
-
-        const mediaPath = readDragPayload(dataTransfer, MEDIA_PATH_DND_TYPE, MEDIA_PATH_DND_PREFIX)
-        if (mediaPath) {
-          const asset = findTreeNode(projectRef.current.media, mediaPath)
-          if (!asset || asset.kind === 'folder') return false
-          event.preventDefault()
-          cueDropActionsRef.current.createCueFromAsset(asset, dropPosition)
-          clearGlobalDragPayload()
-          return true
-        }
-
-        return false
+        event.preventDefault()
+        const handled = handleEditorPointerDrop(
+          view,
+          payload,
+          dropPosition,
+          projectRef.current,
+          activeFilePathRef.current,
+          cueDropActionsRef.current,
+          setSelectedNoteId,
+          setSelectedCueId,
+          showStatus,
+        )
+        if (handled) clearGlobalDragPayload()
+        return handled
       },
       handleClick(_view, pos, event) {
         const link = linkFromClickTarget(event.target)
@@ -2160,7 +2162,7 @@ function App() {
       persistProject(projectInFolder)
       setStorageStatus(`Copione importato: ${compactPath(path)}`)
       if (storeScriptId) {
-        const target = { scriptId: storeScriptId, title: projectName }
+        const target = { scriptId: storeScriptId, title: projectName, filePath }
         setStoreRatingTarget(target)
         try {
           localStorage.setItem(STORE_RATING_TARGET_KEY, JSON.stringify(target))
@@ -2183,26 +2185,39 @@ function App() {
   }
 
   const submitStoreRating = async (score: number) => {
-    if (!storeRating) return
-    setStoreRatingStatus('Invio valutazione…')
-    const { error } = await supabase.rpc('rate_store_script', {
-      p_script_id: storeRating.scriptId,
-      p_score: score,
-      p_comment: '',
-    })
-    if (error) {
-      setStoreRatingStatus(`Valutazione non riuscita: ${error.message}`)
-      return
-    }
-    setStoreRating(undefined)
-    setStoreRatingTarget(undefined)
+    if (!storeRating || storeRatingSubmitting) return
+    setStoreRatingSubmitting(true)
+    setStoreRatingStatus('Salvataggio valutazione…')
     try {
-      localStorage.removeItem(STORE_RATING_TARGET_KEY)
-    } catch {
-      // Ignore unavailable browser storage.
+      const { data: authData, error: authError } = await supabase.auth.getUser()
+      if (authError) throw authError
+      if (!authData.user) throw new Error('La sessione non è più disponibile. Accedi di nuovo.')
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(storeRating.scriptId)) {
+        throw new Error('Identificativo del copione Store non valido.')
+      }
+
+      const { error } = await supabase.rpc('rate_store_script', {
+        p_script_id: storeRating.scriptId,
+        p_score: score,
+        p_comment: '',
+      })
+      if (error) throw error
+
+      setStoreRating(undefined)
+      setStoreRatingTarget(undefined)
+      try {
+        localStorage.removeItem(STORE_RATING_TARGET_KEY)
+      } catch {
+        // Ignore unavailable browser storage.
+      }
+      setStoreRatingStatus('')
+      setToastMessage('Valutazione registrata')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setStoreRatingStatus(`Valutazione non riuscita: ${message}`)
+    } finally {
+      setStoreRatingSubmitting(false)
     }
-    setStoreRatingStatus('')
-    setToastMessage('Valutazione registrata')
   }
 
   const openProjectFile = () => {
@@ -2265,8 +2280,7 @@ function App() {
       .catch((error) => setStorageStatus(`Rinomina progetto non riuscita: ${String(error)}`))
   }
 
-  const deleteProjectEntry = async (entry: ProjectEntry) => {
-    if (!confirm(`Eliminare definitivamente il progetto "${entry.name}"?`)) return
+  const deleteProjectEntryConfirmed = async (entry: ProjectEntry) => {
     try {
       await storage.deleteProjectFolder(entry.path)
       setProjectPickerEntries((current) => current.filter((item) => item.path !== entry.path))
@@ -3696,6 +3710,17 @@ function App() {
       return
     }
 
+    if (scriptDialog.kind === 'delete-project') {
+      if (scriptDialog.targetPath && scriptDialog.value) {
+        void deleteProjectEntryConfirmed({
+          name: scriptDialog.value,
+          path: scriptDialog.targetPath,
+        })
+      }
+      setScriptDialog(undefined)
+      return
+    }
+
     const value = scriptDialog.value?.trim()
     if (!value) return
 
@@ -3828,21 +3853,6 @@ function App() {
                   <BookOpen size={15} />
                   Documentazione
                 </button>
-                {storeRatingTarget ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setAppMenuOpen(false)
-                      setAppMenuPosition(undefined)
-                      setStoreRatingStatus('')
-                      setStoreRating(storeRatingTarget)
-                    }}
-                  >
-                    <Star size={15} />
-                    Valuta copione
-                  </button>
-                ) : null}
                 <button
                   type="button"
                   role="menuitem"
@@ -3979,7 +3989,7 @@ function App() {
                 className="media-tree-drop-zone"
                 data-media-drop-root="true"
                 onDragOver={(event) => {
-                  if (!hasDragPayload(event.dataTransfer, MEDIA_PATH_DND_TYPE)) return
+                  if (!hasDragPayload(event.dataTransfer, MEDIA_PATH_DND_TYPE, MEDIA_PATH_DND_PREFIX)) return
                   event.preventDefault()
                   event.stopPropagation()
                   event.dataTransfer.dropEffect = 'move'
@@ -4459,6 +4469,22 @@ function App() {
                 </div>
               ) : null}
             </div>
+            {canRateActiveStoreScript ? (
+              <button
+                type="button"
+                className="toolbar-menu-trigger icon-only store-rating-toolbar-trigger"
+                title="Valuta copione"
+                aria-label="Valuta copione"
+                onClick={() => {
+                  if (!storeRatingTarget) return
+                  setStoreRatingStatus('')
+                  setStoreRatingSubmitting(false)
+                  setStoreRating(storeRatingTarget)
+                }}
+              >
+                <Star size={15} />
+              </button>
+            ) : null}
             {toolbarState.table || tableContextActive ? (
               <div className="toolbar-menu" ref={tableMenuRef}>
                 <button
@@ -4723,9 +4749,11 @@ function App() {
         <StoreRatingModal
           title={storeRating.title}
           status={storeRatingStatus}
+          submitting={storeRatingSubmitting}
           onClose={() => {
             setStoreRating(undefined)
             setStoreRatingStatus('')
+            setStoreRatingSubmitting(false)
           }}
           onRate={(score) => void submitStoreRating(score)}
         />
@@ -4744,7 +4772,7 @@ function App() {
             void openProjectFolder(entry.path)
           }}
           onRename={(entry, name) => renameProjectEntry(entry, name)}
-          onDelete={(entry) => deleteProjectEntry(entry)}
+          onDelete={(entry) => void deleteProjectEntryConfirmed(entry)}
         />
       ) : null}
       {pointerDropIndicator ? (
@@ -4915,7 +4943,6 @@ function StorePublicationModal({
           ) : null}
         </div>
         <footer className="store-publication-actions">
-          <button type="button" onClick={onClose} disabled={busy}>Annulla</button>
           <button
             type="button"
             className="store-publication-primary"
@@ -4985,17 +5012,19 @@ function PublishScriptModal({
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className="action-modal publish-modal"
+        className="action-modal publish-modal share-publish-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="publish-script-title"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="publish-modal-header">
+        <div className="publish-modal-header share-modal-header">
           <div>
             <span className="publish-kicker">StageDesk Share</span>
             <h2 id="publish-script-title">Condividi file</h2>
-            <p>Prepara il file attivo per le app attori con personaggi, scene e battute.</p>
+            <div className="publish-description">
+              Prepara il file attivo per le app attori con personaggi, scene e battute.
+            </div>
           </div>
           <button type="button" className="publish-close" aria-label="Chiudi" onClick={onClose}>
             <X size={16} />
@@ -5076,6 +5105,7 @@ type ScriptActionDialog = {
     | 'create-media-folder'
     | 'rename-media'
     | 'delete-media'
+    | 'delete-project'
     | 'bookmark'
   title: string
   label?: string
@@ -5136,7 +5166,7 @@ function ScriptActionModal({
   onCancel: () => void
   onConfirm: () => void
 }) {
-  const hasInput = dialog.kind !== 'delete' && dialog.kind !== 'delete-media'
+  const hasInput = dialog.kind !== 'delete' && dialog.kind !== 'delete-media' && dialog.kind !== 'delete-project'
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onCancel}>
       <section
@@ -5176,14 +5206,18 @@ function ScriptActionModal({
 function StoreRatingModal({
   title,
   status,
+  submitting,
   onClose,
   onRate,
 }: {
   title: string
   status: string
+  submitting: boolean
   onClose: () => void
   onRate: (score: number) => void
 }) {
+  const [selectedScore, setSelectedScore] = useState(0)
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
@@ -5195,17 +5229,31 @@ function StoreRatingModal({
       >
         <p className="eyebrow">STAGEDESK STORE</p>
         <h2 id="store-rating-title">Valuta il copione</h2>
-        <p>Hai letto “{title}”. Esprimi ora una valutazione da 1 a 5.</p>
+        <p>Hai letto “{title}”. Seleziona le stelle e conferma la valutazione da 1 a 5.</p>
         <div className="store-rating-options" aria-label="Valutazione da 1 a 5">
           {[1, 2, 3, 4, 5].map((score) => (
-            <button key={score} type="button" onClick={() => onRate(score)} aria-label={`Valuta ${score} su 5`}>
-              <span aria-hidden="true">★</span>
+            <button
+              key={score}
+              type="button"
+              className={selectedScore >= score ? 'selected' : ''}
+              onClick={() => setSelectedScore(score)}
+              aria-label={`Seleziona ${score} stelle su 5`}
+              aria-pressed={selectedScore === score}
+              disabled={submitting}
+            >
+              <Star size={26} fill="currentColor" aria-hidden="true" />
             </button>
           ))}
         </div>
+        <p className="store-rating-selection" aria-live="polite">
+          {selectedScore ? `${selectedScore} di 5 stelle selezionate` : 'Seleziona una valutazione'}
+        </p>
         {status ? <p className="form-status">{status}</p> : null}
         <div className="modal-actions">
-          <button type="button" onClick={onClose}>Salta</button>
+          <button type="button" onClick={onClose} disabled={submitting}>Salta</button>
+          <button type="button" className="primary" onClick={() => onRate(selectedScore)} disabled={!selectedScore || submitting}>
+            {submitting ? 'Salvataggio…' : 'Registra voto'}
+          </button>
         </div>
       </section>
     </div>
@@ -5230,6 +5278,7 @@ function ProjectPickerModal({
   const [openMenuPath, setOpenMenuPath] = useState('')
   const [renameEntry, setRenameEntry] = useState<ProjectEntry | undefined>()
   const [renameValue, setRenameValue] = useState('')
+  const [deleteEntry, setDeleteEntry] = useState<ProjectEntry | undefined>()
   const [projectSearch, setProjectSearch] = useState('')
   const [page, setPage] = useState(0)
   const pageSize = 6
@@ -5254,6 +5303,10 @@ function ProjectPickerModal({
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       if (renameEntry) return
+      if (deleteEntry) {
+        setDeleteEntry(undefined)
+        return
+      }
       if (openMenuPath) {
         setOpenMenuPath('')
         return
@@ -5262,7 +5315,7 @@ function ProjectPickerModal({
     }
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
-  }, [onCancel, openMenuPath, renameEntry])
+  }, [deleteEntry, onCancel, openMenuPath, renameEntry])
   const submitRename = () => {
     if (!renameEntry) return
     onRename(renameEntry, renameValue)
@@ -5329,6 +5382,7 @@ function ProjectPickerModal({
                         event.preventDefault()
                         event.stopPropagation()
                         setOpenMenuPath('')
+                        setDeleteEntry(undefined)
                         setRenameEntry(entry)
                         setRenameValue(entry.name)
                       }}
@@ -5345,7 +5399,9 @@ function ProjectPickerModal({
                         event.preventDefault()
                         event.stopPropagation()
                         setOpenMenuPath('')
-                        onDelete(entry)
+                        setRenameEntry(undefined)
+                        setRenameValue('')
+                        setDeleteEntry(entry)
                       }}
                     >
                       <Trash2 size={14} />
@@ -5413,6 +5469,26 @@ function ProjectPickerModal({
               </button>
               <button type="button" className="primary" disabled={!renameValue.trim() || renameValue.trim() === renameEntry.name} onClick={submitRename}>
                 Rinomina
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {deleteEntry ? (
+          <div className="project-delete-panel" role="alertdialog" aria-labelledby="project-delete-title">
+            <strong id="project-delete-title">Eliminare definitivamente questo progetto?</strong>
+            <p>{deleteEntry.name}</p>
+            <div className="project-rename-actions">
+              <button type="button" onClick={() => setDeleteEntry(undefined)}>Annulla</button>
+              <button
+                type="button"
+                className="danger"
+                onClick={() => {
+                  onDelete(deleteEntry)
+                  setDeleteEntry(undefined)
+                }}
+              >
+                <Trash2 size={14} />
+                Elimina
               </button>
             </div>
           </div>
@@ -5626,7 +5702,7 @@ function MediaExplorerTree({
               onDragEnd={clearGlobalDragPayload}
               onDragOver={(event: ReactDragEvent<HTMLDivElement>) => {
                 if (!isFolder) return
-                if (!hasDragPayload(event.dataTransfer, MEDIA_PATH_DND_TYPE)) return
+                if (!hasDragPayload(event.dataTransfer, MEDIA_PATH_DND_TYPE, MEDIA_PATH_DND_PREFIX)) return
                 event.preventDefault()
                 event.stopPropagation()
                 event.dataTransfer.dropEffect = 'move'
@@ -6904,15 +6980,44 @@ const writeDragPayload = (dataTransfer: DataTransfer, type: string, prefix: stri
   writeGlobalDragPayload(type, value)
 }
 
-const hasDragPayload = (dataTransfer: DataTransfer, type: string) =>
-  dragTypes(dataTransfer).some((item) => item.toLowerCase() === type.toLowerCase() || item === 'text/plain') ||
-  Boolean(readGlobalDragPayload(type))
+const hasDragPayload = (dataTransfer: DataTransfer, type: string, prefix: string) => {
+  if (dragTypes(dataTransfer).some((item) => item.toLowerCase() === type.toLowerCase())) return true
+  const text = dataTransfer.getData('text/plain')
+  return text.startsWith(prefix) || Boolean(readGlobalDragPayload(type))
+}
 
 const hasAnyEditorDragPayload = (dataTransfer: DataTransfer) =>
-  hasDragPayload(dataTransfer, NOTE_ID_DND_TYPE) ||
-  hasDragPayload(dataTransfer, CUE_ID_DND_TYPE) ||
-  hasDragPayload(dataTransfer, MEDIA_PATH_DND_TYPE) ||
-  hasDragPayload(dataTransfer, DIALOGUE_ID_DND_TYPE)
+  hasDragPayload(dataTransfer, NOTE_ID_DND_TYPE, NOTE_ID_DND_PREFIX) ||
+  hasDragPayload(dataTransfer, CUE_ID_DND_TYPE, CUE_ID_DND_PREFIX) ||
+  hasDragPayload(dataTransfer, MEDIA_PATH_DND_TYPE, MEDIA_PATH_DND_PREFIX) ||
+  hasDragPayload(dataTransfer, DIALOGUE_ID_DND_TYPE, DIALOGUE_ID_DND_PREFIX)
+
+type EditorDragPayload = {
+  type: typeof NOTE_ID_DND_TYPE | typeof DIALOGUE_ID_DND_TYPE | typeof CUE_ID_DND_TYPE | typeof MEDIA_PATH_DND_TYPE
+  value: string
+}
+
+const readEditorDragPayload = (dataTransfer: DataTransfer): EditorDragPayload | undefined => {
+  const payloads: Array<EditorDragPayload> = [
+    {
+      type: NOTE_ID_DND_TYPE,
+      value: readDragPayload(dataTransfer, NOTE_ID_DND_TYPE, NOTE_ID_DND_PREFIX),
+    },
+    {
+      type: DIALOGUE_ID_DND_TYPE,
+      value: readDragPayload(dataTransfer, DIALOGUE_ID_DND_TYPE, DIALOGUE_ID_DND_PREFIX),
+    },
+    {
+      type: CUE_ID_DND_TYPE,
+      value: readDragPayload(dataTransfer, CUE_ID_DND_TYPE, CUE_ID_DND_PREFIX),
+    },
+    {
+      type: MEDIA_PATH_DND_TYPE,
+      value: readDragPayload(dataTransfer, MEDIA_PATH_DND_TYPE, MEDIA_PATH_DND_PREFIX),
+    },
+  ]
+  return payloads.find((payload) => payload.value)
+}
 
 const dragTypes = (dataTransfer: DataTransfer) => {
   try {
@@ -7026,7 +7131,7 @@ const editorBlockElementAtPosition = (view: EditorView, position: number) => {
 
 const handleEditorPointerDrop = (
   view: EditorView,
-  payload: StagedeskDragPayload,
+  payload: Pick<StagedeskDragPayload, 'type' | 'value'>,
   dropPosition: number,
   project: Project,
   activeFilePath: string,

@@ -2,6 +2,8 @@
 
 Applicazione desktop/web per scrittura, organizzazione e messa in scena di copioni teatrali con note di regia, cue multimediali, raccolta media, modalità schermo intero ed export PDF.
 
+Versione desktop corrente: **1.0.38**.
+
 ## Scopo
 
 StageDesk Pro fornisce un ambiente unico per:
@@ -69,6 +71,8 @@ Implementato:
 38. recupero password tramite link e-mail e impostazione guidata di una nuova password;
 39. dialog coerenti e responsive per condivisione e pubblicazione versionata nello Store;
 40. navigazione da tastiera tra note e battute adiacenti, anche quando cambia il tipo di blocco;
+41. comando **Valuta copione** nella toolbar, disponibile solo per il file importato dallo StageDesk Store;
+42. trascinamento unificato di note, battute e cue nell'editor con indicatore della posizione di rilascio;
 
 ## Sviluppo
 

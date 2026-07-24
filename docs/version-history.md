@@ -1,5 +1,16 @@
 # Novità
 
+## Versione 1.0.38
+
+> Allineamento del flusso Store e miglioramento del lavoro nell'editor.
+
+- Aggiunto il comando **Valuta copione** direttamente nella toolbar, accanto agli strumenti teatro.
+- Il comando di valutazione è visibile esclusivamente sul file effettivamente importato dallo Store; il copione dimostrativo e gli altri file non lo mostrano.
+- Ridotta la tipografia della dialog **Valuta il copione** e migliorata la selezione del voto prima della conferma.
+- Mantenuta la compatibilità con i copioni già importati nelle versioni precedenti.
+- Uniformata la gestione del trascinamento di note, battute e cue nell'editor con un payload comune e un indicatore di rilascio coerente.
+- Stabilizzata la struttura laterale e la navigazione dei contenuti lunghi, inclusa la scrollbar orizzontale dell'indice.
+
 ## Versione 1.0.37
 
 > Stato di pubblicazione vincolato al file attivo.

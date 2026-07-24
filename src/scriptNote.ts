@@ -244,7 +244,8 @@ export const ScriptNote = TiptapNode.create({
       }
 
       const focusAdjacentScriptBlock = (direction: 'next' | 'previous') => {
-        const blocks = Array.from(document.querySelectorAll<HTMLElement>('[data-ref-id], [data-dialogue-id]'))
+        // Cue e bookmark usano data-ref-id, ma non sono blocchi di testo navigabili.
+        const blocks = Array.from(editor.view.dom.querySelectorAll<HTMLElement>('[data-note-block], [data-dialogue-id]'))
         const currentIndex = blocks.indexOf(dom)
         const targetIndex = currentIndex + (direction === 'next' ? 1 : -1)
         const targetElement = currentIndex < 0 ? undefined : blocks[targetIndex]
@@ -345,7 +346,7 @@ export const ScriptNote = TiptapNode.create({
       })
       const writePointerDragPayload = (event: PointerEvent | MouseEvent) => {
         const target = event.target as HTMLElement | null
-        if (!target?.closest('.script-note-header') || target.closest('button, textarea, .script-note-type-menu')) {
+        if (!target?.closest('.script-note-header') || target.closest('button, input, textarea, .script-note-type-menu')) {
           return
         }
         const refId = String(currentNode.attrs.refId ?? '')
@@ -362,14 +363,31 @@ export const ScriptNote = TiptapNode.create({
           tone: 'note',
         }
       }
-      dom.addEventListener('pointerdown', writePointerDragPayload)
-      dom.addEventListener('mousedown', writePointerDragPayload)
-      dom.addEventListener('dragstart', (event) => {
-        event.preventDefault()
-      })
-      dom.addEventListener('dragend', () => {
-        delete (window as ScriptNoteWindow).__STAGEDESK_DRAG_PAYLOAD__
-      })
+      const startNativeDrag = (event: Event) => {
+        const dragEvent = event as DragEvent
+        const target = dragEvent.target as HTMLElement | null
+        if (target?.closest('button, input, textarea, .script-note-type-menu')) {
+          dragEvent.preventDefault()
+          return
+        }
+        const refId = String(currentNode.attrs.refId ?? '')
+        if (!refId || !dragEvent.dataTransfer) return
+        dragEvent.dataTransfer.effectAllowed = 'move'
+        dragEvent.dataTransfer.setData('text/plain', `stagedesk-note:${refId}`)
+        dragEvent.dataTransfer.setData('application/x-stagedesk-note-id', refId)
+        writePointerDragPayload(dragEvent)
+      }
+      const clearNoteDragPayload = () => {
+        const payload = (window as ScriptNoteWindow).__STAGEDESK_DRAG_PAYLOAD__
+        if (payload?.type === 'application/x-stagedesk-note-id') {
+          delete (window as ScriptNoteWindow).__STAGEDESK_DRAG_PAYLOAD__
+        }
+      }
+      header.draggable = true
+      header.addEventListener('pointerdown', writePointerDragPayload)
+      header.addEventListener('mousedown', writePointerDragPayload)
+      header.addEventListener('dragstart', startNativeDrag)
+      header.addEventListener('dragend', clearNoteDragPayload)
       document.addEventListener('pointerdown', closeTypeMenuOnOutsideClick)
       contentTextarea.addEventListener('input', () => {
         resizeTextarea()
@@ -410,6 +428,10 @@ export const ScriptNote = TiptapNode.create({
         },
         destroy() {
           document.removeEventListener('pointerdown', closeTypeMenuOnOutsideClick)
+          header.removeEventListener('pointerdown', writePointerDragPayload)
+          header.removeEventListener('mousedown', writePointerDragPayload)
+          header.removeEventListener('dragstart', startNativeDrag)
+          header.removeEventListener('dragend', clearNoteDragPayload)
           contentTextarea.removeEventListener('dragstart', preventTextDrag)
         },
       }

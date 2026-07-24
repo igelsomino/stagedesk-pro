@@ -1,4 +1,4 @@
-import { defaultProject } from './defaultProject'
+import { CURRENT_SAMPLE_VERSION, defaultProject } from './defaultProject'
 import { LEGACY_SCRIPT_ROOT_PATH, SCRIPT_ROOT_PATH } from './domain'
 import type { MediaAsset, Project, ProjectTreeNode } from './domain'
 
@@ -264,10 +264,32 @@ const loadLocalRecoveryProject = (): Project | undefined => {
   }
 }
 
-const normalizeProject = (project: Project): Project => ({
-  ...project,
-  ...normalizeLegacySampleProject(project),
-})
+const normalizeProject = (project: Project): Project => migrateOutdatedSample(project)
+
+const isSampleProject = (project: Project) => {
+  const normalizedScripts = normalizeScriptTree(project.scripts)
+  const root = normalizedScripts[0]
+  const firstFile = root?.kind === 'folder' ? root.children?.[0] : undefined
+  return (
+    (project.name === 'Goldoni' || project.name === 'La locandiera') &&
+    root?.kind === 'folder' &&
+    firstFile?.kind === 'markdown' &&
+    firstFile.content?.includes('AVVISO IMPORTANTE')
+  )
+}
+
+const migrateOutdatedSample = (project: Project): Project => {
+  const normalized = { ...project, ...normalizeLegacySampleProject(project) }
+  if (!isSampleProject(normalized) || (normalized.sampleVersion ?? 0) >= CURRENT_SAMPLE_VERSION) return normalized
+
+  const currentSample = defaultProject('Goldoni')
+  return {
+    ...currentSample,
+    id: normalized.id,
+    rootPath: normalized.rootPath,
+    sampleVersion: CURRENT_SAMPLE_VERSION,
+  }
+}
 
 const normalizeLegacySampleProject = (project: Project) => {
   const normalizedScripts = normalizeScriptTree(project.scripts)

@@ -1,6 +1,8 @@
 import { SCRIPT_ROOT_PATH } from './domain'
 import type { DirectorNote, MediaAsset, MediaCue, NoteType, Project } from './domain'
 
+export const CURRENT_SAMPLE_VERSION = 2
+
 const now = () => new Date().toISOString()
 
 const noteTypes: NoteType[] = [
@@ -189,6 +191,10 @@ ${demoNoteContent.general}
 ${demoNoteContent.characters}
 ::
 
+### Sinossi
+
+Mirandolina conduce il gioco con intelligenza e misura: il Cavaliere, ostile alle donne, viene progressivamente coinvolto nella conversazione e nella vita della locanda.
+
 ::regia{id="note-7d903ab2" type="position" color="blue" title="Posizione" sceneId="scena-xv" anchorId="2d89799c-c7df-4224-b898-b9585dcd07e3"}
 Mirandolina conversa con il Cavaliere e usa cortesia, ironia e apparente sincerità per incrinare la sua diffidenza verso le donne.
 ::
@@ -334,6 +340,7 @@ export const defaultProject = (name = 'Goldoni'): Project => ({
   id: crypto.randomUUID(),
   name,
   rootPath: '/progetto',
+  sampleVersion: CURRENT_SAMPLE_VERSION,
   author: '',
   language: 'it',
   actorsCount: 0,

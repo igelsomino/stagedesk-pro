@@ -30,6 +30,7 @@ export type Project = {
   id: string
   name: string
   rootPath: string
+  sampleVersion?: number
   author?: string
   language?: string
   actorsCount?: number

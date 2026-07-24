@@ -153,7 +153,7 @@ export const ScriptDialogue = TiptapNode.create({
 
       const writePointerDragPayload = (event: PointerEvent | MouseEvent) => {
         const target = event.target as HTMLElement | null
-        if (!target?.closest('.script-dialogue-header') || target.closest('button, textarea, .script-note-type-menu')) return
+        if (!target?.closest('.script-dialogue-header') || target.closest('button, input, textarea, .script-note-type-menu')) return
         const id = String(currentNode.attrs.id ?? '')
         if (!id) return
         ;(window as ScriptDialogueWindow).__STAGEDESK_DRAG_PAYLOAD__ = {
@@ -172,7 +172,7 @@ export const ScriptDialogue = TiptapNode.create({
       const startNativeDrag = (event: Event) => {
         const dragEvent = event as DragEvent
         const target = dragEvent.target as HTMLElement | null
-        if (target?.closest('button, textarea, .script-note-type-menu')) {
+        if (target?.closest('button, input, textarea, .script-note-type-menu')) {
           dragEvent.preventDefault()
           return
         }
@@ -230,7 +230,8 @@ export const ScriptDialogue = TiptapNode.create({
       }
 
       const focusAdjacentScriptBlock = (direction: 'next' | 'previous') => {
-        const blocks = Array.from(editor.view.dom.querySelectorAll<HTMLElement>('[data-ref-id], [data-dialogue-id]'))
+        // Cue e bookmark usano data-ref-id, ma non sono blocchi di testo navigabili.
+        const blocks = Array.from(editor.view.dom.querySelectorAll<HTMLElement>('[data-note-block], [data-dialogue-id]'))
         const currentIndex = blocks.indexOf(dom)
         const targetIndex = currentIndex + (direction === 'next' ? 1 : -1)
         const targetElement = currentIndex < 0 ? undefined : blocks[targetIndex]
