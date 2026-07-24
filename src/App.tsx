@@ -14,6 +14,7 @@ import {
   Bookmark,
   Bold,
   AlertTriangle,
+  Binoculars,
   ChevronDown,
   ChevronRight,
   CloudCheck,
@@ -23,6 +24,7 @@ import {
   Download,
   Drama,
   Eraser,
+  ExternalLink,
   FileAudio,
   FileImage,
   FilePlus2,
@@ -136,6 +138,7 @@ const SHARE_URL_BASE = 'https://stagedesk-pro.aigconsulting.it/share'
 const SHARED_SCRIPT_NOTE_TYPES = ['movement', 'position', 'characters', 'tone'] as const
 const CUE_PAGE_SIZE = 5
 const STORE_TAB_PATH = 'web://stagedesk-store'
+const SHARE_TAB_PREFIX = 'web://stagedesk-share/'
 const STORE_URL = 'https://stagedesk-pro.aigconsulting.it/store/?embedded=1'
 const STORE_ORIGIN = 'https://stagedesk-pro.aigconsulting.it'
 // Public Supabase project origin used by the Store package bucket. This is not a credential.
@@ -143,6 +146,13 @@ const STORE_STORAGE_ORIGIN = 'https://insoqzhjmrbrgfrsmlnj.supabase.co'
 const STORE_IMPORT_MESSAGE = 'stagedesk-store-import'
 const STORE_CONTEXT_MESSAGE = 'stagedesk-store-context'
 const STORE_RATING_TARGET_KEY = 'stagedesk-store-rating-target'
+
+const shareTabPathForUid = (uid: string) => `${SHARE_TAB_PREFIX}${encodeURIComponent(uid)}`
+const shareUidFromTabPath = (path: string) =>
+  path.startsWith(SHARE_TAB_PREFIX) ? decodeURIComponent(path.slice(SHARE_TAB_PREFIX.length)) : ''
+const isShareTabPath = (path: string) => path.startsWith(SHARE_TAB_PREFIX)
+const isEmbeddedTabPath = (path: string) => path === STORE_TAB_PATH || isShareTabPath(path)
+const isNonMarkdownTabPath = (path: string) => isAppDocumentPath(path) || isEmbeddedTabPath(path)
 const SUPABASE_STORAGE_ORIGIN = (() => {
   try {
     return supabaseUrl ? new URL(supabaseUrl).origin : ''
@@ -184,9 +194,18 @@ type PublishedScriptNote = {
   sceneId?: string
   sourceLine?: number
 }
+type PublishedScriptHeading = {
+  id: string
+  headingType: 'act' | 'scene'
+  level: 1 | 2
+  text: string
+  sceneId?: string
+  sourceLine?: number
+}
 type PublishedScriptItem =
   | (PublishedScriptDialogue & { kind: 'dialogue' })
   | (PublishedScriptNote & { kind: 'note' })
+  | (PublishedScriptHeading & { kind: 'heading' })
 type PublishedScriptPayload = {
   schemaVersion: 3
   app: 'StageDesk Pro'
@@ -362,6 +381,9 @@ function App() {
   const [selectedNoteTypeId, setSelectedNoteTypeId] = useState(initialNoteTypeId)
   const [selectedCueId, setSelectedCueId] = useState(project.cues[0]?.id ?? '')
   const [search, setSearch] = useState('')
+  const [editorSearchOpen, setEditorSearchOpen] = useState(false)
+  const [editorSearchQuery, setEditorSearchQuery] = useState('')
+  const [editorSearchMatchIndex, setEditorSearchMatchIndex] = useState(0)
   const [isFullscreen, setFullscreen] = useState(false)
   const [fullscreenIndex, setFullscreenIndex] = useState(0)
   const [fullscreenBlocks, setFullscreenBlocks] = useState<PerformanceBlock[]>([])
@@ -404,6 +426,7 @@ function App() {
   const [projectPickerOpen, setProjectPickerOpen] = useState(false)
   const [projectPickerEntries, setProjectPickerEntries] = useState<ProjectEntry[]>([])
   const [storeLoading, setStoreLoading] = useState(false)
+  const [shareTabLoading, setShareTabLoading] = useState(false)
   const [storeRating, setStoreRating] = useState<StoreRatingTarget>()
   const [storeRatingTarget, setStoreRatingTarget] = useState<StoreRatingTarget | undefined>(() => {
     try {
@@ -430,6 +453,7 @@ function App() {
   const [storeRatingSubmitting, setStoreRatingSubmitting] = useState(false)
   const [toolbarState, setToolbarState] = useState<ToolbarState>(emptyToolbarState)
   const [tableContextActive, setTableContextActive] = useState(false)
+  const [characterTableContextActive, setCharacterTableContextActive] = useState(false)
   const [activeEditorSceneId, setActiveEditorSceneId] = useState('')
   const [activeOutline, setActiveOutline] = useState<OutlineItem[]>(() =>
     markdownOutlineItems(findMarkdownNode(project.scripts, initialPath)?.content ?? ''),
@@ -441,11 +465,14 @@ function App() {
   const [activeBookmarkId, setActiveBookmarkId] = useState('')
   const [editorCueRefIds, setEditorCueRefIds] = useState<string[]>([])
   const [currentEditorCueRefIds, setCurrentEditorCueRefIds] = useState<string[]>([])
+  const editorSearchInputRef = useRef<HTMLInputElement>(null)
 
   const markdownFiles = useMemo(() => flattenMarkdownFiles(project.scripts), [project.scripts])
   const activeFile = useMemo(() => findMarkdownNode(project.scripts, activePath), [activePath, project.scripts])
   const activeAppDocument = useMemo(() => getAppDocument(activePath), [activePath])
   const activeStoreTab = activePath === STORE_TAB_PATH
+  const activeShareTab = isShareTabPath(activePath)
+  const activeEmbeddedTab = activeStoreTab || activeShareTab
   const canRateActiveStoreScript = Boolean(
     storeRatingTarget &&
     activeFile &&
@@ -464,13 +491,13 @@ function App() {
   const activeAppDocumentMarkdown = activeAppDocument
     ? appDocumentContent(activeAppDocument, installedUpdateVersion, remoteAppDocuments[activeAppDocument.path])
     : ''
-  const activeMarkdown = activeStoreTab
+  const activeMarkdown = activeEmbeddedTab
     ? ''
     : activeAppDocument
     ? activeAppDocumentMarkdown
     : drafts[activePath] ?? activeFile?.content ?? ''
   const [editorMarkdown, setEditorMarkdown] = useState(activeMarkdown)
-  const activeCharacterMarkdown = activeAppDocument || activeStoreTab ? activeMarkdown : editorMarkdown || activeMarkdown
+  const activeCharacterMarkdown = activeAppDocument || activeEmbeddedTab ? activeMarkdown : editorMarkdown || activeMarkdown
   const activeCharacters = useMemo(
     () => charactersFromMarkdown(activeCharacterMarkdown, project.characters),
     [activeCharacterMarkdown, project.characters],
@@ -550,6 +577,7 @@ function App() {
   const tableInsertMenuRef = useRef<HTMLDivElement>(null)
   const appMenuRef = useRef<HTMLDivElement>(null)
   const storeFrameRef = useRef<HTMLIFrameElement>(null)
+  const shareFrameRef = useRef<HTMLIFrameElement>(null)
   const pointerDropTargetRef = useRef<PointerDropTarget | undefined>(undefined)
   const moveMediaNodeRef = useRef<(sourcePath: string, targetFolderPath: string) => Promise<void>>(async () => undefined)
   const fileNotes = useMemo(
@@ -1260,6 +1288,9 @@ function App() {
       syncEditorSceneState(currentEditor, setActiveEditorSceneId)
       syncEditorCueRefs(currentEditor, setEditorCueRefIds)
       syncEditorCueRefsAtSelection(currentEditor, setCurrentEditorCueRefIds)
+      const tableContext = currentTableContext(currentEditor)
+      setTableContextActive(Boolean(tableContext.tableNode))
+      setCharacterTableContextActive(tableContext.isCharacterTable)
     },
     onSelectionUpdate({ editor: currentEditor }) {
       diagnosticLog('editor-selection-update', {
@@ -1275,6 +1306,9 @@ function App() {
       syncEditorSceneState(currentEditor, setActiveEditorSceneId)
       syncEditorCueRefs(currentEditor, setEditorCueRefIds)
       syncEditorCueRefsAtSelection(currentEditor, setCurrentEditorCueRefIds)
+      const tableContext = currentTableContext(currentEditor)
+      setTableContextActive(Boolean(tableContext.tableNode))
+      setCharacterTableContextActive(tableContext.isCharacterTable)
     },
     onTransaction({ editor: currentEditor }) {
       diagnosticLog('editor-transaction', {
@@ -1422,8 +1456,8 @@ function App() {
     },
     immediatelyRender: false,
   })
-  const editorEditingDisabled = !editor || Boolean(activeAppDocument) || activeStoreTab
-  const activeDocumentTitle = activeFile?.name ?? activeAppDocument?.title ?? (activeStoreTab ? 'Store' : undefined)
+  const editorEditingDisabled = !editor || Boolean(activeAppDocument) || activeEmbeddedTab
+  const activeDocumentTitle = activeFile?.name ?? activeAppDocument?.title ?? (activeStoreTab ? 'Store' : activeShareTab ? 'Condividi' : undefined)
   const selectedTableContext = editor ? currentTableContext(editor) : undefined
   const selectedCharacterTable = Boolean(selectedTableContext?.isCharacterTable)
   const selectedCharacterTableHeaderRow = Boolean(selectedTableContext?.isCharacterTable && selectedTableContext.isHeaderRow)
@@ -1432,6 +1466,23 @@ function App() {
     editorNoteCollapseSummaryValue.total > 0 &&
     editorNoteCollapseSummaryValue.collapsed === editorNoteCollapseSummaryValue.total
   const toggleAllNotesLabel = allEditorNotesCollapsed ? 'Espandi tutte le note' : 'Collassa tutte le note'
+  const editorSearchMatches = useMemo(
+    () => {
+      void editorMarkdown
+      return editor && editorSearchQuery.trim() ? searchEditorDocument(editor, editorSearchQuery) : []
+    },
+    [editor, editorMarkdown, editorSearchQuery],
+  )
+
+  useEffect(() => {
+    setEditorSearchOpen(false)
+    setEditorSearchQuery('')
+    setEditorSearchMatchIndex(0)
+  }, [activePath])
+
+  useEffect(() => {
+    setEditorSearchMatchIndex((current) => Math.min(current, Math.max(0, editorSearchMatches.length - 1)))
+  }, [editorSearchMatches.length])
 
   const draftsWithCurrentEditorContent = useCallback(() => {
     const currentDrafts = { ...draftsRef.current }
@@ -1556,6 +1607,9 @@ function App() {
         syncEditorSceneState(editor, setActiveEditorSceneId)
         syncEditorCueRefs(editor, setEditorCueRefIds)
         syncEditorCueRefsAtSelection(editor, setCurrentEditorCueRefIds)
+        const tableContext = currentTableContext(editor)
+        setTableContextActive(Boolean(tableContext.tableNode))
+        setCharacterTableContextActive(tableContext.isCharacterTable)
       })
     }
 
@@ -1579,8 +1633,8 @@ function App() {
 
   useEffect(() => {
     if (!editor) return
-    editor.setEditable(!activeAppDocument && !activeStoreTab)
-  }, [activeAppDocument, activeStoreTab, editor])
+    editor.setEditable(!activeAppDocument && !activeEmbeddedTab)
+  }, [activeAppDocument, activeEmbeddedTab, editor])
 
   useEffect(() => {
     if (!editor || activeAppDocument) return
@@ -1599,7 +1653,7 @@ function App() {
   useEffect(() => {
     if (!editor) return
 
-    if (activeStoreTab) {
+    if (activeEmbeddedTab) {
       editor.commands.setContent('', { emitUpdate: false })
       setEditorMarkdown('')
       setActiveOutline([])
@@ -1656,15 +1710,15 @@ function App() {
     syncEditorCueRefs(editor, setEditorCueRefIds)
     syncEditorCueRefsAtSelection(editor, setCurrentEditorCueRefIds)
     syncEditorSceneState(editor, setActiveEditorSceneId)
-  }, [activeAppDocument, activeAppDocumentMarkdown, activeFilePath, activeStoreTab, editor, project.id])
+  }, [activeAppDocument, activeAppDocumentMarkdown, activeEmbeddedTab, activeFilePath, editor, project.id])
 
   useEffect(() => {
-    if (!editor || activeAppDocument || activeStoreTab || !activeFilePath) {
+    if (!editor || activeAppDocument || activeEmbeddedTab || !activeFilePath) {
       setActiveEditorSceneId('')
       return
     }
     syncEditorSceneState(editor, setActiveEditorSceneId)
-  }, [activeAppDocument, activeFilePath, activeStoreTab, editor])
+  }, [activeAppDocument, activeEmbeddedTab, activeFilePath, editor])
 
   useEffect(() => {
     if (!editor || !activeFilePath) return
@@ -1950,15 +2004,15 @@ function App() {
     nextProject = normalizeProject(nextProject)
     const markdownPaths = flattenMarkdownFiles(nextProject.scripts).map((file) => file.path)
     const savedUiState = loadPersistedUiState(nextProject.id)
-    const validOpenTabs = savedUiState?.openTabs.filter((path) => markdownPaths.includes(path) || isAppDocumentPath(path)) ?? []
+    const validOpenTabs = savedUiState?.openTabs.filter((path) => markdownPaths.includes(path) || isNonMarkdownTabPath(path)) ?? []
     const nextPath =
-      savedUiState?.activePath && (markdownPaths.includes(savedUiState.activePath) || isAppDocumentPath(savedUiState.activePath))
+      savedUiState?.activePath && (markdownPaths.includes(savedUiState.activePath) || isNonMarkdownTabPath(savedUiState.activePath))
         ? savedUiState.activePath
         : validOpenTabs[0] ?? markdownPaths[0] ?? ''
     const scriptPath =
       savedUiState?.selectedScriptPath && findTreeNode(nextProject.scripts, savedUiState.selectedScriptPath)
         ? savedUiState.selectedScriptPath
-        : nextPath && !isAppDocumentPath(nextPath)
+        : nextPath && !isNonMarkdownTabPath(nextPath)
           ? nextPath
           : markdownPaths[0] ?? SCRIPT_ROOT_PATH
     const mediaPath =
@@ -2331,6 +2385,18 @@ function App() {
     persistUiStateNow()
   }
 
+  const openShareTab = (uid: string) => {
+    const path = shareTabPathForUid(uid)
+    diagnosticLog('tab-open-share', { path, uid, previousActivePath: activePathRef.current, openTabs: openTabsRef.current })
+    setShareTabLoading(true)
+    const nextTabs = openTabsRef.current.includes(path) ? openTabsRef.current : [...openTabsRef.current, path]
+    openTabsRef.current = nextTabs
+    activePathRef.current = path
+    setOpenTabs(nextTabs)
+    setActivePath(path)
+    persistUiStateNow()
+  }
+
   useEffect(() => {
     const onStoreMessage = (event: MessageEvent<{ type?: string; url?: string; title?: string; scriptId?: string }>) => {
       if (event.source !== storeFrameRef.current?.contentWindow) return
@@ -2379,7 +2445,7 @@ function App() {
       element.removeEventListener('scroll', updateFileTabOverflow)
       observer.disconnect()
     }
-  }, [activePath, openTabs, project.scripts, storeLoading])
+  }, [activePath, openTabs, project.scripts, shareTabLoading, storeLoading])
 
   const closeMarkdownTab = (path: string) => {
     diagnosticLog('tab-close-request', { path, activePath: activePathRef.current, openTabs: openTabsRef.current })
@@ -2400,7 +2466,7 @@ function App() {
     if (nextActivePath === path) {
       const closedIndex = currentTabs.indexOf(path)
       nextActivePath = nextTabs[Math.max(0, closedIndex - 1)] ?? nextTabs[0] ?? ''
-      if (nextActivePath && !isAppDocumentPath(nextActivePath) && nextActivePath !== STORE_TAB_PATH) {
+      if (nextActivePath && !isNonMarkdownTabPath(nextActivePath)) {
         nextSelectedScriptPath = nextActivePath
       }
     }
@@ -3053,7 +3119,10 @@ function App() {
 
   const syncTableContextFromTarget = (target: EventTarget | null) => {
     const element = target instanceof HTMLElement ? target : null
-    setTableContextActive(Boolean(element?.closest('table')))
+    const isInsideTable = Boolean(element?.closest('table'))
+    setTableContextActive(isInsideTable)
+    const tableContext = editor ? currentTableContext(editor) : undefined
+    setCharacterTableContextActive(isInsideTable && Boolean(tableContext?.isCharacterTable))
   }
 
   const showBookmarkDialog = () => {
@@ -3129,6 +3198,7 @@ function App() {
     setTableInsertMenuOpen(false)
     setTableInsertMenuPosition(undefined)
     setTableContextActive(true)
+    setCharacterTableContextActive(false)
     showStatus(`Tabella ${rows} x ${cols} inserita`)
   }
 
@@ -3166,6 +3236,102 @@ function App() {
     }
     editor.chain().focus().deleteTable().run()
     showStatus('Tabella eliminata')
+  }
+
+  const updateCurrentCharacterTable = () => {
+    const tableContext = editor ? currentTableContext(editor) : undefined
+    if (!editor || editorEditingDisabled || !tableContext?.isCharacterTable || tableContext.tablePosition === undefined) {
+      showStatus('Posiziona il cursore nella tabella personaggi')
+      return
+    }
+
+    const table = tableContext.tableNode
+    const headerRow = table?.child(0)
+    if (!table || !headerRow || table.childCount < 1) {
+      showStatus('Tabella personaggi non valida')
+      return
+    }
+
+    const markdown = editorJsonToMarkdown(editor.getJSON())
+    const currentCharacters = [
+      ...charactersFromMarkdown(markdown, project.characters),
+      ...dialogueCharactersFromMarkdown(markdown),
+    ].filter((character, index, characters) =>
+      characters.findIndex((candidate) => normalizeCharacterName(candidate.name) === normalizeCharacterName(character.name)) === index,
+    )
+    const presenceByCharacter = characterPresenceFromMarkdown(markdown, currentCharacters)
+    const existingRows = Array.from({ length: Math.max(0, table.childCount - 1) }, (_, index) => table.child(index + 1))
+    const rowByCharacter = new Map<string, string[]>()
+    existingRows.forEach((row) => {
+      const cells = tableRowTexts(row)
+      const name = cells[0]?.trim() ?? ''
+      const key = normalizeCharacterName(name)
+      if (key && !isCollectiveCharacterName(name) && !rowByCharacter.has(key)) rowByCharacter.set(key, cells)
+    })
+
+    const names = [...rowByCharacter.keys()].map((key) => rowByCharacter.get(key)?.[0]?.trim() ?? '').filter(Boolean)
+    currentCharacters.forEach((character) => {
+      if (!isCollectiveCharacterName(character.name) && !names.some((name) => normalizeCharacterName(name) === normalizeCharacterName(character.name))) {
+        names.push(character.name)
+      }
+    })
+
+    const tableJson = table.toJSON() as TiptapJsonNode
+    const headerJson = tableJson.content?.[0]
+    const rowTemplate = tableJson.content?.[1] ?? {
+      type: 'tableRow',
+      content: Array.from({ length: 4 }, () => ({ type: 'tableCell', content: [{ type: 'paragraph' }] })),
+    }
+    const columnCount = headerRow.childCount
+    const rows = names.map((name) => {
+      const existing = rowByCharacter.get(normalizeCharacterName(name)) ?? []
+      const presence = presenceByCharacter.get(normalizeCharacterName(name)) ?? 'Nessuna battuta rilevata'
+      const values = [name, existing[1] || 'D/A', presence, existing[3] || '']
+      return {
+        ...rowTemplate,
+        content: Array.from({ length: columnCount }, (_, index) => {
+          const templateCell = rowTemplate.content?.[index] ?? { type: 'tableCell', content: [{ type: 'paragraph' }] }
+          const value = values[index] ?? ''
+          return {
+            ...templateCell,
+            content: value ? [{ type: 'paragraph', content: [{ type: 'text', text: value }] }] : [{ type: 'paragraph' }],
+          }
+        }),
+      }
+    })
+    const nextTableContent = [headerJson ?? tableJson.content?.[0], ...rows].filter(
+      (row): row is TiptapJsonNode => Boolean(row),
+    )
+    const nextTableJson: TiptapJsonNode = {
+      ...tableJson,
+      content: nextTableContent,
+    }
+
+    try {
+      const nextTable = editor.schema.nodeFromJSON(nextTableJson)
+      const transaction = editor.state.tr.replaceWith(
+        tableContext.tablePosition,
+        tableContext.tablePosition + table.nodeSize,
+        nextTable,
+      )
+      editor.view.dispatch(transaction)
+      editor.chain().focus().scrollIntoView().run()
+      showStatus('Tabella personaggi aggiornata')
+    } catch (error) {
+      showStatus(`Aggiornamento tabella non riuscito: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  const focusEditorSearchMatch = (direction: 1 | -1 = 1) => {
+    if (!editor || editorSearchMatches.length === 0) return
+    const nextIndex = (editorSearchMatchIndex + direction + editorSearchMatches.length) % editorSearchMatches.length
+    const match = editorSearchMatches[nextIndex]
+    setEditorSearchMatchIndex(nextIndex)
+    if (match.nodeSelection) {
+      editor.chain().focus().setNodeSelection(match.from).scrollIntoView().run()
+    } else {
+      editor.chain().focus().setTextSelection({ from: match.from, to: match.to }).scrollIntoView().run()
+    }
   }
 
   const selectCueFromInspector = (cue: MediaCue) => {
@@ -3884,7 +4050,7 @@ function App() {
         </div>
       </header>
 
-      <section className="workspace">
+      <section className={`workspace${activeEmbeddedTab ? ' workspace-embedded-tab' : ''}`}>
         <aside className="sidebar left-sidebar">
           <div className="panel-title"><PanelLeft size={17} />Struttura</div>
           <div className="segmented">
@@ -4055,17 +4221,19 @@ function App() {
                 openTabs.map((path) => {
                   const tabFile = findMarkdownNode(project.scripts, path)
                   const isStoreTab = path === STORE_TAB_PATH
-                  const tabTitle = tabFile?.name ?? getAppDocument(path)?.title ?? (isStoreTab ? 'Store' : path.split('/').pop())
+                  const isShareTab = isShareTabPath(path)
+                  const tabTitle = tabFile?.name ?? getAppDocument(path)?.title ?? (isStoreTab ? 'Store' : isShareTab ? 'Condividi' : path.split('/').pop())
                   return (
                     <button
                       type="button"
                       key={path}
-                      className={path === activePath ? fileTabClass(tabFile, true, isAppDocumentPath(path) || isStoreTab) : fileTabClass(tabFile, false, isAppDocumentPath(path) || isStoreTab)}
+                      className={path === activePath ? fileTabClass(tabFile, true, isNonMarkdownTabPath(path)) : fileTabClass(tabFile, false, isNonMarkdownTabPath(path))}
                       onClick={() => {
                         activePathRef.current = path
-                        if (!isAppDocumentPath(path) && !isStoreTab) selectedScriptPathRef.current = path
+                        if (isShareTab) setShareTabLoading(true)
+                        if (!isNonMarkdownTabPath(path)) selectedScriptPathRef.current = path
                         setActivePath(path)
-                        if (!isAppDocumentPath(path) && !isStoreTab) setSelectedScriptPath(path)
+                        if (!isNonMarkdownTabPath(path)) setSelectedScriptPath(path)
                         persistUiStateNow()
                       }}
                     >
@@ -4132,9 +4300,24 @@ function App() {
                 }}
               />
             </div>
+          ) : activeShareTab ? (
+            <div className="store-tab-view" data-loading={shareTabLoading}>
+              {shareTabLoading ? (
+                <div className="store-loading" role="status">
+                  <RefreshCw size={18} className="spin-icon" />
+                  <span>Caricamento condivisione...</span>
+                </div>
+              ) : null}
+              <iframe
+                ref={shareFrameRef}
+                title="StageDesk Share"
+                src={shareUrlForUid(shareUidFromTabPath(activePath))}
+                onLoad={() => setShareTabLoading(false)}
+              />
+            </div>
           ) : (
             <>
-          <div className="editor-toolbar">
+          <div className={`editor-toolbar${editorSearchOpen ? ' search-open' : ''}`}>
             <div className="toolbar-group" aria-label="Cronologia">
               <button type="button" title="Annulla" aria-label="Annulla" onClick={() => editor?.chain().focus().undo().run()} disabled={editorEditingDisabled}>
                 <Undo2 size={15} />
@@ -4239,6 +4422,72 @@ function App() {
               >
                 <Bookmark size={15} />
               </button>
+              <div className={`editor-search-toolbar ${editorSearchOpen ? 'is-open' : ''}`}>
+                <button
+                  type="button"
+                  className="toolbar-menu-trigger icon-only"
+                  title="Cerca nel file attivo"
+                  aria-label="Cerca nel file attivo"
+                  aria-expanded={editorSearchOpen}
+                  onClick={() => {
+                    setEditorSearchOpen((current) => !current)
+                    window.setTimeout(() => editorSearchInputRef.current?.focus(), 0)
+                  }}
+                  disabled={!editor || Boolean(activeAppDocument) || activeEmbeddedTab}
+                >
+                  <Binoculars size={16} />
+                </button>
+                {editorSearchOpen ? (
+                  <div className="editor-search-control">
+                    <Binoculars size={14} aria-hidden="true" />
+                    <input
+                      ref={editorSearchInputRef}
+                      value={editorSearchQuery}
+                      onChange={(event) => {
+                        setEditorSearchQuery(event.target.value)
+                        setEditorSearchMatchIndex(0)
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          focusEditorSearchMatch(event.shiftKey ? -1 : 1)
+                        }
+                        if (event.key === 'Escape') {
+                          setEditorSearchOpen(false)
+                          setEditorSearchQuery('')
+                        }
+                      }}
+                      placeholder="Cerca nel file"
+                      aria-label="Cerca nel file attivo"
+                    />
+                    <span className="editor-search-count" aria-live="polite">
+                      {editorSearchQuery.trim() ? `${editorSearchMatches.length ? editorSearchMatchIndex + 1 : 0}/${editorSearchMatches.length}` : ''}
+                    </span>
+                    <button
+                      type="button"
+                      className="editor-search-next"
+                      title="Risultato successivo"
+                      aria-label="Risultato successivo"
+                      onClick={() => focusEditorSearchMatch(1)}
+                      disabled={editorSearchMatches.length === 0}
+                    >
+                      <ChevronDown size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="editor-search-close"
+                      title="Chiudi ricerca"
+                      aria-label="Chiudi ricerca"
+                      onClick={() => {
+                        setEditorSearchOpen(false)
+                        setEditorSearchQuery('')
+                      }}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               <span className="toolbar-inline-divider" aria-hidden="true" />
               <button
                 type="button"
@@ -4544,11 +4793,27 @@ function App() {
                 ) : null}
               </div>
             ) : null}
+            {characterTableContextActive ? (
+              <button
+                type="button"
+                className="toolbar-menu-trigger icon-only character-table-refresh"
+                title="Aggiorna tabella personaggi"
+                aria-label="Aggiorna tabella personaggi"
+                onClick={updateCurrentCharacterTable}
+                disabled={editorEditingDisabled}
+              >
+                <RefreshCw size={15} />
+              </button>
+            ) : null}
           </div>
           <div
             className="editor-scroll-area"
             onPointerUp={(event) => syncTableContextFromTarget(event.target)}
-            onKeyUp={() => setTableContextActive(editor ? selectionIsInsideNode(editor, 'table') : false)}
+            onKeyUp={() => {
+              const tableContext = editor ? currentTableContext(editor) : undefined
+              setTableContextActive(Boolean(tableContext?.tableNode))
+              setCharacterTableContextActive(Boolean(tableContext?.isCharacterTable))
+            }}
           >
             <EditorContent editor={editor} />
           </div>
@@ -4809,6 +5074,11 @@ function App() {
           onResetPin={() => void publishScriptJson('update', true)}
           onUnpublish={() => void unpublishScriptJson()}
           onCopyLink={() => void copyPublishedLink()}
+          onOpenLink={() => {
+            if (!publishState.shareUid) return
+            openShareTab(publishState.shareUid)
+            setPublishDialogOpen(false)
+          }}
         />
       ) : null}
       {storePublicationDialogOpen ? (
@@ -4967,6 +5237,7 @@ function PublishScriptModal({
   onResetPin,
   onUnpublish,
   onCopyLink,
+  onOpenLink,
 }: {
   state: PublishState
   disabled: boolean
@@ -4976,6 +5247,7 @@ function PublishScriptModal({
   onResetPin: () => void
   onUnpublish: () => void
   onCopyLink: () => void
+  onOpenLink: () => void
 }) {
   const busy = state.status === 'publishing' || state.status === 'removing'
   const [qrUrl, setQrUrl] = useState('')
@@ -5055,8 +5327,17 @@ function PublishScriptModal({
             <div className="publish-share">
               <label>
                 Link condivisione
-                <div className="publish-link-row">
+                <div className="publish-link-row publish-share-link-row">
                   <input readOnly value={state.url} onFocus={(event) => event.currentTarget.select()} />
+                  <button
+                    type="button"
+                    className="publish-link-open"
+                    aria-label="Apri condivisione in un nuovo tab"
+                    title="Apri condivisione in un nuovo tab"
+                    onClick={onOpenLink}
+                  >
+                    <ExternalLink size={14} />
+                  </button>
                   <button type="button" onClick={onCopyLink}>
                     <Copy size={14} />
                     Copia
@@ -7783,14 +8064,18 @@ const currentTableContext = (editor: Editor) => {
   const { $from } = editor.state.selection
   let tableNode: ProseMirrorNode | undefined
   let rowNode: ProseMirrorNode | undefined
+  let tablePosition: number | undefined
   for (let depth = $from.depth; depth > 0; depth -= 1) {
     const node = $from.node(depth)
     if (!rowNode && node.type.name === 'tableRow') rowNode = node
-    if (!tableNode && node.type.name === 'table') tableNode = node
+    if (!tableNode && node.type.name === 'table') {
+      tableNode = node
+      tablePosition = $from.before(depth)
+    }
   }
   const isHeaderRow = Boolean(rowNode && tableRowIsHeader(rowNode))
   const isCharacterTable = Boolean(tableNode && tableIsCharacterTable(tableNode))
-  return { tableNode, rowNode, isHeaderRow, isCharacterTable }
+  return { tableNode, rowNode, tablePosition, isHeaderRow, isCharacterTable }
 }
 
 const tableRowIsHeader = (row: ProseMirrorNode) => {
@@ -7826,6 +8111,118 @@ const normalizeTableHeaderText = (value: string) =>
     .replace(/[\u0300-\u036f]/g, '')
     .trim()
     .toLowerCase()
+
+type EditorSearchMatch = {
+  from: number
+  to: number
+  nodeSelection?: boolean
+}
+
+const searchEditorDocument = (editor: Editor, query: string): EditorSearchMatch[] => {
+  const normalizedQuery = query.trim().toLocaleLowerCase('it-IT')
+  if (!normalizedQuery) return []
+
+  const matches: EditorSearchMatch[] = []
+  editor.state.doc.descendants((node, position) => {
+    let text = ''
+    let nodeSelection = false
+    if (node.type.name === 'text') {
+      text = node.text ?? ''
+    } else if (node.type.name === 'scriptDialogue') {
+      text = `${String(node.attrs.character ?? '')} ${String(node.attrs.text ?? '')}`.trim()
+      nodeSelection = true
+    } else if (node.type.name === 'scriptNote') {
+      text = `${String(node.attrs.title ?? '')} ${String(node.attrs.content ?? '')}`.trim()
+      nodeSelection = true
+    } else if (node.type.name === 'scriptChip') {
+      text = String(node.attrs.label ?? '')
+      nodeSelection = true
+    }
+    if (!text) return
+
+    const searchableText = text.toLocaleLowerCase('it-IT')
+    let fromIndex = 0
+    while (fromIndex < searchableText.length) {
+      const matchIndex = searchableText.indexOf(normalizedQuery, fromIndex)
+      if (matchIndex < 0) break
+      matches.push({
+        from: position + (nodeSelection ? 0 : matchIndex),
+        to: position + (nodeSelection ? node.nodeSize : matchIndex + normalizedQuery.length),
+        nodeSelection,
+      })
+      fromIndex = matchIndex + Math.max(normalizedQuery.length, 1)
+      if (nodeSelection) break
+    }
+  })
+  return matches
+}
+
+const characterPresenceFromMarkdown = (markdown: string, characters: CharacterOption[]) => {
+  const knownNames = new Map(characters.map((character) => [normalizeCharacterName(character.name), character.name]))
+  const presence = new Map<string, string[]>()
+  let act = 0
+  let scene = 0
+
+  const addPresence = (character: string) => {
+    if (isCollectiveCharacterName(character)) return
+    const normalized = normalizeCharacterName(character)
+    if (!normalized || !knownNames.has(normalized) || !act || !scene) return
+    const values = presence.get(normalized) ?? []
+    const value = `${act}/${scene}`
+    if (!values.includes(value)) values.push(value)
+    presence.set(normalized, values)
+  }
+
+  for (const rawLine of markdown.split('\n')) {
+    const line = rawLine.trim()
+    const heading = line.match(/^(#{1,3})\s+(.+?)\s*#*$/)
+    if (heading) {
+      const level = heading[1].length
+      const title = heading[2].trim()
+      if (level === 1) {
+        const number = title.match(/\b(?:atto|act)\s+(\d+)/i)?.[1]
+        act = number ? Number(number) : act + 1
+        scene = 0
+      } else if (level === 2) {
+        const number = title.match(/\b(?:scena|scene)\s+(\d+)/i)?.[1]
+        scene = number ? Number(number) : scene + 1
+      }
+      continue
+    }
+
+    const structured = parseStructuredDialogueMarker(line)
+    if (structured) {
+      addPresence(structured.character)
+      continue
+    }
+    const legacy = line.match(/^\*\*([^*:\n]+)\*\*:\s+.+$/) ?? line.match(/^\*\*([^*:\n]+):\*\*\s+.+$/)
+    if (legacy) addPresence(legacy[1].trim())
+  }
+
+  return new Map([...presence.entries()].map(([key, values]) => [key, values.join('; ')]))
+}
+
+const dialogueCharactersFromMarkdown = (markdown: string): CharacterOption[] => {
+  const characters = new Map<string, CharacterOption>()
+  const addCharacter = (name: string) => {
+    const trimmed = name.trim()
+    const id = normalizeCharacterName(trimmed)
+    if (!id || isCollectiveCharacterName(trimmed) || characters.has(id)) return
+    characters.set(id, { id: slug(trimmed), name: trimmed })
+  }
+
+  for (const rawLine of markdown.split('\n')) {
+    const line = rawLine.trim()
+    const structured = parseStructuredDialogueMarker(line)
+    if (structured) {
+      addCharacter(structured.character)
+      continue
+    }
+    const legacy = line.match(/^\*\*([^*:\n]+)\*\*:\s+.+$/) ?? line.match(/^\*\*([^*:\n]+):\*\*\s+.+$/)
+    if (legacy) addCharacter(legacy[1])
+  }
+  return [...characters.values()]
+}
 
 const bookmarkTitleFromSelection = (editor: Editor) => {
   const { from, to } = editor.state.selection
@@ -9326,8 +9723,23 @@ const parsePublishedScriptItems = (
 
   for (let index = 0; index < lines.length; index += 1) {
     const trimmed = lines[index].trim()
-    if (trimmed.startsWith('## ') || /^SCENA\b/i.test(trimmed)) {
-      sceneId = slug(trimmed.replace(/^##\s*/, ''))
+    const headingMatch = trimmed.match(/^#{1,6}\s+(.+?)\s*#*$/)
+    const headingText = headingMatch?.[1]?.trim() || ''
+    const isActHeading = /^(atto|act)\b/i.test(headingText)
+    const isSceneHeading = /^(scena|scene)\b/i.test(headingText)
+    if (headingMatch && (isActHeading || isSceneHeading)) {
+      const headingType = isActHeading ? 'act' : 'scene'
+      if (headingType === 'act') sceneId = undefined
+      if (headingType === 'scene') sceneId = slug(headingText)
+      items.push({
+        kind: 'heading',
+        id: `heading-${index + 1}`,
+        headingType,
+        level: headingType === 'act' ? 1 : 2,
+        text: headingText,
+        sceneId: headingType === 'scene' ? sceneId : undefined,
+        sourceLine: index + 1,
+      })
       continue
     }
 

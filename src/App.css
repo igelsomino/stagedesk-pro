@@ -654,6 +654,19 @@ h1 {
   height: calc(100vh - 46px);
 }
 
+.workspace.workspace-embedded-tab {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace.workspace-embedded-tab > .left-sidebar,
+.workspace.workspace-embedded-tab > .right-sidebar {
+  display: none;
+}
+
+.workspace.workspace-embedded-tab > .editor-column {
+  min-width: 0;
+}
+
 .sidebar {
   min-width: 0;
   overflow-x: auto;
@@ -1304,6 +1317,12 @@ body.stagedesk-pointer-dragging * {
   overflow-x: auto;
 }
 
+.editor-toolbar.search-open {
+  position: relative;
+  min-height: 70px;
+  overflow-x: auto;
+}
+
 .editor-toolbar button {
   display: inline-flex;
   align-items: center;
@@ -1350,6 +1369,88 @@ body.stagedesk-pointer-dragging * {
 .toolbar-menu {
   position: relative;
   flex: 0 0 auto;
+}
+
+.editor-search-toolbar {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.editor-search-toolbar > .toolbar-menu-trigger {
+  color: var(--text-muted);
+}
+
+.editor-search-toolbar.is-open > .toolbar-menu-trigger,
+.editor-search-toolbar > .toolbar-menu-trigger:hover {
+  color: var(--text-accent-hover);
+}
+
+.editor-search-control {
+  position: absolute;
+  z-index: 4;
+  top: 40px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  width: min(320px, calc(100% - 20px));
+  margin-left: 3px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: 0 4px 0 7px;
+  background: var(--background-tertiary);
+  color: var(--text-faint);
+}
+
+.editor-search-control:focus-within {
+  border-color: var(--interactive-accent);
+  box-shadow: inset 0 0 0 1px var(--interactive-accent);
+}
+
+.editor-search-control input {
+  width: 148px;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 0.78rem;
+}
+
+.editor-search-control input::placeholder {
+  color: var(--text-faint);
+}
+
+.editor-search-count {
+  min-width: 31px;
+  color: var(--text-faint);
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+.editor-search-control button {
+  width: 22px;
+  min-height: 22px;
+  border: 0;
+  border-radius: var(--radius-s);
+  padding: 0;
+  color: var(--text-muted);
+}
+
+.editor-search-control button:hover:not(:disabled) {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.editor-search-control button:disabled {
+  opacity: 0.45;
+}
+
+.character-table-refresh {
+  color: var(--text-accent-hover);
 }
 
 .toolbar-menu summary,
@@ -1935,6 +2036,15 @@ body.stagedesk-pointer-dragging * {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
+}
+
+.publish-share-link-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.publish-link-open {
+  width: 34px;
+  padding-inline: 0;
 }
 
 .publish-link-row input {
