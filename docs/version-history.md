@@ -1,5 +1,12 @@
 # Novità
 
+## Versione 1.0.39
+
+> Allineamento della documentazione incorporata e della release desktop.
+
+- Aggiornato il fallback offline della **Version history** visualizzata nel menu Aiuto.
+- Allineati versione dell'app, documentazione locale e artefatti pubblicati.
+
 ## Versione 1.0.38
 
 > Allineamento del flusso Store e miglioramento del lavoro nell'editor.

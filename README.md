@@ -2,7 +2,7 @@
 
 Applicazione desktop/web per scrittura, organizzazione e messa in scena di copioni teatrali con note di regia, cue multimediali, raccolta media, modalità schermo intero ed export PDF.
 
-Versione desktop corrente: **1.0.38**.
+Versione desktop corrente: **1.0.39**.
 
 ## Scopo
 

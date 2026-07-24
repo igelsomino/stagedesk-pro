@@ -70,6 +70,23 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.39
+
+> Allineamento della documentazione incorporata e della release desktop.
+
+- Aggiornato il fallback offline della **Version history** visualizzata nel menu Aiuto.
+- Allineati versione dell'app, documentazione locale e artefatti pubblicati.
+
+## Versione 1.0.38
+
+> Allineamento del flusso Store e miglioramento del lavoro nell'editor.
+
+- Aggiunto il comando **Valuta copione** direttamente nella toolbar, accanto agli strumenti teatro.
+- Il comando di valutazione è visibile esclusivamente sul file effettivamente importato dallo Store.
+- Ridotta la tipografia della dialog **Valuta il copione** e migliorata la selezione del voto prima della conferma.
+- Uniformata la gestione del trascinamento di note, battute e cue nell'editor.
+- Stabilizzata la struttura laterale e la navigazione dei contenuti lunghi.
+
 ## Versione 1.0.37
 
 > Stato di pubblicazione vincolato al file attivo.
