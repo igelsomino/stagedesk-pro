@@ -420,6 +420,7 @@ function App() {
   const editorScrollAreaRef = useRef<HTMLDivElement>(null)
   const editorScrollPositionsRef = useRef<Record<string, number>>({})
   const editorRenderedPathRef = useRef('')
+  const editorLoadedPathRef = useRef('')
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const pendingEditorSelectionRef = useRef<number | undefined>(undefined)
   const fullscreenReturnBlockRef = useRef<ReturnType<typeof parseScriptBlocks>[number] | undefined>(undefined)
@@ -1706,6 +1707,7 @@ function App() {
     if (!editor) return
 
     if (activeEmbeddedTab) {
+      editorLoadedPathRef.current = ''
       editorRenderedPathRef.current = ''
       editor.commands.setContent('', { emitUpdate: false })
       setEditorMarkdown('')
@@ -1721,6 +1723,7 @@ function App() {
     }
 
     if (activeAppDocument) {
+      editorLoadedPathRef.current = ''
       editorRenderedPathRef.current = ''
       editor.commands.setContent(markdownToHtml(activeAppDocumentMarkdown, { preserveEmptyParagraphs: false }), { emitUpdate: false })
       setEditorMarkdown(activeAppDocumentMarkdown)
@@ -1735,6 +1738,7 @@ function App() {
     }
 
     if (!activeFilePath) {
+      editorLoadedPathRef.current = ''
       editorRenderedPathRef.current = ''
       editor.commands.setContent('', { emitUpdate: false })
       setEditorMarkdown('')
@@ -1749,12 +1753,18 @@ function App() {
       return
     }
 
+    // A project state update is expected while typing. Do not rebuild the
+    // ProseMirror document for the same file, otherwise the native selection
+    // and scroll position can jump during an edit.
+    if (editorLoadedPathRef.current === activeFilePath) return
+
     const content =
       draftsRef.current[activeFilePath] ??
       findMarkdownNode(projectScriptsRef.current, activeFilePath)?.content ??
       ''
     const filePathToRestore = activeFilePath
     editor.commands.setContent(markdownToHtml(content), { emitUpdate: false })
+    editorLoadedPathRef.current = filePathToRestore
     setEditorMarkdown(content)
     const restoreScrollPosition = () => {
       const scrollArea = editorScrollAreaRef.current
@@ -1778,7 +1788,7 @@ function App() {
     syncEditorCueRefsAtSelection(editor, setCurrentEditorCueRefIds)
     setEditorNoteCollapseSummaryValue(editorNoteCollapseSummary(editor))
     syncEditorSceneState(editor, setActiveEditorSceneId)
-  }, [activeAppDocument, activeAppDocumentMarkdown, activeEmbeddedTab, activeFilePath, editor, project.id])
+  }, [activeAppDocument, activeAppDocumentMarkdown, activeEmbeddedTab, activeFilePath, activePath, editor, project.id])
 
   useEffect(() => {
     if (!editor || activeAppDocument || activeEmbeddedTab || !activeFilePath) {
@@ -8164,7 +8174,7 @@ const normalizeCharacterHeader = (value: string) =>
     .replace(/[^a-z0-9]/gi, '')
     .toLowerCase()
 
-const COLLECTIVE_CHARACTER_KEYS = new Set(['tutti', 'tutte', 'coro', 'ensemble', 'tuttiinsieme'])
+const COLLECTIVE_CHARACTER_KEYS = new Set(['tutti', 'tutte', 'coro', 'ensemble', 'tuttiinsieme', 'prologo'])
 
 const isCollectiveCharacterName = (value: string) =>
   COLLECTIVE_CHARACTER_KEYS.has(normalizeCharacterHeader(value))

@@ -1,5 +1,15 @@
 # Novità
 
+## Versione 1.0.42
+
+> Stabilità dell’editor e navigazione più affidabile in StageDesk Share.
+
+- Il termine **Prologo** non viene più aggiunto alla lista dei personaggi.
+- Evitata la ricostruzione del documento ProseMirror durante gli aggiornamenti di stato mentre si scrive, prevenendo salti di cursore e scroll.
+- Il titolo del copione condiviso viene visualizzato in maiuscolo con parole separate da trattini.
+- Allineati gli stili H1 degli atti e H2 delle scene di StageDesk Share a quelli dell’editor StageDesk Pro.
+- Il selettore della struttura in StageDesk Share conserva la scena o l’atto scelto anche dopo il caricamento progressivo del copione.
+
 ## Versione 1.0.41
 
 > Navigazione per-file e rifiniture del lavoro nell'editor e in StageDesk Share.

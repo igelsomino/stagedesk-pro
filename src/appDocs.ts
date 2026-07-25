@@ -72,6 +72,16 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.42
+
+> Stabilità dell’editor e navigazione più affidabile in StageDesk Share.
+
+- Il termine **Prologo** non viene più aggiunto alla lista dei personaggi.
+- Evitata la ricostruzione del documento durante gli aggiornamenti di stato mentre si scrive.
+- Il titolo del copione condiviso usa maiuscole e trattini tra le parole.
+- Gli atti e le scene condivisi usano rispettivamente gli stili H1 e H2 dell’editor StageDesk Pro.
+- Il selettore della struttura conserva la voce scelta dopo il caricamento progressivo.
+
 ## Versione 1.0.41
 
 > Navigazione per-file e rifiniture del lavoro nell'editor e in StageDesk Share.
