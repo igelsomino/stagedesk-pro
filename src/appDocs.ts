@@ -50,7 +50,7 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 - Organizza copioni, media e bookmark dalla colonna Struttura.
 - Inserisci note di regia e cue multimediali direttamente nel testo.
 - Usa oggetti battuta collegati alla tabella personaggi.
-- Digita \`nota:\` su una riga vuota per inserire una nota generale con focus nel contenuto.
+- Digita \`nota:\` su una riga vuota per inserire una nota generale già collassata, con focus sul titolo. Sono disponibili anche gli shortcut \`movimento:\`, \`posizione:\`, \`personaggi:\`, \`tono:\`, \`luce:\`, \`audio:\`, \`video:\`, \`immagine:\` e \`oggetto:\`.
 - Inserisci Atto, Scena, Sezione, battute e tabelle dalla toolbar teatrale.
 - Usa Cmd+Invio su macOS o Ctrl+Invio su Windows/Linux dentro una nota o battuta per creare una riga sotto il box.
 - Condividi il copione attivo per future app attori con un link \`/share/[UID]\`, QR code e PIN personale di cinque cifre.
@@ -71,6 +71,15 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 `)
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
+
+## Versione 1.0.41
+
+> Navigazione per-file e rifiniture del lavoro nell'editor e in StageDesk Share.
+
+- La posizione di scorrimento viene conservata separatamente per ogni file aperto.
+- La navigazione da titolo nota attraversa cue e altri elementi non testuali per raggiungere il blocco successivo o precedente.
+- La valutazione non viene proposta dopo che l'utente ha già votato il copione importato.
+- Il selettore di atto/scena in StageDesk Share ha un margine destro più leggibile.
 
 ## Versione 1.0.39
 
@@ -225,7 +234,7 @@ const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 > Aggiornamento dedicato a stabilita editor, documentazione pubblica e standard del repository.
 
 - Corretto il rendering di Aiuto e Novità: le righe vuote Markdown non generano più paragrafi vuoti visibili tra le sezioni.
-- Aggiunta la scorciatoia testuale \`nota:\` per creare una nota generale con focus automatico nel contenuto.
+- Aggiunti gli shortcut testuali per creare note di regia già collassate, con focus automatico sul titolo: \`nota:\`, \`movimento:\`, \`posizione:\`, \`personaggi:\`, \`tono:\`, \`luce:\`, \`audio:\`, \`video:\`, \`immagine:\` e \`oggetto:\`.
 - Aggiunto Cmd+Invio su macOS e Ctrl+Invio su Windows/Linux nelle textarea di note e battute per creare una riga sotto il box.
 - Migliorata la normalizzazione Markdown/editor per rimuovere righe vuote reali tra blocchi strutturali, note, cue e battute.
 - I cue in modalità schermo intero vengono risolti tramite ID stabile, evitando duplicazioni di immagini e mancati avvii di cue musicali.
@@ -245,7 +254,7 @@ const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 - Digitando i due punti dopo il nome di un personaggio presente nella tabella personaggi, la riga viene convertita automaticamente in un oggetto battuta.
 - Aggiunte scorciatoie rapide per inserire Atto, Scena, Sezione e battute dei personaggi.
 - Il pulsante struttura applica Atto, Scena o Sezione alla riga corrente, al testo selezionato o inserisce il titolo corretto se la riga è vuota.
-- Digitando \`nota:\` su una riga vuota viene inserita una nota generale con focus automatico nel contenuto.
+- Digitando \`nota:\` o il nome di un tipo seguito da \`:\` su una riga vuota viene inserita la nota corrispondente già collassata; il focus viene portato sul titolo per rinominarla subito.
 - Dentro le textarea di note e battute Cmd+Invio su macOS o Ctrl+Invio su Windows/Linux crea una nuova riga sotto il box e sposta lì il cursore.
 - Aggiunto un pulsante dedicato per collassare o espandere tutte le note dell'editor.
 - Aggiunto un inserimento tabella da toolbar con selezione rapida di righe e colonne e prima riga impostata come intestazione.

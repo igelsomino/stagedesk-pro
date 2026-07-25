@@ -45,6 +45,14 @@ describe('markdown chip rendering', () => {
     expect(html).toContain('data-note-collapsed="true"')
   })
 
+  it('collapses notes by default while preserving an explicit expanded state', () => {
+    const defaultHtml = markdownToHtml('::regia{id="note-default" type="tone" color="purple" title="Tono"}\nNota.\n::')
+    const expandedHtml = markdownToHtml('::regia{id="note-expanded" type="tone" color="purple" title="Tono" collapsed="false"}\nNota.\n::')
+
+    expect(defaultHtml).toContain('data-note-collapsed="true"')
+    expect(expandedHtml).toContain('data-note-collapsed="false"')
+  })
+
   it('renders cue chips with title, stable ref and cue type color', () => {
     const html = markdownToHtml('::media{id="cue-001" type="audio" src="media/musiche/blues-intro.mp3" title="Blues intro"}\nTesto\n::')
 

@@ -69,7 +69,7 @@ import {
   LogOut,
   X,
 } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   CSSProperties,
   ChangeEvent,
@@ -415,6 +415,11 @@ function App() {
   const startupProjectReadyRef = useRef(false)
   const startupUserEditedRef = useRef(false)
   const toastTimeoutRef = useRef<number | undefined>(undefined)
+  const uiStatePersistTimerRef = useRef<number | undefined>(undefined)
+  const editorUiSyncFrameRef = useRef<number | null>(null)
+  const editorScrollAreaRef = useRef<HTMLDivElement>(null)
+  const editorScrollPositionsRef = useRef<Record<string, number>>({})
+  const editorRenderedPathRef = useRef('')
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const pendingEditorSelectionRef = useRef<number | undefined>(undefined)
   const fullscreenReturnBlockRef = useRef<ReturnType<typeof parseScriptBlocks>[number] | undefined>(undefined)
@@ -462,7 +467,10 @@ function App() {
   })
   const [storeRatingStatus, setStoreRatingStatus] = useState('')
   const [storeRatingSubmitting, setStoreRatingSubmitting] = useState(false)
+  const [ratedStoreScriptId, setRatedStoreScriptId] = useState('')
+  const [storeRatingCheckPending, setStoreRatingCheckPending] = useState(false)
   const [toolbarState, setToolbarState] = useState<ToolbarState>(emptyToolbarState)
+  const [editorNoteCollapseSummaryValue, setEditorNoteCollapseSummaryValue] = useState({ total: 0, collapsed: 0 })
   const [tableContextActive, setTableContextActive] = useState(false)
   const [characterTableContextActive, setCharacterTableContextActive] = useState(false)
   const [activeEditorSceneId, setActiveEditorSceneId] = useState('')
@@ -490,7 +498,9 @@ function App() {
     activeFile &&
     storeRatingTarget.filePath === activeFile.path &&
     !activeAppDocument &&
-    !activeStoreTab,
+    !activeStoreTab &&
+    !storeRatingCheckPending &&
+    ratedStoreScriptId !== storeRatingTarget.scriptId,
   )
   const selectedScriptNode = useMemo(
     () => findTreeNode(project.scripts, selectedScriptPath),
@@ -510,15 +520,20 @@ function App() {
     : drafts[activePath] ?? activeFile?.content ?? ''
   const [editorMarkdown, setEditorMarkdown] = useState(activeMarkdown)
   const activeCharacterMarkdown = activeAppDocument || activeEmbeddedTab ? activeMarkdown : editorMarkdown || activeMarkdown
+  // Parsing the whole document on every keystroke makes long scripts compete
+  // with the editor for the main thread. React can refresh these derived views
+  // at low priority while the editable surface remains responsive.
+  const deferredActiveMarkdown = useDeferredValue(activeMarkdown)
+  const deferredCharacterMarkdown = useDeferredValue(activeCharacterMarkdown)
   const activeCharacters = useMemo(
-    () => charactersFromMarkdown(activeCharacterMarkdown, project.characters),
-    [activeCharacterMarkdown, project.characters],
+    () => charactersFromMarkdown(deferredCharacterMarkdown, project.characters),
+    [deferredCharacterMarkdown, project.characters],
   )
   const activeCueRefIds = useMemo(
-    () => uniqueValues([...markerRefIdsFromMarkdown(activeMarkdown, 'cue'), ...editorCueRefIds]),
-    [activeMarkdown, editorCueRefIds],
+    () => uniqueValues([...markerRefIdsFromMarkdown(deferredActiveMarkdown, 'cue'), ...editorCueRefIds]),
+    [deferredActiveMarkdown, editorCueRefIds],
   )
-  const blocks = useMemo(() => parseScriptBlocks(activeMarkdown), [activeMarkdown])
+  const blocks = useMemo(() => parseScriptBlocks(deferredActiveMarkdown), [deferredActiveMarkdown])
   const performanceBlocks = useMemo(
     () => assignCueBlocks(blocks.filter((block) => isFullscreenBlock(block.type)), project.cues, activePath, activeCueRefIds),
     [activeCueRefIds, activePath, blocks, project.cues],
@@ -630,6 +645,45 @@ function App() {
     }
     savePersistedUiState(state)
     diagnosticLog('ui-state-persisted', state)
+  }, [])
+
+  const scheduleUiStatePersist = useCallback(() => {
+    if (uiStatePersistTimerRef.current !== undefined) {
+      window.clearTimeout(uiStatePersistTimerRef.current)
+    }
+    uiStatePersistTimerRef.current = window.setTimeout(() => {
+      uiStatePersistTimerRef.current = undefined
+      persistUiStateNow()
+    }, 160)
+  }, [persistUiStateNow])
+
+  const scheduleEditorUiSync = useCallback((currentEditor: Editor) => {
+    if (editorUiSyncFrameRef.current !== null) return
+    editorUiSyncFrameRef.current = window.requestAnimationFrame(() => {
+      editorUiSyncFrameRef.current = null
+      syncToolbarState(currentEditor, setToolbarState)
+      syncOutlineState(currentEditor, setActiveOutline, setActiveOutlineId)
+      syncBookmarkState(currentEditor, setActiveBookmarks, setActiveBookmarkId)
+      syncEditorSceneState(currentEditor, setActiveEditorSceneId)
+      syncEditorCueRefs(currentEditor, setEditorCueRefIds)
+      syncEditorCueRefsAtSelection(currentEditor, setCurrentEditorCueRefIds)
+      const noteSummary = editorNoteCollapseSummary(currentEditor)
+      setEditorNoteCollapseSummaryValue((current) => (
+        current.total === noteSummary.total && current.collapsed === noteSummary.collapsed ? current : noteSummary
+      ))
+      const tableContext = currentTableContext(currentEditor)
+      setTableContextActive(Boolean(tableContext.tableNode))
+      setCharacterTableContextActive(tableContext.isCharacterTable)
+    })
+  }, [])
+
+  useEffect(() => () => {
+    if (uiStatePersistTimerRef.current !== undefined) {
+      window.clearTimeout(uiStatePersistTimerRef.current)
+    }
+    if (editorUiSyncFrameRef.current !== null) {
+      window.cancelAnimationFrame(editorUiSyncFrameRef.current)
+    }
   }, [])
 
   const selectLeftTab = useCallback((nextTab: PersistedUiState['leftTab']) => {
@@ -773,6 +827,32 @@ function App() {
   useEffect(() => {
     void loadStorePublicationState()
   }, [loadStorePublicationState])
+
+  useEffect(() => {
+    let cancelled = false
+    setRatedStoreScriptId('')
+    if (!user || !storeRatingTarget?.scriptId) {
+      setStoreRatingCheckPending(false)
+      return
+    }
+
+    setStoreRatingCheckPending(true)
+    void supabase
+      .from('store_ratings')
+      .select('id')
+      .eq('script_id', storeRatingTarget.scriptId)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return
+        // A missing rating must not block the action. RLS still protects the query.
+        if (!error && data?.id) setRatedStoreScriptId(storeRatingTarget.scriptId)
+        setStoreRatingCheckPending(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [storeRatingTarget?.scriptId, user])
 
   useEffect(() => {
     if (!activeFile || isExampleScriptFile(activeFile, editorMarkdown)) {
@@ -1286,58 +1366,22 @@ function App() {
   }, [])
 
   const editor = useEditor({
-    extensions: [StarterKit, linkExtension, tableExtensions, ScriptNote, ScriptDialogue, ScriptChip],
+    extensions: [StarterKit.configure({ link: false }), linkExtension, tableExtensions, ScriptNote, ScriptDialogue, ScriptChip],
     content: markdownToHtml(activeMarkdown),
     onCreate({ editor: currentEditor }) {
       diagnosticLog('editor-created', {
         activePath: activePathRef.current,
         selection: currentEditor.state.selection.from,
       })
-      setEditorMarkdown(editorJsonToMarkdown(currentEditor.getJSON()))
-      syncToolbarState(currentEditor, setToolbarState)
-      syncOutlineState(currentEditor, setActiveOutline, setActiveOutlineId)
-      syncBookmarkState(currentEditor, setActiveBookmarks, setActiveBookmarkId)
-      syncEditorSceneState(currentEditor, setActiveEditorSceneId)
-      syncEditorCueRefs(currentEditor, setEditorCueRefIds)
-      syncEditorCueRefsAtSelection(currentEditor, setCurrentEditorCueRefIds)
-      const tableContext = currentTableContext(currentEditor)
-      setTableContextActive(Boolean(tableContext.tableNode))
-      setCharacterTableContextActive(tableContext.isCharacterTable)
+      scheduleEditorUiSync(currentEditor)
     },
     onSelectionUpdate({ editor: currentEditor }) {
-      diagnosticLog('editor-selection-update', {
-        activePath: activePathRef.current,
-        selection: currentEditor.state.selection.from,
-        scene: editorSceneIdAtPosition(currentEditor.state.doc, currentEditor.state.selection.from),
-      })
       lastEditorSelectionRef.current = currentEditor.state.selection.from
-      persistUiStateNow(currentEditor.state.selection.from)
-      syncToolbarState(currentEditor, setToolbarState)
-      syncOutlineState(currentEditor, setActiveOutline, setActiveOutlineId)
-      syncBookmarkState(currentEditor, setActiveBookmarks, setActiveBookmarkId)
-      syncEditorSceneState(currentEditor, setActiveEditorSceneId)
-      syncEditorCueRefs(currentEditor, setEditorCueRefIds)
-      syncEditorCueRefsAtSelection(currentEditor, setCurrentEditorCueRefIds)
-      const tableContext = currentTableContext(currentEditor)
-      setTableContextActive(Boolean(tableContext.tableNode))
-      setCharacterTableContextActive(tableContext.isCharacterTable)
+      scheduleUiStatePersist()
+      scheduleEditorUiSync(currentEditor)
     },
     onTransaction({ editor: currentEditor }) {
-      diagnosticLog('editor-transaction', {
-        activePath: activePathRef.current,
-        selection: currentEditor.state.selection.from,
-        docSize: currentEditor.state.doc.content.size,
-      })
-      setEditorMarkdown((current) => {
-        const next = editorJsonToMarkdown(currentEditor.getJSON())
-        return current === next ? current : next
-      })
-      syncToolbarState(currentEditor, setToolbarState)
-      syncOutlineState(currentEditor, setActiveOutline, setActiveOutlineId)
-      syncBookmarkState(currentEditor, setActiveBookmarks, setActiveBookmarkId)
-      syncEditorSceneState(currentEditor, setActiveEditorSceneId)
-      syncEditorCueRefs(currentEditor, setEditorCueRefIds)
-      syncEditorCueRefsAtSelection(currentEditor, setCurrentEditorCueRefIds)
+      scheduleEditorUiSync(currentEditor)
     },
     editorProps: {
       attributes: {
@@ -1355,12 +1399,13 @@ function App() {
       handleTextInput(view, from, to, text) {
         if (text !== ':') return false
         if (
-          convertNoteColonToGeneralNote(
+          convertNoteColonToNote(
             view,
             from,
             to,
             activeFilePathRef.current,
             currentSceneRef.current ?? '',
+            projectRef.current.noteTypes,
             (note) => {
               persistProject({ ...projectRef.current, notes: [...projectRef.current.notes, note] })
               setSelectedNoteId(note.id)
@@ -1473,7 +1518,6 @@ function App() {
   const selectedTableContext = editor ? currentTableContext(editor) : undefined
   const selectedCharacterTable = Boolean(selectedTableContext?.isCharacterTable)
   const selectedCharacterTableHeaderRow = Boolean(selectedTableContext?.isCharacterTable && selectedTableContext.isHeaderRow)
-  const editorNoteCollapseSummaryValue = editorNoteCollapseSummary(editor)
   const allEditorNotesCollapsed =
     editorNoteCollapseSummaryValue.total > 0 &&
     editorNoteCollapseSummaryValue.collapsed === editorNoteCollapseSummaryValue.total
@@ -1641,41 +1685,6 @@ function App() {
 
   useEffect(() => {
     if (!editor) return
-
-    const syncAfterEditorEvent = () => {
-      window.requestAnimationFrame(() => {
-        syncToolbarState(editor, setToolbarState)
-        syncOutlineState(editor, setActiveOutline, setActiveOutlineId)
-        syncBookmarkState(editor, setActiveBookmarks, setActiveBookmarkId)
-        syncEditorSceneState(editor, setActiveEditorSceneId)
-        syncEditorCueRefs(editor, setEditorCueRefIds)
-        syncEditorCueRefsAtSelection(editor, setCurrentEditorCueRefIds)
-        const tableContext = currentTableContext(editor)
-        setTableContextActive(Boolean(tableContext.tableNode))
-        setCharacterTableContextActive(tableContext.isCharacterTable)
-      })
-    }
-
-    const editorElement = editor.view.dom
-    editorElement.addEventListener('click', syncAfterEditorEvent)
-    editorElement.addEventListener('mouseup', syncAfterEditorEvent)
-    editorElement.addEventListener('keyup', syncAfterEditorEvent)
-    editorElement.addEventListener('focus', syncAfterEditorEvent)
-    editor.on('selectionUpdate', syncAfterEditorEvent)
-    editor.on('transaction', syncAfterEditorEvent)
-
-    return () => {
-      editorElement.removeEventListener('click', syncAfterEditorEvent)
-      editorElement.removeEventListener('mouseup', syncAfterEditorEvent)
-      editorElement.removeEventListener('keyup', syncAfterEditorEvent)
-      editorElement.removeEventListener('focus', syncAfterEditorEvent)
-      editor.off('selectionUpdate', syncAfterEditorEvent)
-      editor.off('transaction', syncAfterEditorEvent)
-    }
-  }, [editor])
-
-  useEffect(() => {
-    if (!editor) return
     editor.setEditable(!activeAppDocument && !activeEmbeddedTab)
   }, [activeAppDocument, activeEmbeddedTab, editor])
 
@@ -1697,6 +1706,7 @@ function App() {
     if (!editor) return
 
     if (activeEmbeddedTab) {
+      editorRenderedPathRef.current = ''
       editor.commands.setContent('', { emitUpdate: false })
       setEditorMarkdown('')
       setActiveOutline([])
@@ -1705,11 +1715,13 @@ function App() {
       setActiveBookmarkId('')
       setEditorCueRefIds([])
       setCurrentEditorCueRefIds([])
+      setEditorNoteCollapseSummaryValue({ total: 0, collapsed: 0 })
       setActiveEditorSceneId('')
       return
     }
 
     if (activeAppDocument) {
+      editorRenderedPathRef.current = ''
       editor.commands.setContent(markdownToHtml(activeAppDocumentMarkdown, { preserveEmptyParagraphs: false }), { emitUpdate: false })
       setEditorMarkdown(activeAppDocumentMarkdown)
       syncToolbarState(editor, setToolbarState)
@@ -1717,11 +1729,13 @@ function App() {
       syncBookmarkState(editor, setActiveBookmarks, setActiveBookmarkId)
       syncEditorCueRefs(editor, setEditorCueRefIds)
       syncEditorCueRefsAtSelection(editor, setCurrentEditorCueRefIds)
+      setEditorNoteCollapseSummaryValue(editorNoteCollapseSummary(editor))
       syncEditorSceneState(editor, setActiveEditorSceneId)
       return
     }
 
     if (!activeFilePath) {
+      editorRenderedPathRef.current = ''
       editor.commands.setContent('', { emitUpdate: false })
       setEditorMarkdown('')
       setActiveOutline([])
@@ -1730,6 +1744,7 @@ function App() {
       setActiveBookmarkId('')
       setEditorCueRefIds([])
       setCurrentEditorCueRefIds([])
+      setEditorNoteCollapseSummaryValue({ total: 0, collapsed: 0 })
       setActiveEditorSceneId('')
       return
     }
@@ -1738,8 +1753,17 @@ function App() {
       draftsRef.current[activeFilePath] ??
       findMarkdownNode(projectScriptsRef.current, activeFilePath)?.content ??
       ''
+    const filePathToRestore = activeFilePath
     editor.commands.setContent(markdownToHtml(content), { emitUpdate: false })
     setEditorMarkdown(content)
+    const restoreScrollPosition = () => {
+      const scrollArea = editorScrollAreaRef.current
+      if (!scrollArea) return
+      if (activePathRef.current !== filePathToRestore) return
+      editorRenderedPathRef.current = filePathToRestore
+      scrollArea.scrollTop = editorScrollPositionsRef.current[filePathToRestore] ?? 0
+    }
+    window.requestAnimationFrame(restoreScrollPosition)
     const pendingSelection = pendingEditorSelectionRef.current
     if (pendingSelection !== undefined) {
       const safePosition = Math.max(1, Math.min(pendingSelection, editor.state.doc.content.size))
@@ -1752,6 +1776,7 @@ function App() {
     syncBookmarkState(editor, setActiveBookmarks, setActiveBookmarkId)
     syncEditorCueRefs(editor, setEditorCueRefIds)
     syncEditorCueRefsAtSelection(editor, setCurrentEditorCueRefIds)
+    setEditorNoteCollapseSummaryValue(editorNoteCollapseSummary(editor))
     syncEditorSceneState(editor, setActiveEditorSceneId)
   }, [activeAppDocument, activeAppDocumentMarkdown, activeEmbeddedTab, activeFilePath, editor, project.id])
 
@@ -1793,12 +1818,6 @@ function App() {
       editor.off('update', markActiveFileDirty)
     }
   }, [activeFilePath, editor, startupProjectReady])
-
-  useEffect(() => {
-    if (!project.settings.autosave) return
-    const projectToSave = applyDraftsToProject(project, drafts)
-    storage.save(projectToSave)
-  }, [drafts, project])
 
   useEffect(() => {
     if (!project.settings.autosave) return
@@ -3107,9 +3126,9 @@ function App() {
       id: `note-${crypto.randomUUID().slice(0, 8)}`,
       type: noteType.id,
       color: noteType.color,
-      title: 'Nuova nota',
-      content: 'Inserire contenuto della nota di regia.',
-      collapsed: false,
+      title: noteType.label,
+      content: '',
+      collapsed: true,
       filePath: activeFile.path,
       anchorId: crypto.randomUUID(),
       sceneId: currentScene,
@@ -3127,7 +3146,7 @@ function App() {
           title: noteChipLabel(note, project.noteTypes),
           content: note.content,
           refId: note.id,
-          collapsed: false,
+          collapsed: true,
         },
       })
       .run()
@@ -5025,7 +5044,13 @@ function App() {
             ) : null}
           </div>
           <div
+            ref={editorScrollAreaRef}
             className="editor-scroll-area"
+            onScroll={(event) => {
+              if (editorRenderedPathRef.current) {
+                editorScrollPositionsRef.current[editorRenderedPathRef.current] = event.currentTarget.scrollTop
+              }
+            }}
             onPointerUp={(event) => syncTableContextFromTarget(event.target)}
             onKeyUp={() => {
               const tableContext = editor ? currentTableContext(editor) : undefined
@@ -5566,9 +5591,15 @@ function PublishScriptModal({
                 PIN attore
                 <div className="publish-link-row">
                   <input readOnly value={state.pin ?? ''} placeholder={state.pinAvailable ? '' : 'Non disponibile: reimposta il PIN'} />
-                  <button type="button" disabled={busy} onClick={onResetPin}>
-                    <RefreshCw size={14} />
-                    Reimposta
+                  <button
+                    type="button"
+                    className="publish-pin-reset"
+                    disabled={busy}
+                    onClick={onResetPin}
+                    aria-label="Rigenera PIN attore"
+                    title="Rigenera PIN attore"
+                  >
+                    <RefreshCw size={15} aria-hidden="true" />
                   </button>
                 </div>
               </label>
@@ -7210,12 +7241,13 @@ const convertMarkdownTableAroundSelection = (view: EditorView) => {
   return true
 }
 
-const convertNoteColonToGeneralNote = (
+const convertNoteColonToNote = (
   view: EditorView,
   from: number,
   to: number,
   filePath: string,
   sceneId: string,
+  noteTypes: NoteType[],
   onNoteCreated: (note: DirectorNote) => void,
 ) => {
   if (from !== to || !filePath) return false
@@ -7225,18 +7257,45 @@ const convertNoteColonToGeneralNote = (
 
   const textBefore = paragraph.textBetween(0, $from.parentOffset, ' ', ' ').trim()
   const textAfter = paragraph.textBetween($from.parentOffset, paragraph.content.size, ' ', ' ').trim()
-  if (normalizeCharacterName(textBefore) !== 'nota' || textAfter) return false
+  if (textAfter) return false
+
+  const aliases: Record<string, string> = {
+    nota: 'general',
+    notagenerale: 'general',
+    generale: 'general',
+    movimento: 'movement',
+    posizione: 'position',
+    personaggio: 'characters',
+    personaggi: 'characters',
+    personaggiinscena: 'characters',
+    tono: 'tone',
+    luce: 'light',
+    audio: 'audio',
+    video: 'video',
+    vide: 'video',
+    immagine: 'image',
+    immagini: 'image',
+    oggetto: 'prop',
+    oggettodiscena: 'prop',
+    prop: 'prop',
+  }
+  const shortcut = normalizeCharacterName(textBefore)
+  const typeId = aliases[shortcut] ?? noteTypes.find(
+    (noteType) => normalizeCharacterName(noteType.label) === shortcut,
+  )?.id
+  const noteType = noteTypes.find((item) => item.id === typeId)
+  if (!noteType) return false
 
   const nodeType = view.state.schema.nodes.scriptNote
   if (!nodeType) return false
 
   const note: DirectorNote = {
     id: `note-${crypto.randomUUID().slice(0, 8)}`,
-    type: 'general',
-    color: 'cyan',
-    title: 'Nota generale',
+    type: noteType.id,
+    color: noteType.color,
+    title: noteType.label,
     content: '',
-    collapsed: false,
+    collapsed: true,
     filePath,
     anchorId: crypto.randomUUID(),
     sceneId,
@@ -7251,27 +7310,27 @@ const convertNoteColonToGeneralNote = (
     title: note.title,
     content: note.content,
     refId: note.id,
-    collapsed: false,
+    collapsed: true,
   })
   const transaction = view.state.tr.replaceWith(paragraphStart, paragraphEnd, noteNode)
   transaction.setSelection(NodeSelection.create(transaction.doc, paragraphStart))
   transaction.scrollIntoView()
   view.dispatch(transaction)
   onNoteCreated(note)
-  focusScriptNoteTextarea(view, note.id)
+  focusScriptNoteTitle(view, note.id)
   return true
 }
 
-const focusScriptNoteTextarea = (view: EditorView, noteId: string, attempts = 0) => {
+const focusScriptNoteTitle = (view: EditorView, noteId: string, attempts = 0) => {
   window.requestAnimationFrame(() => {
-    const textarea = view.dom.querySelector<HTMLTextAreaElement>(`[data-ref-id="${noteId}"] textarea`)
-    if (textarea) {
-      textarea.focus()
-      textarea.setSelectionRange(textarea.value.length, textarea.value.length)
-      textarea.scrollIntoView({ block: 'center', inline: 'nearest' })
+    const titleInput = view.dom.querySelector<HTMLInputElement>(`[data-ref-id="${noteId}"] .script-note-title`)
+    if (titleInput) {
+      titleInput.focus()
+      titleInput.select()
+      titleInput.scrollIntoView({ block: 'center', inline: 'nearest' })
       return
     }
-    if (attempts < 8) focusScriptNoteTextarea(view, noteId, attempts + 1)
+    if (attempts < 8) focusScriptNoteTitle(view, noteId, attempts + 1)
   })
 }
 
@@ -10116,7 +10175,7 @@ type PdfBlock =
   | { type: 'paragraph'; text: string }
   | { type: 'dialogue'; character: string; text: string }
   | { type: 'quote'; text: string }
-  | { type: 'note'; title: string; content: string }
+  | { type: 'note'; noteType: string; title: string; content: string }
   | { type: 'cue'; title: string; content: string }
   | { type: 'table'; rows: string[][] }
 
@@ -10165,6 +10224,10 @@ const markdownToPdfBlocks = (markdown: string, mode: 'complete' | 'clean'): PdfB
       continue
     }
 
+    // Bookmark e riferimenti di navigazione restano nell'editor, ma non fanno
+    // parte del contenuto stampabile del copione.
+    if (/^\[BOOKMARK:/i.test(trimmed)) continue
+
     const richNote = trimmed.match(/^\[NOTA:\s*([^\]]+)\](?:\s+\{([^}]*)\})?$/)
     if (richNote) {
       const attrs = richNote[2] ?? ''
@@ -10172,6 +10235,7 @@ const markdownToPdfBlocks = (markdown: string, mode: 'complete' | 'clean'): PdfB
       if (mode === 'complete' || exportedNoteTypes.has(noteType)) {
         blocks.push({
           type: 'note',
+          noteType,
           title: decodePdfAttr(richNote[1].trim()),
           content: decodePdfAttr(readDirectiveAttr(attrs, 'content') || ''),
         })
@@ -10206,11 +10270,20 @@ const markdownToPdfBlocks = (markdown: string, mode: 'complete' | 'clean'): PdfB
           readDirectiveAttr(attrs, 'title') ||
           readDirectiveAttr(attrs, directiveType === 'regia' ? 'type' : 'src') ||
           (directiveType === 'regia' ? 'Nota regia' : 'Cue')
-        blocks.push({
-          type: directiveType === 'regia' ? 'note' : 'cue',
-          title,
-          content: contentLines.join('\n').trim(),
-        })
+        if (directiveType === 'regia') {
+          blocks.push({
+            type: 'note',
+            noteType,
+            title,
+            content: contentLines.join('\n').trim(),
+          })
+        } else {
+          blocks.push({
+            type: 'cue',
+            title,
+            content: contentLines.join('\n').trim(),
+          })
+        }
       }
       continue
     }
@@ -10455,6 +10528,19 @@ const formatPdfGeneratedAt = (date: Date) =>
     timeStyle: 'medium',
   }).format(date)
 
+const pdfNoteTypeLabel = (type: string) => ({
+  general: 'Nota generale',
+  movement: 'Movimento',
+  position: 'Posizione',
+  characters: 'Personaggi in scena',
+  tone: 'Tono',
+  light: 'Luce',
+  audio: 'Audio',
+  video: 'Video',
+  image: 'Immagine',
+  prop: 'Oggetto di scena',
+}[type] ?? type) || 'Nota generale'
+
 const drawPdfNoteBox = (
   doc: JsPDF,
   block: Extract<PdfBlock, { type: 'note' }>,
@@ -10465,9 +10551,19 @@ const drawPdfNoteBox = (
   marginTop: number,
 ) => {
   const padding = 10
-  const titleHeight = 15
-  const lines = doc.splitTextToSize(block.content || ' ', width - (padding * 2)) as string[]
-  const boxHeight = padding + titleHeight + Math.max(lines.length, 1) * 14 + padding
+  const titleLineHeight = 14
+  const contentLineHeight = 14
+  const contentGap = block.content.trim() ? 4 : 0
+  const title = `${pdfNoteTypeLabel(block.noteType)}: ${stripInlineMarkdown(block.title)}`
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(10)
+  const titleLines = doc.splitTextToSize(title, width - (padding * 2)) as string[]
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(10)
+  const contentLines = block.content.trim()
+    ? doc.splitTextToSize(stripInlineMarkdown(block.content), width - (padding * 2)) as string[]
+    : []
+  const boxHeight = (padding * 2) + (titleLines.length * titleLineHeight) + contentGap + (contentLines.length * contentLineHeight)
   y = ensurePdfSpace(doc, y, pageBottom, marginTop, boxHeight)
   doc.setDrawColor(148, 163, 184)
   doc.setFillColor(248, 250, 252)
@@ -10475,14 +10571,18 @@ const drawPdfNoteBox = (
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(10)
   doc.setTextColor('#334155')
-  doc.text(`Nota regia: ${block.title}`, x + padding, y + padding + 9)
+  let textY = y + padding + 10
+  for (const line of titleLines) {
+    doc.text(line, x + padding, textY)
+    textY += titleLineHeight
+  }
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(10)
   doc.setTextColor('#1f2937')
-  let textY = y + padding + titleHeight + 10
-  for (const line of lines) {
+  textY += contentGap
+  for (const line of contentLines) {
     doc.text(line, x + padding, textY)
-    textY += 14
+    textY += contentLineHeight
   }
   return y + boxHeight
 }

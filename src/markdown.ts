@@ -155,7 +155,7 @@ const toEditorMarkdownWithRefs = (markdown: string) =>
       const color = readAttr(attrs, 'color')
       const id = readAttr(attrs, 'id')
       const noteType = readAttr(attrs, 'type') ?? 'general'
-      const collapsed = readAttr(attrs, 'collapsed') === 'true'
+      const collapsed = readAttr(attrs, 'collapsed') !== 'false'
       return noteBlockLine(title || type, id, color, noteType, content.trim(), collapsed)
     })
     .replace(/::media\{([^}]*)\}[\s\S]*?::/g, (_, attrs: string) => {
@@ -519,7 +519,7 @@ const escapeAttr = (value: string) =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/\n/g, '&#10;')
 
 const noteBlockLine = (label: string, refId = '', color = '', type = 'general', content = '', collapsed = false) =>
-  `[NOTA: ${label}] {#${refId} .${color} type="${escapeAttr(type)}" content="${escapeAttr(content)}"${collapsed ? ' collapsed="true"' : ''}}`
+  `[NOTA: ${label}] {#${refId} .${color} type="${escapeAttr(type)}" content="${escapeAttr(content)}" collapsed="${collapsed ? 'true' : 'false'}"}`
 
 const dialogueBlockLine = (character: string, id = '', characterId = '', text = '', sceneId = '') => {
   const attrs = [
@@ -546,7 +546,7 @@ const parseChipLine = (line: string) => {
       color: match[3] ?? '',
       type: readAttr(extraAttrs, 'type') ?? 'general',
       content: readAttr(extraAttrs, 'content') ?? '',
-      collapsed: readAttr(extraAttrs, 'collapsed') === 'true',
+      collapsed: readAttr(extraAttrs, 'collapsed') !== 'false',
     }
   }
 

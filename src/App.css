@@ -677,6 +677,8 @@ h1 {
 }
 
 .left-sidebar {
+  display: flex;
+  flex-direction: column;
   scrollbar-color: #4a4a4a transparent;
   scrollbar-width: thin;
 }
@@ -1374,7 +1376,11 @@ body.stagedesk-pointer-dragging * {
 
 .structure-search-panel {
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 10px;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
 }
 
@@ -1483,7 +1489,9 @@ body.stagedesk-pointer-dragging * {
 .structure-search-results {
   display: grid;
   gap: 4px;
-  max-height: 52vh;
+  align-content: start;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
   padding-right: 2px;
 }
@@ -1492,6 +1500,7 @@ body.stagedesk-pointer-dragging * {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);
   align-items: start;
+  align-self: start;
   gap: 6px;
   min-width: 0;
   border: 1px solid transparent;
@@ -2143,6 +2152,7 @@ body.stagedesk-pointer-dragging * {
 
 .publish-link-editor-actions {
   position: absolute;
+  z-index: 2;
   top: 50%;
   right: 5px;
   display: flex;
@@ -2160,13 +2170,33 @@ body.stagedesk-pointer-dragging * {
   padding: 0;
   border: 0;
   border-radius: var(--radius-s);
+  position: relative;
+  z-index: 1;
   color: var(--text-muted);
-  background: transparent;
+  background: var(--background-tertiary);
+  box-shadow: 0 0 0 1px var(--background-modifier-border);
 }
 
 .publish-link-editor-actions button:hover {
   color: var(--text-normal);
   background: var(--background-modifier-hover);
+}
+
+.publish-pin-reset {
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+}
+
+.publish-pin-reset svg {
+  flex: 0 0 auto;
+}
+
+.publish-pin-field input {
+  font-size: 1rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-align: center;
 }
 
 .publish-note {
@@ -3987,7 +4017,7 @@ button.danger:hover {
 }
 
 .store-rating-modal {
-  width: min(460px, 100%);
+  width: min(440px, 100%);
   overflow: hidden;
   padding: 0;
   font-size: 0.84rem;
@@ -4000,7 +4030,7 @@ button.danger:hover {
   gap: 16px;
   padding: 17px 18px 14px;
   border-bottom: 1px solid var(--background-modifier-border);
-  background: color-mix(in srgb, var(--interactive-accent) 7%, var(--background-secondary));
+  background: transparent;
 }
 
 .store-rating-header .eyebrow {
@@ -4093,8 +4123,8 @@ button.danger:hover {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 4px;
-  max-width: 330px;
-  margin: 8px auto 0;
+  max-width: none;
+  margin: 8px 0 0;
 }
 
 .store-rating-options button {

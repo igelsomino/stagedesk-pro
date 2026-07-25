@@ -1,5 +1,14 @@
 # Novità
 
+## Versione 1.0.41
+
+> Navigazione per-file e rifiniture del lavoro nell'editor e in StageDesk Share.
+
+- Conservata la posizione di scorrimento indipendentemente per ogni file aperto: passando da un tab all'altro ogni copione riprende dalla propria posizione.
+- La freccia verticale nel titolo di una nota attraversa correttamente cue e altri elementi non testuali e porta al blocco testuale successivo o precedente.
+- Nascosto il comando di valutazione quando l'utente ha già votato il copione importato.
+- Migliorato il margine destro del selettore di atto/scena in StageDesk Share.
+
 ## Versione 1.0.40
 
 > Trascinamento coerente tra editor, cue e raccolta multimediale.

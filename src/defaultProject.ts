@@ -43,6 +43,7 @@ const demoNotes = (): DirectorNote[] =>
       color: noteType.color,
       title: noteType.label,
       content: demoNoteContent[noteType.id],
+      collapsed: true,
       filePath,
       anchorId: `note-${noteType.id}`,
       sceneId,

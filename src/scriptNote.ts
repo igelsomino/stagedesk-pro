@@ -81,8 +81,8 @@ export const ScriptNote = TiptapNode.create({
         parseHTML: (element) => element.getAttribute('data-ref-id') ?? '',
       },
       collapsed: {
-        default: false,
-        parseHTML: (element) => element.getAttribute('data-note-collapsed') === 'true',
+        default: true,
+        parseHTML: (element) => element.getAttribute('data-note-collapsed') !== 'false',
       },
     }
   },
@@ -317,6 +317,16 @@ export const ScriptNote = TiptapNode.create({
       })
 
       titleInput.addEventListener('input', () => updateAttrs({ title: titleInput.value }))
+      titleInput.addEventListener('keydown', (event) => {
+        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+        const atBoundary = event.key === 'ArrowDown'
+          ? titleInput.selectionStart === titleInput.value.length && titleInput.selectionEnd === titleInput.value.length
+          : titleInput.selectionStart === 0 && titleInput.selectionEnd === 0
+        if (!atBoundary || event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return
+        if (!focusAdjacentScriptBlock(event.key === 'ArrowDown' ? 'next' : 'previous')) return
+        event.preventDefault()
+        event.stopPropagation()
+      })
       typeButton.addEventListener('click', (event) => {
         event.preventDefault()
         event.stopPropagation()
