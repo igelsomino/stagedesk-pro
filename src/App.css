@@ -701,6 +701,28 @@ h1 {
 .right-sidebar {
   border-right: 0;
   border-left: 1px solid var(--background-modifier-border);
+  scrollbar-color: #4a4a4a transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.right-sidebar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.right-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.right-sidebar::-webkit-scrollbar-thumb {
+  border: 3px solid var(--background-primary);
+  border-radius: 999px;
+  background: #4a4a4a;
+}
+
+.right-sidebar::-webkit-scrollbar-thumb:hover {
+  background: #636363;
 }
 
 .panel-title {
@@ -1376,46 +1398,12 @@ body.stagedesk-pointer-dragging * {
 
 .structure-search-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 10px;
   flex: 1 1 auto;
   height: 100%;
   min-height: 0;
   min-width: 0;
-}
-
-.structure-search-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 28px;
-  color: var(--text-normal);
-}
-
-.structure-search-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--text-normal);
-  font-size: 0.82rem;
-}
-
-.structure-search-title svg {
-  color: var(--text-accent-hover);
-}
-
-.structure-search-close {
-  width: 25px;
-  min-height: 25px;
-  border: 0;
-  border-radius: var(--radius-s);
-  padding: 0;
-  color: var(--text-muted);
-}
-
-.structure-search-close:hover {
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
 }
 
 .structure-search-control {
@@ -1431,12 +1419,17 @@ body.stagedesk-pointer-dragging * {
   color: var(--text-faint);
 }
 
+.cue-search-control {
+  margin-bottom: 10px;
+}
+
 .structure-search-control:focus-within {
   border-color: var(--interactive-accent);
   box-shadow: inset 0 0 0 1px var(--interactive-accent);
 }
 
-.structure-search-control input {
+.structure-search-control input,
+.cue-search-control input {
   min-width: 0;
   flex: 1 1 auto;
   border: 0;
@@ -1444,6 +1437,9 @@ body.stagedesk-pointer-dragging * {
   background: transparent;
   color: var(--text-normal);
   font-size: 0.8rem;
+  font-family: inherit;
+  font-weight: 400;
+  line-height: 1.2;
 }
 
 .structure-search-control input::placeholder {
@@ -3517,6 +3513,20 @@ body.stagedesk-pointer-dragging * {
   text-underline-offset: 3px;
 }
 
+.script-editor .stagedesk-validation-highlight {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 88%, transparent), 0 0 24px color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+}
+
+.script-editor .stagedesk-validation-field-highlight {
+  background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 74%, transparent);
+}
+
+.script-editor .script-dialogue-character.stagedesk-validation-field-highlight {
+  color: var(--interactive-accent);
+}
+
 .script-editor .stagedesk-pointer-editor-target {
   outline: none;
   background: transparent;
@@ -3952,6 +3962,21 @@ button.danger {
 
 button.danger:hover {
   background: rgba(255, 123, 123, 0.16);
+}
+
+.cue-delete-action {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--background-tertiary));
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.cue-delete-action:hover {
+  border-color: color-mix(in srgb, var(--danger) 66%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--danger) 18%, var(--background-tertiary));
+  color: #ff9b9b;
 }
 
 .modal-backdrop {

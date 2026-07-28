@@ -123,6 +123,9 @@ const STAGEDESK_SITE_URL = 'https://stagedesk-pro.aigconsulting.it'
 const STAGEDESK_DRAG_STATE_KEY = '__STAGEDESK_DRAG_PAYLOAD__'
 const POINTER_DRAGGING_CLASS = 'stagedesk-pointer-dragging'
 const POINTER_EDITOR_TARGET_CLASS = 'stagedesk-pointer-editor-target'
+const UI_STATE_PERSIST_DELAY_MS = 800
+const EDITOR_DRAFT_SYNC_DELAY_MS = 750
+const EDITOR_DOCUMENT_UI_SYNC_DELAY_MS = 500
 const POINTER_MEDIA_TARGET_CLASS = 'drop-target'
 const STOP_PREVIEW_PLAYBACK_EVENT = 'stagedesk-stop-preview-playback'
 const STOP_EDITOR_PLAYBACK_EVENT = 'stagedesk-stop-editor-playback'
@@ -139,6 +142,8 @@ const SHARE_PIN_STORAGE_PREFIX = 'stagedesk-share-pin:'
 const SHARE_URL_BASE = 'https://stagedesk-pro.aigconsulting.it/share'
 const SHARED_SCRIPT_NOTE_TYPES = ['movement', 'position', 'characters', 'tone'] as const
 const CUE_PAGE_SIZE = 5
+const AUTOSAVE_IDLE_DELAY_MS = 1500
+const AUTOSAVE_MIN_INTERVAL_MS = 4000
 const STORE_TAB_PATH = 'web://stagedesk-store'
 const SHARE_TAB_PREFIX = 'web://stagedesk-share/'
 const STORE_URL = 'https://stagedesk-pro.aigconsulting.it/store/?embedded=1'
@@ -149,7 +154,6 @@ const STORE_IMPORT_MESSAGE = 'stagedesk-store-import'
 const STORE_CONTEXT_MESSAGE = 'stagedesk-store-context'
 const STORE_RATING_TARGET_KEY = 'stagedesk-store-rating-target'
 
-const shareTabPathForUid = (uid: string) => `${SHARE_TAB_PREFIX}${encodeURIComponent(uid)}`
 const shareUidFromTabPath = (path: string) =>
   path.startsWith(SHARE_TAB_PREFIX) ? decodeURIComponent(path.slice(SHARE_TAB_PREFIX.length)) : ''
 const isShareTabPath = (path: string) => path.startsWith(SHARE_TAB_PREFIX)
@@ -417,11 +421,19 @@ function App() {
   const toastTimeoutRef = useRef<number | undefined>(undefined)
   const uiStatePersistTimerRef = useRef<number | undefined>(undefined)
   const editorUiSyncFrameRef = useRef<number | null>(null)
+  const editorDraftSyncTimerRef = useRef<number | null>(null)
+  const editorDocumentUiSyncTimerRef = useRef<number | null>(null)
   const editorScrollAreaRef = useRef<HTMLDivElement>(null)
   const editorScrollPositionsRef = useRef<Record<string, number>>({})
   const editorRenderedPathRef = useRef('')
   const editorLoadedPathRef = useRef('')
-  const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
+  const saveQueueRef = useRef<Promise<string | undefined>>(Promise.resolve(undefined))
+  const pendingProjectFolderSaveRef = useRef<Project | undefined>(undefined)
+  const projectFolderSaveWorkerRef = useRef(false)
+  const pendingLocalProjectSaveRef = useRef<Project | undefined>(undefined)
+  const localProjectSaveCancelRef = useRef<(() => void) | undefined>(undefined)
+  const autosaveFolderSaveCancelRef = useRef<(() => void) | undefined>(undefined)
+  const lastAutosaveAtRef = useRef(0)
   const pendingEditorSelectionRef = useRef<number | undefined>(undefined)
   const fullscreenReturnBlockRef = useRef<ReturnType<typeof parseScriptBlocks>[number] | undefined>(undefined)
   const [scriptDialog, setScriptDialog] = useState<ScriptActionDialog | undefined>()
@@ -483,10 +495,21 @@ function App() {
     markdownBookmarkItems(findMarkdownNode(project.scripts, initialPath)?.content ?? ''),
   )
   const [activeBookmarkId, setActiveBookmarkId] = useState('')
+  const activeOutlineRef = useRef(activeOutline)
+  const activeBookmarksRef = useRef(activeBookmarks)
+
+  useEffect(() => {
+    activeOutlineRef.current = activeOutline
+  }, [activeOutline])
+
+  useEffect(() => {
+    activeBookmarksRef.current = activeBookmarks
+  }, [activeBookmarks])
   const [editorCueRefIds, setEditorCueRefIds] = useState<string[]>([])
   const [currentEditorCueRefIds, setCurrentEditorCueRefIds] = useState<string[]>([])
   const editorSearchInputRef = useRef<HTMLInputElement>(null)
   const editorSearchHighlightTimerRef = useRef<number | null>(null)
+  const validationHighlightTimerRef = useRef<number | null>(null)
 
   const markdownFiles = useMemo(() => flattenMarkdownFiles(project.scripts), [project.scripts])
   const activeFile = useMemo(() => findMarkdownNode(project.scripts, activePath), [activePath, project.scripts])
@@ -552,6 +575,8 @@ function App() {
   const selectedMediaIsProtectedRoot = selectedMediaNode ? isProtectedMediaRoot(selectedMediaNode) : false
   const activeFilePath = activeFile?.path ?? ''
   const userEmail = user?.email ?? 'Utente autenticato'
+  const activeFileRef = useRef(activeFile)
+  const editorMarkdownRef = useRef(editorMarkdown)
   const activeCharactersRef = useRef(activeCharacters)
   const currentSceneRef = useRef(currentScene)
   const draftsRef = useRef(drafts)
@@ -571,6 +596,8 @@ function App() {
   })
   projectScriptsRef.current = project.scripts
   projectRef.current = project
+  activeFileRef.current = activeFile
+  editorMarkdownRef.current = editorMarkdown
   activeFilePathRef.current = activeFilePath
   activePathRef.current = activePath
   openTabsRef.current = openTabs
@@ -645,7 +672,6 @@ function App() {
       editorSelection: selection,
     }
     savePersistedUiState(state)
-    diagnosticLog('ui-state-persisted', state)
   }, [])
 
   const scheduleUiStatePersist = useCallback(() => {
@@ -655,26 +681,48 @@ function App() {
     uiStatePersistTimerRef.current = window.setTimeout(() => {
       uiStatePersistTimerRef.current = undefined
       persistUiStateNow()
-    }, 160)
+    }, UI_STATE_PERSIST_DELAY_MS)
   }, [persistUiStateNow])
 
-  const scheduleEditorUiSync = useCallback((currentEditor: Editor) => {
+  const scheduleEditorUiSync = useCallback((currentEditor: Editor, documentChanged = false) => {
+    if (documentChanged) {
+      if (editorDocumentUiSyncTimerRef.current !== null) {
+        window.clearTimeout(editorDocumentUiSyncTimerRef.current)
+      }
+      editorDocumentUiSyncTimerRef.current = window.setTimeout(() => {
+        editorDocumentUiSyncTimerRef.current = null
+        const nextOutline = editorOutlineItems(currentEditor.state.doc)
+        const nextBookmarks = editorBookmarkItems(currentEditor.state.doc)
+        activeOutlineRef.current = nextOutline
+        activeBookmarksRef.current = nextBookmarks
+        setActiveOutline((current) => (sameOutlineItems(current, nextOutline) ? current : nextOutline))
+        setActiveBookmarks((current) => (sameBookmarkItems(current, nextBookmarks) ? current : nextBookmarks))
+        syncEditorCueRefs(currentEditor, setEditorCueRefIds)
+        syncEditorSceneState(currentEditor, setActiveEditorSceneId)
+        const noteSummary = editorNoteCollapseSummary(currentEditor)
+        setEditorNoteCollapseSummaryValue((current) => (
+          current.total === noteSummary.total && current.collapsed === noteSummary.collapsed ? current : noteSummary
+        ))
+        const activePosition = currentEditor.state.selection.from
+        setActiveOutlineId(outlineItemIdAtPosition(nextOutline, activePosition))
+        setActiveBookmarkId(bookmarkItemIdAtPosition(nextBookmarks, activePosition))
+      }, EDITOR_DOCUMENT_UI_SYNC_DELAY_MS)
+    }
+
     if (editorUiSyncFrameRef.current !== null) return
     editorUiSyncFrameRef.current = window.requestAnimationFrame(() => {
       editorUiSyncFrameRef.current = null
       syncToolbarState(currentEditor, setToolbarState)
-      syncOutlineState(currentEditor, setActiveOutline, setActiveOutlineId)
-      syncBookmarkState(currentEditor, setActiveBookmarks, setActiveBookmarkId)
-      syncEditorSceneState(currentEditor, setActiveEditorSceneId)
-      syncEditorCueRefs(currentEditor, setEditorCueRefIds)
       syncEditorCueRefsAtSelection(currentEditor, setCurrentEditorCueRefIds)
-      const noteSummary = editorNoteCollapseSummary(currentEditor)
-      setEditorNoteCollapseSummaryValue((current) => (
-        current.total === noteSummary.total && current.collapsed === noteSummary.collapsed ? current : noteSummary
-      ))
       const tableContext = currentTableContext(currentEditor)
       setTableContextActive(Boolean(tableContext.tableNode))
       setCharacterTableContextActive(tableContext.isCharacterTable)
+
+      const activePosition = currentEditor.state.selection.from
+      const activeOutlineId = outlineItemIdAtPosition(activeOutlineRef.current, activePosition)
+      const activeBookmarkId = bookmarkItemIdAtPosition(activeBookmarksRef.current, activePosition)
+      setActiveOutlineId((current) => (current === activeOutlineId ? current : activeOutlineId))
+      setActiveBookmarkId((current) => (current === activeBookmarkId ? current : activeBookmarkId))
     })
   }, [])
 
@@ -685,6 +733,11 @@ function App() {
     if (editorUiSyncFrameRef.current !== null) {
       window.cancelAnimationFrame(editorUiSyncFrameRef.current)
     }
+    if (editorDocumentUiSyncTimerRef.current !== null) {
+      window.clearTimeout(editorDocumentUiSyncTimerRef.current)
+    }
+    localProjectSaveCancelRef.current?.()
+    autosaveFolderSaveCancelRef.current?.()
   }, [])
 
   const selectLeftTab = useCallback((nextTab: PersistedUiState['leftTab']) => {
@@ -695,10 +748,79 @@ function App() {
 
   const saveProjectFolderQueued = useCallback((nextProject: Project) => {
     if (!desktopStorageReady || !startupProjectReady) return Promise.resolve<string | undefined>(undefined)
-    const saveTask = saveQueueRef.current.then(() => storage.saveProjectFolder(nextProject))
-    saveQueueRef.current = saveTask.catch(() => undefined)
+    // Keep only the newest snapshot. Serializing stale projects can build a
+    // long IPC/disk queue and make typing feel blocked after a pause.
+    pendingProjectFolderSaveRef.current = nextProject
+    if (projectFolderSaveWorkerRef.current) return saveQueueRef.current
+
+    projectFolderSaveWorkerRef.current = true
+    const saveTask = (async () => {
+      let savedPath: string | undefined
+      try {
+        while (pendingProjectFolderSaveRef.current) {
+          const snapshot = pendingProjectFolderSaveRef.current
+          pendingProjectFolderSaveRef.current = undefined
+          savedPath = await storage.saveProjectFolder(snapshot)
+        }
+        return savedPath
+      } finally {
+        projectFolderSaveWorkerRef.current = false
+      }
+    })()
+    saveQueueRef.current = saveTask
     return saveTask
   }, [desktopStorageReady, startupProjectReady])
+
+  const scheduleLocalProjectSave = useCallback((nextProject: Project) => {
+    pendingLocalProjectSaveRef.current = nextProject
+    localProjectSaveCancelRef.current?.()
+
+    const saveLatest = () => {
+      localProjectSaveCancelRef.current = undefined
+      const snapshot = pendingLocalProjectSaveRef.current
+      pendingLocalProjectSaveRef.current = undefined
+      if (snapshot) storage.save(snapshot)
+    }
+
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+      cancelIdleCallback?: (handle: number) => void
+    }
+    if (idleWindow.requestIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(saveLatest, { timeout: 2000 })
+      localProjectSaveCancelRef.current = () => idleWindow.cancelIdleCallback?.(handle)
+      return
+    }
+
+    const handle = window.setTimeout(saveLatest, 250)
+    localProjectSaveCancelRef.current = () => window.clearTimeout(handle)
+  }, [])
+
+  const scheduleAutosaveFolderSave = useCallback((nextProject: Project) => {
+    autosaveFolderSaveCancelRef.current?.()
+
+    const saveLatestFolder = () => {
+      autosaveFolderSaveCancelRef.current = undefined
+      saveProjectFolderQueued(nextProject)
+        .then((path) => {
+          if (path) setStorageStatus(`Cartella progetto salvata: ${compactPath(path)}`)
+        })
+        .catch((error) => setStorageStatus(`Salvataggio progetto non riuscito: ${String(error)}`))
+    }
+
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+      cancelIdleCallback?: (handle: number) => void
+    }
+    if (idleWindow.requestIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(saveLatestFolder, { timeout: 2000 })
+      autosaveFolderSaveCancelRef.current = () => idleWindow.cancelIdleCallback?.(handle)
+      return
+    }
+
+    const handle = window.setTimeout(saveLatestFolder, 350)
+    autosaveFolderSaveCancelRef.current = () => window.clearTimeout(handle)
+  }, [saveProjectFolderQueued])
 
   useEffect(() => {
     ;(window as CharacterOptionsWindow).__STAGEDESK_CHARACTER_OPTIONS__ = activeCharacters
@@ -715,30 +837,31 @@ function App() {
 
   useEffect(() => {
     let active = true
-    if (!user || !activeFile || activeAppDocument) {
+    if (!user || !activeFilePath || activeAppDocument) {
       return undefined
     }
 
     const checkSharedFile = async () => {
-      setShareIndicatorForPath(activeFile.path, { status: 'checking' })
+      const filePath = activeFilePath
+      setShareIndicatorForPath(filePath, { status: 'checking' })
       try {
         const { data, error } = await supabase
           .from(SCRIPT_SHARE_TABLE)
           .select('uid, published_at, updated_at')
           .eq('owner_id', user.id)
           .eq('project_id', project.id)
-          .eq('script_path', activeFile.path)
+          .eq('script_path', filePath)
           .maybeSingle()
         if (error) throw error
         if (!active) return
         const shareUid = data?.uid
         const shared = Boolean(shareUid)
-        setShareIndicatorForPath(activeFile.path, shared
+        setShareIndicatorForPath(filePath, shared
           ? { status: 'shared', url: shareUrlForUid(shareUid as string) }
           : { status: 'not-shared' })
       } catch (error) {
         if (!active) return
-        setShareIndicatorForPath(activeFile.path, {
+        setShareIndicatorForPath(filePath, {
           status: 'error',
           message: publishErrorMessage(error),
         })
@@ -749,20 +872,21 @@ function App() {
     return () => {
       active = false
     }
-  }, [activeAppDocument, activeFile, project.id, setShareIndicatorForPath, user])
+  }, [activeAppDocument, activeFilePath, project.id, setShareIndicatorForPath, user])
 
-  const loadStorePublicationState = useCallback(async (file: ProjectTreeNode | undefined = activeFile) => {
+  const loadStorePublicationState = useCallback(async (file: ProjectTreeNode | undefined = activeFileRef.current) => {
     const requestId = storePublicationRequestRef.current + 1
     storePublicationRequestRef.current = requestId
-    if (!user || !file || activeAppDocument || activeStoreTab || isExampleScriptFile(file, editorMarkdown)) {
+    const currentFile = file ?? activeFileRef.current
+    if (!user || !currentFile || activeAppDocument || activeStoreTab || isExampleScriptFile(currentFile)) {
       setStorePublicationState({ status: 'idle', history: [] })
       return
     }
 
-    setStorePublicationState({ status: 'checking', filePath: file.path, history: [] })
+    setStorePublicationState({ status: 'checking', filePath: currentFile.path, history: [] })
     try {
       const fields = 'id, author_id, title, current_version, published_at, package_name, is_published'
-      const packageName = `${stripMarkdownExtension(file.name)}.stagedesk`
+      const packageName = `${stripMarkdownExtension(currentFile.name)}.stagedesk`
       const authoredScripts = await supabase
         .from('store_scripts')
         .select(fields)
@@ -778,9 +902,9 @@ function App() {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
       const targetPackage = normalisePackageName(packageName)
-      const targetTitle = normalisePackageName(file.name)
+      const targetTitle = normalisePackageName(currentFile.name)
       const documentTitle = normalisePackageName(
-        editorMarkdown.match(/^#\s+(.+)$/m)?.[1]?.replace(/\*+/g, '').trim() ?? '',
+        editorMarkdownRef.current.match(/^#\s+(.+)$/m)?.[1]?.replace(/\*+/g, '').trim() ?? '',
       )
       const matchingScripts = (authoredScripts.data ?? []).filter((script) =>
         normalisePackageName(String(script.package_name ?? '')) === targetPackage,
@@ -792,7 +916,7 @@ function App() {
 
       if (requestId !== storePublicationRequestRef.current) return
       if (!data || data.author_id !== user.id) {
-        setStorePublicationState({ status: 'idle', filePath: file.path, history: [] })
+        setStorePublicationState({ status: 'idle', filePath: currentFile.path, history: [] })
         return
       }
 
@@ -807,7 +931,7 @@ function App() {
 
       setStorePublicationState({
         status: 'published',
-        filePath: file.path,
+        filePath: currentFile.path,
         scriptId: data.id,
         versionNumber: typeof data.current_version === 'number' ? data.current_version : undefined,
         publishedAt: typeof data.published_at === 'string' ? data.published_at : undefined,
@@ -823,11 +947,11 @@ function App() {
       if (requestId !== storePublicationRequestRef.current) return
       setStorePublicationState({ status: 'error', history: [], error: publishErrorMessage(error) })
     }
-  }, [activeAppDocument, activeFile, activeStoreTab, editorMarkdown, user])
+  }, [activeAppDocument, activeStoreTab, user])
 
   useEffect(() => {
-    void loadStorePublicationState()
-  }, [loadStorePublicationState])
+    void loadStorePublicationState(activeFileRef.current)
+  }, [activeAppDocument, activeFilePath, activeStoreTab, loadStorePublicationState])
 
   useEffect(() => {
     let cancelled = false
@@ -856,11 +980,11 @@ function App() {
   }, [storeRatingTarget?.scriptId, user])
 
   useEffect(() => {
-    if (!activeFile || isExampleScriptFile(activeFile, editorMarkdown)) {
+    if (!activeFile || isExampleScriptFile(activeFile)) {
       setStorePublicationDialogOpen(false)
       setStorePublicationState({ status: 'idle', history: [] })
     }
-  }, [activeFile, editorMarkdown])
+  }, [activeFilePath, activeFile?.name])
 
   useEffect(() => {
     const installedVersion = window.localStorage.getItem(INSTALLED_UPDATE_VERSION_KEY)
@@ -1374,15 +1498,15 @@ function App() {
         activePath: activePathRef.current,
         selection: currentEditor.state.selection.from,
       })
-      scheduleEditorUiSync(currentEditor)
+      scheduleEditorUiSync(currentEditor, true)
     },
     onSelectionUpdate({ editor: currentEditor }) {
       lastEditorSelectionRef.current = currentEditor.state.selection.from
       scheduleUiStatePersist()
       scheduleEditorUiSync(currentEditor)
     },
-    onTransaction({ editor: currentEditor }) {
-      scheduleEditorUiSync(currentEditor)
+    onTransaction({ editor: currentEditor, transaction }) {
+      scheduleEditorUiSync(currentEditor, transaction.docChanged)
     },
     editorProps: {
       attributes: {
@@ -1682,6 +1806,37 @@ function App() {
     if (!editor) return
     const position = editorPositionForValidationIssue(editor, issue)
     editor.chain().focus(position).setTextSelection(position).scrollIntoView().run()
+
+    window.requestAnimationFrame(() => {
+      if (!editor) return
+      if (validationHighlightTimerRef.current !== null) {
+        window.clearTimeout(validationHighlightTimerRef.current)
+        validationHighlightTimerRef.current = null
+      }
+
+      editor.view.dom.querySelectorAll<HTMLElement>('.stagedesk-validation-highlight, .stagedesk-validation-field-highlight')
+        .forEach((element) => {
+          element.classList.remove('stagedesk-validation-highlight', 'stagedesk-validation-field-highlight')
+        })
+
+      const nodeDom = editor.view.nodeDOM(Math.max(0, position - 1))
+      const nodeElement = nodeDom instanceof HTMLElement ? nodeDom : undefined
+      const root = nodeElement?.closest<HTMLElement>('[data-dialogue-block], [data-note-block]') ?? nodeElement
+      if (!root) return
+
+      root.classList.add('stagedesk-validation-highlight')
+      root.querySelector<HTMLElement>('.script-dialogue-character')?.classList.add('stagedesk-validation-field-highlight')
+      root.querySelector<HTMLElement>('.script-dialogue-text')?.classList.add('stagedesk-validation-field-highlight')
+      root.scrollIntoView({ block: 'center', inline: 'nearest' })
+
+      validationHighlightTimerRef.current = window.setTimeout(() => {
+        root.classList.remove('stagedesk-validation-highlight')
+        root.querySelectorAll<HTMLElement>('.stagedesk-validation-field-highlight').forEach((element) => {
+          element.classList.remove('stagedesk-validation-field-highlight')
+        })
+        validationHighlightTimerRef.current = null
+      }, 2600)
+    })
   }
 
   useEffect(() => {
@@ -1801,31 +1956,54 @@ function App() {
   useEffect(() => {
     if (!editor || !activeFilePath) return
 
-    const markActiveFileDirty = () => {
-      if (!startupProjectReady) startupUserEditedRef.current = true
+    // Keep typing responsive by coalescing the expensive document serialization
+    // and project index updates until the user pauses briefly.
+    const flushActiveFileDraft = () => {
       const draft = editorJsonToMarkdown(editor.getJSON())
       const cueIds = markerRefIdsFromMarkdown(draft, 'cue')
       const noteIds = markerRefIdsFromMarkdown(draft, 'note')
+      const cueIdSet = new Set(cueIds)
+      const noteIdSet = new Set(noteIds)
       setEditorMarkdown((current) => (current === draft ? current : draft))
       setDrafts((current) => (current[activeFilePath] === draft ? current : { ...current, [activeFilePath]: draft }))
       setProject((current) => {
-        const cues = current.cues.filter((cue) => cue.filePath !== activeFilePath || cueIds.includes(cue.id))
-        const notes = current.notes.filter((note) => note.filePath !== activeFilePath || noteIds.includes(note.id))
+        const currentFileCues = current.cues.filter((cue) => cue.filePath === activeFilePath)
+        const currentFileNotes = current.notes.filter((note) => note.filePath === activeFilePath)
+        const cuesChanged = currentFileCues.length !== cueIds.length || currentFileCues.some((cue) => !cueIdSet.has(cue.id))
+        const notesChanged = currentFileNotes.length !== noteIds.length || currentFileNotes.some((note) => !noteIdSet.has(note.id))
         const activeNode = findMarkdownNode(current.scripts, activeFilePath)
         const scripts = activeNode?.dirty
           ? current.scripts
           : updateTreeNode(current.scripts, activeFilePath, (node) => ({ ...node, dirty: true }))
-        const unchanged =
-          cues.length === current.cues.length &&
-          notes.length === current.notes.length &&
-          scripts === current.scripts
-        return unchanged ? current : { ...current, cues, notes, scripts }
+        if (!cuesChanged && !notesChanged && scripts === current.scripts) return current
+        return {
+          ...current,
+          cues: cuesChanged ? current.cues.filter((cue) => cue.filePath !== activeFilePath || cueIdSet.has(cue.id)) : current.cues,
+          notes: notesChanged ? current.notes.filter((note) => note.filePath !== activeFilePath || noteIdSet.has(note.id)) : current.notes,
+          scripts,
+        }
       })
+    }
+
+    const markActiveFileDirty = () => {
+      if (!startupProjectReady) startupUserEditedRef.current = true
+      if (editorDraftSyncTimerRef.current !== null) {
+        window.clearTimeout(editorDraftSyncTimerRef.current)
+      }
+      editorDraftSyncTimerRef.current = window.setTimeout(() => {
+        editorDraftSyncTimerRef.current = null
+        flushActiveFileDraft()
+      }, EDITOR_DRAFT_SYNC_DELAY_MS)
     }
 
     editor.on('update', markActiveFileDirty)
     return () => {
       editor.off('update', markActiveFileDirty)
+      if (editorDraftSyncTimerRef.current !== null) {
+        window.clearTimeout(editorDraftSyncTimerRef.current)
+        editorDraftSyncTimerRef.current = null
+        flushActiveFileDraft()
+      }
     }
   }, [activeFilePath, editor, startupProjectReady])
 
@@ -1864,17 +2042,16 @@ function App() {
     const entries = Object.entries(drafts)
     if (entries.length === 0) return
 
+    const elapsedSinceLastAutosave = Date.now() - lastAutosaveAtRef.current
+    const autosaveDelay = Math.max(AUTOSAVE_IDLE_DELAY_MS, AUTOSAVE_MIN_INTERVAL_MS - elapsedSinceLastAutosave)
     const timeout = window.setTimeout(() => {
-      setProject((current) => {
-        const nextProject = applyDraftsToProject(current, Object.fromEntries(entries))
-        storage.save(nextProject)
-        saveProjectFolderQueued(nextProject)
-          .then((path) => {
-            if (path) setStorageStatus(`Cartella progetto salvata: ${compactPath(path)}`)
-          })
-          .catch((error) => setStorageStatus(`Salvataggio progetto non riuscito: ${String(error)}`))
-        return nextProject
-      })
+      lastAutosaveAtRef.current = Date.now()
+      const nextProject = applyDraftsToProject(projectRef.current, Object.fromEntries(entries))
+      projectRef.current = nextProject
+      projectScriptsRef.current = nextProject.scripts
+      setProject(nextProject)
+      scheduleLocalProjectSave(nextProject)
+      scheduleAutosaveFolderSave(nextProject)
 
       setDrafts((current) => {
         let nextDrafts = current
@@ -1883,10 +2060,10 @@ function App() {
         }
         return nextDrafts
       })
-    }, 700)
+    }, autosaveDelay)
 
     return () => window.clearTimeout(timeout)
-  }, [drafts, project.settings.autosave, saveProjectFolderQueued])
+  }, [drafts, project.settings.autosave, scheduleAutosaveFolderSave, scheduleLocalProjectSave])
 
   const checkForAppUpdates = useCallback(async (silent = false) => {
     if (!isTauriRuntime()) {
@@ -1992,6 +2169,7 @@ function App() {
 
   const startFullscreenWithValidation = () => {
     if (!editor || activeAppDocument) return
+    synchronizeScriptDialogueTextFromDom(editor)
     const markdown = editorJsonToMarkdown(editor.getJSON())
     const issues = validateScriptForFullscreen(markdown, projectRef.current)
     setScriptValidationIssues(issues)
@@ -2499,21 +2677,21 @@ function App() {
     persistUiStateNow()
   }
 
-  const openShareTab = (uid: string) => {
-    const path = shareTabPathForUid(uid)
-    diagnosticLog('tab-open-share', { path, uid, previousActivePath: activePathRef.current, openTabs: openTabsRef.current })
-    setShareTabLoading(true)
-    const nextTabs = openTabsRef.current.includes(path) ? openTabsRef.current : [...openTabsRef.current, path]
-    openTabsRef.current = nextTabs
-    activePathRef.current = path
-    setOpenTabs(nextTabs)
-    setActivePath(path)
-    persistUiStateNow()
-  }
-
   useEffect(() => {
     const onStoreMessage = (event: MessageEvent<{ type?: string; url?: string; title?: string; scriptId?: string }>) => {
-      if (event.source !== storeFrameRef.current?.contentWindow) return
+      const sourceIsStore = event.source === storeFrameRef.current?.contentWindow
+      const sourceIsShare = event.source === shareFrameRef.current?.contentWindow
+      if (!sourceIsStore && !sourceIsShare) return
+
+      if (sourceIsShare && event.data?.type === 'stagedesk-share-auth' && event.data.url) {
+        if (event.origin !== STORE_ORIGIN || !/^https:\/\//i.test(event.data.url)) return
+        void openExternalLink(event.data.url).catch((error: Error) => {
+          diagnosticLog('share-auth-open-failed', { message: error.message })
+        })
+        return
+      }
+
+      if (!sourceIsStore) return
       if (event.data?.type === 'stagedesk-store-ready') {
         storeFrameRef.current?.contentWindow?.postMessage(
           { type: STORE_CONTEXT_MESSAGE, canImport: true },
@@ -4419,25 +4597,6 @@ function App() {
 
           {leftTab === 'search' ? (
             <section className="structure-search-panel" aria-label="Cerca nel file attivo">
-              <div className="structure-search-heading">
-                <div className="structure-search-title">
-                  <Search size={15} aria-hidden="true" />
-                  <strong>Cerca nel file</strong>
-                </div>
-                <button
-                  type="button"
-                  className="structure-search-close"
-                  title="Chiudi ricerca"
-                  aria-label="Chiudi ricerca"
-                  onClick={() => {
-                    setEditorSearchQuery('')
-                    setEditorSearchMatchIndex(0)
-                    selectLeftTab('outline')
-                  }}
-                >
-                  <X size={14} />
-                </button>
-              </div>
               <div className="structure-search-control">
                 <Search size={14} aria-hidden="true" />
                 <input
@@ -5108,8 +5267,8 @@ function App() {
             <button type="button" className={noteMode === 'scene' ? 'active' : ''} onClick={() => setNoteMode('scene')}>Scena</button>
             <button type="button" className={noteMode === 'all' ? 'active' : ''} onClick={() => setNoteMode('all')}>Tutte</button>
           </div>
-          <label className="search-field">
-            <Search size={15} />
+          <label className="structure-search-control cue-search-control">
+            <Search size={14} aria-hidden="true" />
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cerca cue" />
           </label>
           <div className="note-list">
@@ -5255,7 +5414,10 @@ function App() {
                 projectRootPath={project.rootPath}
                 onStatus={setStorageStatus}
               />
-              <button type="button" className="danger" onClick={deleteSelectedCue}><Trash2 size={16} />Elimina cue</button>
+              <button type="button" className="danger cue-delete-action" onClick={deleteSelectedCue}>
+                <Trash2 size={16} />
+                Elimina cue
+              </button>
             </section>
           ) : (
             <p className="empty-state">
@@ -5340,7 +5502,9 @@ function App() {
           onCopyLink={() => void copyPublishedLink()}
           onOpenLink={() => {
             if (!publishState.shareUid) return
-            openShareTab(publishState.shareUid)
+            void openExternalLink(shareUrlForUid(publishState.shareUid)).catch((error: Error) => {
+              showStatus(`Apertura condivisione non riuscita: ${error.message}`)
+            })
             setPublishDialogOpen(false)
           }}
         />
@@ -5580,8 +5744,8 @@ function PublishScriptModal({
                     <button
                       type="button"
                       className="publish-link-open"
-                      aria-label="Apri condivisione in un nuovo tab"
-                      title="Apri condivisione in un nuovo tab"
+                      aria-label="Apri StageDesk Share in una finestra esterna"
+                      title="Apri StageDesk Share in una finestra esterna"
                       onClick={onOpenLink}
                     >
                       <ExternalLink size={14} />
@@ -8002,7 +8166,11 @@ const validateScriptForFullscreen = (markdown: string, project: Project): Script
     const structuredDialogue = parseStructuredDialogueMarker(line)
     if (structuredDialogue) {
       const character = structuredDialogue.character.trim()
-      const spoken = structuredDialogue.text.trim()
+      const nextLine = lines[index + 1]?.trim() ?? ''
+      const continuation = !structuredDialogue.text.trim() && isDialogueContinuationLine(nextLine)
+        ? nextLine
+        : ''
+      const spoken = (structuredDialogue.text.trim() || continuation).trim()
       const normalizedCharacter = normalizeCharacterName(character)
       if (!spoken) {
         addIssue(index, 'Battuta', 'La battuta è vuota dopo il nome del personaggio.', character)
@@ -8034,6 +8202,7 @@ const validateScriptForFullscreen = (markdown: string, project: Project): Script
       if (!seenCharacters.some((name) => normalizeCharacterName(name) === normalizedCharacter)) {
         seenCharacters.push(character)
       }
+      if (continuation) index += 1
       continue
     }
     if (/^\[NOTA:/.test(line) || /^\[CUE[:\s]/.test(line) || /^\[BOOKMARK:/.test(line)) continue
@@ -8200,9 +8369,18 @@ const parseStructuredDialogueMarker = (line: string) => {
     character: match[1].trim(),
     id: readMarkdownMarkerId(attrs),
     characterId: readMarkdownAttr(attrs, 'characterId') ?? '',
-    text: readMarkdownAttr(attrs, 'text') ?? '',
+    text: readMarkdownAttr(attrs, 'text') || readMarkdownAttr(attrs, 'content') || readMarkdownAttr(attrs, 'body') || '',
     sceneId: readMarkdownAttr(attrs, 'sceneId') ?? '',
   }
+}
+
+const isDialogueContinuationLine = (line: string) => {
+  if (!line) return false
+  return !(
+    /^(?:#{1,6}\s+|\[\s*(?:BATTUTA|NOTA|CUE|BOOKMARK)[:\s]|::|>\s?|\|)/i.test(line) ||
+    /^-{3,}$/.test(line) ||
+    /^\*\*[^*]+\*\*\s*:/.test(line)
+  )
 }
 
 const readMarkdownMarkerId = (attrs: string) => {
@@ -8211,8 +8389,8 @@ const readMarkdownMarkerId = (attrs: string) => {
 }
 
 const readMarkdownAttr = (attrs: string, name: string) => {
-  const match = attrs.match(new RegExp(`${name}="([^"]*)"`, 'i'))
-  return match ? decodeMarkdownAttr(match[1]) : undefined
+  const match = attrs.match(new RegExp(`${name}=(?:"([^"]*)"|'([^']*)')`, 'i'))
+  return match ? decodeMarkdownAttr(match[1] ?? match[2] ?? '') : undefined
 }
 
 const isMarkdownTableLine = (lines: string[], index: number) => {
@@ -8307,6 +8485,26 @@ const editorPositionForValidationIssue = (editor: Editor, issue: ScriptValidatio
   })
 
   return fallbackPosition
+}
+
+const synchronizeScriptDialogueTextFromDom = (editor: Editor) => {
+  let transaction = editor.state.tr
+  let changed = false
+
+  editor.state.doc.descendants((node, position) => {
+    if (node.type.name !== 'scriptDialogue') return
+    const nodeDom = editor.view.nodeDOM(position)
+    if (!(nodeDom instanceof HTMLElement)) return
+    const textarea = nodeDom.querySelector<HTMLTextAreaElement>('.script-dialogue-text')
+    if (!textarea || textarea.value === String(node.attrs.text ?? '')) return
+    transaction = transaction.setNodeMarkup(position, undefined, {
+      ...node.attrs,
+      text: textarea.value,
+    })
+    changed = true
+  })
+
+  if (changed) editor.view.dispatch(transaction)
 }
 
 const validationSearchText = (value: string) =>

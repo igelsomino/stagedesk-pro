@@ -198,7 +198,10 @@ export const ScriptDialogue = TiptapNode.create({
       const updateAttrs = (patch: Partial<ScriptDialogueAttrs>) => {
         const position = typeof getPos === 'function' ? getPos() : undefined
         if (typeof position !== 'number') return
-        const attrs = { ...currentNode.attrs, ...patch }
+        // Read the node from the current document: NodeView callbacks can run
+        // after another transaction has already replaced currentNode.
+        const documentNode = editor.state.doc.nodeAt(position)
+        const attrs = { ...(documentNode?.attrs ?? currentNode.attrs), ...patch }
         editor.view.dispatch(editor.state.tr.setNodeMarkup(position, undefined, attrs))
       }
 

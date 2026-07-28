@@ -2,7 +2,7 @@
 
 Applicazione desktop/web per scrittura, organizzazione e messa in scena di copioni teatrali con note di regia, cue multimediali, raccolta media, modalità schermo intero ed export PDF.
 
-Versione desktop corrente: **1.0.42**.
+Versione desktop corrente: **1.0.43**.
 
 ## Scopo
 
@@ -75,6 +75,8 @@ Implementato:
 42. trascinamento unificato di note, battute e cue nell'editor con indicatore della posizione di rilascio;
 43. ghost nativo e indicatori di rilascio uniformi per note, battute, cue e file multimediali;
 44. drag nativo dei cue laterali e dei file media con destinazioni compatibili evidenziate durante il trascinamento;
+45. apertura del link di StageDesk Share in una finestra esterna dal comando **Condividi**, con supporto coerente per web e desktop;
+46. autenticazione OAuth di StageDesk Share avviata fuori dagli iframe incorporati, evitando pagine di accesso bloccate o lasciate in caricamento;
 
 ## Sviluppo
 
@@ -133,7 +135,9 @@ Procedura operativa completa: `docs/RELEASE.md`.
 
 L'app desktop controlla gli aggiornamenti da GitHub Releases. Se è disponibile una nuova versione, scarica e installa automaticamente l'aggiornamento, salva le modifiche correnti e riavvia l'app.
 
-Il metadata updater viene pubblicato come `latest.json` nella release corrente.
+Il metadata updater viene pubblicato come `latest.json` nella release corrente. I link di StageDesk Share generati
+dalla dialog **Condividi** vengono aperti nel browser esterno, così l'autenticazione OAuth non dipende dal contesto
+di un iframe o da un tab interno.
 
 ## Media e salvataggio
 

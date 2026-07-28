@@ -448,8 +448,8 @@ const splitMarkdownTableRow = (line: string) =>
     .map((cell) => cell.trim())
 
 const readAttr = (attrs: string, name: string) => {
-  const match = attrs.match(new RegExp(`${name}="([^"]*)"`, 'i'))
-  return match ? decodeAttr(match[1]) : undefined
+  const match = attrs.match(new RegExp(`${name}=(?:"([^"]*)"|'([^']*)')`, 'i'))
+  return match ? decodeAttr(match[1] ?? match[2] ?? '') : undefined
 }
 
 const decodeAttr = (value: string) =>

@@ -1,5 +1,14 @@
 # Novità
 
+## Versione 1.0.43
+
+> Condivisione più affidabile tra StageDesk Pro, browser e StageDesk Share.
+
+- Il comando **Apri condivisione** dalla dialog **Condividi** apre StageDesk Share in una finestra esterna; il tab interno non viene più usato per il copione condiviso.
+- Il flusso OAuth di StageDesk Share, quando viene avviato da un iframe, trasferisce l'autorizzazione al browser esterno invece di lasciare il provider in caricamento o tentare di aprire direttamente l'app desktop.
+- La web app riceve il collegamento OAuth solo dal frame StageDesk Share autorizzato e valida l'origine prima di aprirlo.
+- Aggiornati README, procedura di release e riferimenti alla versione desktop per mantenere allineati codice, documentazione e installer.
+
 ## Versione 1.0.42
 
 > Stabilità dell’editor e navigazione più affidabile in StageDesk Share.
