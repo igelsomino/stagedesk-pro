@@ -987,6 +987,10 @@ body.stagedesk-pointer-dragging * {
   transform: none;
 }
 
+html.stagedesk-native-dragging .pointer-drag-preview:not(.native-drag-image) {
+  display: none;
+}
+
 .pointer-drag-preview::before {
   position: absolute;
   top: 8px;
@@ -2559,6 +2563,7 @@ body.stagedesk-pointer-dragging * {
   color: var(--text-normal);
   font-size: 1rem;
   line-height: 1.72;
+  counter-reset: stagedesk-dialogue;
 }
 
 .script-editor > * {
@@ -2636,54 +2641,131 @@ body.stagedesk-pointer-dragging * {
 }
 
 .script-dialogue-block {
-  --note-block-color: var(--interactive-accent);
+  --dialogue-bar-color: #f15b2a;
+  position: relative;
+  counter-increment: stagedesk-dialogue;
   display: block;
   margin: 12px 0;
   overflow: visible;
   border: 0;
-  border-left: 4px solid var(--interactive-accent);
+  border-left: 10px solid var(--dialogue-bar-color);
   border-radius: 0;
   background: transparent;
   box-shadow: none;
 }
 
-.script-dialogue-block.ProseMirror-selectednode {
+.script-dialogue-block.ProseMirror-selectednode,
+.script-dialogue-block.is-focused {
   outline: 0 !important;
   border: 0;
-  border-left: 4px solid var(--interactive-accent);
+  border-left: 10px solid #ffb08f;
   background: transparent;
   box-shadow: none;
+}
+
+.script-dialogue-drag-handle {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  left: -10px;
+  width: 10px;
+  background: var(--dialogue-bar-color);
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-drag: element;
+}
+
+.script-dialogue-block.ProseMirror-selectednode .script-dialogue-drag-handle,
+.script-dialogue-block.is-focused .script-dialogue-drag-handle {
+  background: #ffb08f;
+}
+
+.script-dialogue-drag-handle:active {
+  cursor: grabbing;
 }
 
 .script-dialogue-header {
   display: flex;
   align-items: center;
   min-width: 0;
-  padding: 8px 10px 0 12px;
+  padding: 5px 6px 5px 9px;
   background: transparent;
-  cursor: grab;
+  cursor: default;
 }
 
-.script-dialogue-header:active {
-  cursor: grabbing;
+.script-dialogue-number {
+  display: inline-grid;
+  flex: 0 0 2rem;
+  place-items: center;
+  width: 2rem;
+  height: 1.35rem;
+  margin-right: 8px;
+  border: 1px solid color-mix(in srgb, var(--dialogue-bar-color) 58%, var(--background-modifier-border));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--dialogue-bar-color) 12%, var(--background-primary));
+  color: color-mix(in srgb, var(--dialogue-bar-color) 72%, var(--text-normal));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-align: right;
+  user-select: none;
 }
 
-.script-dialogue-close {
+.script-dialogue-number::before {
+  content: counter(stagedesk-dialogue, decimal-leading-zero);
+}
+
+.script-dialogue-close,
+.script-note-delete {
+  position: relative;
   flex: 0 0 auto;
   width: 26px;
+  min-width: 26px;
   height: 26px;
+  min-height: 26px;
   margin-left: auto;
   padding: 0;
   border: 0;
   border-radius: 5px;
   background: transparent;
   color: var(--text-faint);
-  font-size: 1.2rem;
-  line-height: 1;
+  display: inline-grid;
+  place-items: center;
+  font-size: 0;
+  line-height: 0;
   cursor: pointer;
 }
 
-.script-dialogue-close:hover {
+.script-dialogue-close::before,
+.script-dialogue-close::after,
+.script-note-delete::before,
+.script-note-delete::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 1.5px;
+  border-radius: 999px;
+  background: currentColor;
+  content: '';
+}
+
+.script-dialogue-close::before,
+.script-note-delete::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.script-dialogue-close::after,
+.script-note-delete::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.script-dialogue-close:hover,
+.script-note-delete:hover {
   background: color-mix(in srgb, var(--background-modifier-hover) 80%, transparent);
   color: var(--text-error);
 }
@@ -2784,12 +2866,35 @@ body.stagedesk-pointer-dragging * {
 
 .script-note-block {
   --note-block-color: #8bc7c7;
+  --note-border-color: color-mix(in srgb, var(--note-block-color) 42%, var(--background-modifier-border));
+  position: relative;
   margin: 14px 0;
   overflow: visible;
-  border: 1px solid color-mix(in srgb, var(--note-block-color) 42%, var(--background-modifier-border));
-  border-radius: var(--radius-m);
+  border: 1px solid var(--note-border-color);
+  border-left: 10px solid var(--note-block-color);
+  border-radius: 0;
   background: color-mix(in srgb, var(--note-block-color) 14%, var(--background-tertiary));
   -webkit-user-drag: none;
+}
+
+.script-note-block::before,
+.script-note-block::after {
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  left: -10px;
+  height: 1px;
+  background: var(--note-border-color);
+  content: '';
+  pointer-events: none;
+}
+
+.script-note-block::before {
+  top: -1px;
+}
+
+.script-note-block::after {
+  bottom: -1px;
 }
 
 .script-note-block[data-note-color='purple'] {
@@ -2830,23 +2935,37 @@ body.stagedesk-pointer-dragging * {
 
 .script-note-header {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) minmax(132px, auto) 28px;
+  grid-template-columns: 28px minmax(0, 1fr) minmax(132px, auto) 26px;
   align-items: center;
   gap: 6px;
   min-height: 38px;
   padding: 5px 6px 5px 9px;
   border-bottom: 1px solid color-mix(in srgb, var(--note-block-color) 22%, transparent);
+  cursor: default;
+}
+
+.script-note-drag-handle {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  left: -10px;
+  width: 10px;
+  border-radius: 0;
+  background: var(--note-block-color);
   cursor: grab;
+  touch-action: none;
   -webkit-user-drag: element;
 }
 
-.script-note-header:active {
+.script-note-drag-handle:active {
   cursor: grabbing;
 }
 
 .script-note-collapse,
 .script-note-delete {
   width: 26px;
+  height: 26px;
   min-height: 26px;
   padding: 0;
   color: var(--text-muted);
@@ -2889,11 +3008,6 @@ body.stagedesk-pointer-dragging * {
 
 .script-note-block[data-note-collapsed='true'] .script-note-collapse-icon::after {
   transform: scaleY(1);
-}
-
-.script-note-delete:hover {
-  background: rgba(255, 123, 123, 0.14);
-  color: var(--danger);
 }
 
 .script-note-title {
@@ -3258,22 +3372,85 @@ body.stagedesk-pointer-dragging * {
   vertical-align: middle;
 }
 
+.script-editor span[data-chip='cue'] {
+  border-radius: 2px;
+  padding: 3px 8px;
+}
+
 .script-editor span[data-chip='cue']:has(.script-chip-play) {
   padding-left: 3px;
+}
+
+.script-editor span[data-chip='cue'][data-chip-color='image'] {
+  padding: 1px 8px 1px 3px;
+}
+
+.script-chip-media-icon {
+  position: relative;
+  display: inline-grid;
+  flex: 0 0 15px;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  color: currentColor;
+}
+
+.script-chip-media-icon::before,
+.script-chip-media-icon::after {
+  box-sizing: border-box;
+  content: '';
+}
+
+.script-chip-media-icon[data-media-type='image'] {
+  flex-basis: 17px;
+  width: 17px;
+  height: 17px;
+}
+
+.script-chip-media-icon[data-media-type='image']::before {
+  width: 16px;
+  height: 14px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  background:
+    radial-gradient(circle at 4px 3.5px, currentColor 0 1.4px, transparent 1.6px),
+    linear-gradient(135deg, transparent 47%, currentColor 48% 58%, transparent 59%) 1px 3px / 11px 7px no-repeat;
+}
+
+.script-chip-media-icon[data-media-type='video']::before {
+  width: 14px;
+  height: 11px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+
+.script-chip-media-icon[data-media-type='video']::after {
+  width: 0;
+  height: 0;
+  margin-left: 1px;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-left: 5px solid currentColor;
 }
 
 .script-chip-play,
 .script-chip-stop {
   position: relative;
+  box-sizing: border-box;
   display: inline-grid;
   place-items: center;
   width: 20px;
   height: 20px;
   min-height: 20px;
-  border-radius: 999px;
+  margin-top: 0;
+  margin-bottom: 0;
+  border: 1px solid currentColor;
+  border-radius: 2px;
   padding: 0;
-  background: rgba(255, 255, 255, 0.12);
+  background: color-mix(in srgb, currentColor 12%, transparent);
   color: currentColor;
+  line-height: 0;
+  vertical-align: middle;
 }
 
 .script-chip-equalizer {
@@ -3292,9 +3469,13 @@ body.stagedesk-pointer-dragging * {
 }
 
 .script-chip-play::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
   width: 0;
   height: 0;
-  margin-left: 1px;
+  margin: 0;
+  transform: translate(-40%, -50%);
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
   border-left: 6px solid currentColor;
@@ -3304,9 +3485,12 @@ body.stagedesk-pointer-dragging * {
 }
 
 .script-chip-play[data-state='playing']::before {
+  top: 50%;
+  left: 50%;
   width: 8px;
   height: 10px;
-  margin-left: 0;
+  margin: 0;
+  transform: translate(-50%, -50%);
   border-top: 0;
   border-bottom: 0;
   border-left: 0;
@@ -3329,8 +3513,13 @@ body.stagedesk-pointer-dragging * {
 }
 
 .script-chip-stop::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
   width: 7px;
   height: 7px;
+  margin: 0;
+  transform: translate(-50%, -50%);
   border-radius: 1px;
   background: currentColor;
   content: "";
@@ -3346,7 +3535,7 @@ body.stagedesk-pointer-dragging * {
 
 .script-chip-play:hover,
 .script-chip-stop:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: color-mix(in srgb, currentColor 22%, transparent);
 }
 
 .script-editor span[data-chip='cue'][data-cue-state='playing'] {
@@ -3528,8 +3717,18 @@ body.stagedesk-pointer-dragging * {
 }
 
 .script-editor .stagedesk-pointer-editor-target {
-  outline: none;
+  outline: 1px solid color-mix(in srgb, var(--interactive-accent) 82%, transparent);
+  outline-offset: 3px;
   background: transparent;
+}
+
+.script-editor .script-dialogue-block.stagedesk-pointer-editor-target {
+  --dialogue-bar-color: #ffb08f;
+}
+
+.script-editor .script-note-block.stagedesk-pointer-editor-target,
+.script-editor span[data-chip].stagedesk-pointer-editor-target {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 82%, transparent);
 }
 
 .script-editor blockquote {
@@ -3537,7 +3736,7 @@ body.stagedesk-pointer-dragging * {
   margin: 12px 0;
   border: 1px solid color-mix(in srgb, var(--text-accent) 28%, var(--background-modifier-border));
   border-left: 3px solid var(--text-accent);
-  border-radius: var(--radius-m);
+  border-radius: 0;
   padding: 10px 12px 10px 14px;
   background: color-mix(in srgb, var(--interactive-accent-soft) 45%, transparent);
   color: color-mix(in srgb, var(--text-normal) 88%, var(--text-accent));

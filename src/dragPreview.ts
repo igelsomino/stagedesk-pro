@@ -6,6 +6,10 @@ type DragPreviewDetails = {
   tone: DragPreviewTone
 }
 
+type DragPreviewWindow = Window & {
+  __STAGEDESK_NATIVE_DRAG_ACTIVE__?: boolean
+}
+
 const kindLabel = (tone: DragPreviewTone) => {
   if (tone === 'note') return 'Nota'
   if (tone === 'media') return 'Media'
@@ -15,6 +19,9 @@ const kindLabel = (tone: DragPreviewTone) => {
 /** Uses the same compact preview for native browser and pointer-based dragging. */
 export const setNativeDragPreview = (dataTransfer: DataTransfer, details: DragPreviewDetails) => {
   if (typeof document === 'undefined') return
+
+  ;(window as DragPreviewWindow).__STAGEDESK_NATIVE_DRAG_ACTIVE__ = true
+  document.documentElement.classList.add('stagedesk-native-dragging')
 
   const preview = document.createElement('div')
   preview.className = 'pointer-drag-preview native-drag-image'
@@ -38,4 +45,10 @@ export const setNativeDragPreview = (dataTransfer: DataTransfer, details: DragPr
   document.body.append(preview)
   dataTransfer.setDragImage(preview, 14, 14)
   window.requestAnimationFrame(() => preview.remove())
+}
+
+export const clearNativeDragPreview = () => {
+  if (typeof window === 'undefined') return
+  delete (window as DragPreviewWindow).__STAGEDESK_NATIVE_DRAG_ACTIVE__
+  document.documentElement.classList.remove('stagedesk-native-dragging')
 }

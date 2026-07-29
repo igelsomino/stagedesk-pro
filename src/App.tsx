@@ -87,7 +87,7 @@ import { useAuth } from './authContext'
 import { SCRIPT_ROOT_PATH } from './domain'
 import type { DirectorNote, MediaAsset, MediaCue, NotePanelMode, NoteType, Project, ProjectTreeNode } from './domain'
 import { blankProject } from './defaultProject'
-import { setNativeDragPreview } from './dragPreview'
+import { clearNativeDragPreview, setNativeDragPreview } from './dragPreview'
 import {
   cleanScriptMarkdown,
   cueLabel,
@@ -306,12 +306,14 @@ type StagedeskDragPayload = {
   startY?: number
   pointerId?: number
   pointerActive?: boolean
+  nativeCandidate?: boolean
   label?: string
   detail?: string
   tone?: 'cue' | 'note' | 'media'
 }
 type StagedeskDragWindow = Window & {
   __STAGEDESK_DRAG_PAYLOAD__?: StagedeskDragPayload
+  __STAGEDESK_NATIVE_DRAG_ACTIVE__?: boolean
 }
 type ExportResult = {
   fileName: string
@@ -707,6 +709,11 @@ function App() {
         setActiveOutlineId(outlineItemIdAtPosition(nextOutline, activePosition))
         setActiveBookmarkId(bookmarkItemIdAtPosition(nextBookmarks, activePosition))
       }, EDITOR_DOCUMENT_UI_SYNC_DELAY_MS)
+
+      // Text input produces document transactions for every character. The
+      // delayed structural sync above is sufficient for outline, bookmarks,
+      // notes and cues; selection changes still use the fast path below.
+      return
     }
 
     if (editorUiSyncFrameRef.current !== null) return
@@ -1144,27 +1151,49 @@ function App() {
   }, [activePath, project.id])
 
   useEffect(() => {
+    const pendingNoteUpdates = new Map<string, Record<string, unknown>>()
+    let noteUpdateTimer: number | undefined
+
+    const flushNoteUpdates = () => {
+      noteUpdateTimer = undefined
+      if (pendingNoteUpdates.size === 0) return
+
+      const updates = new Map(pendingNoteUpdates)
+      pendingNoteUpdates.clear()
+      const updatedAt = new Date().toISOString()
+
+      setProject((current) => {
+        let changed = false
+        const notes = current.notes.map((note) => {
+          const attrs = updates.get(note.id)
+          if (!attrs) return note
+          changed = true
+          return {
+            ...note,
+            title: String(attrs.title ?? note.title ?? ''),
+            content: String(attrs.content ?? note.content),
+            type: String(attrs.type ?? note.type),
+            color: String(attrs.color ?? note.color),
+            collapsed: Boolean(attrs.collapsed),
+            updatedAt,
+          }
+        })
+        return changed ? { ...current, notes } : current
+      })
+    }
+
+    const scheduleNoteUpdates = () => {
+      if (noteUpdateTimer !== undefined) window.clearTimeout(noteUpdateTimer)
+      noteUpdateTimer = window.setTimeout(flushNoteUpdates, 100)
+    }
+
     const updateNoteFromEditor = (event: Event) => {
       const { id, attrs } = (event as CustomEvent<{ id?: string; attrs?: Record<string, unknown> }>).detail ?? {}
       if (!id || !attrs) return
       setSelectedNoteId(id)
       setSelectedNoteTypeId(String(attrs.type ?? 'general'))
-      setProject((current) => ({
-        ...current,
-        notes: current.notes.map((note) =>
-          note.id === id
-            ? {
-                ...note,
-                title: String(attrs.title ?? note.title ?? ''),
-                content: String(attrs.content ?? note.content),
-                type: String(attrs.type ?? note.type),
-                color: String(attrs.color ?? note.color),
-                collapsed: Boolean(attrs.collapsed),
-                updatedAt: new Date().toISOString(),
-              }
-            : note,
-        ),
-      }))
+      pendingNoteUpdates.set(id, { ...pendingNoteUpdates.get(id), ...attrs })
+      scheduleNoteUpdates()
     }
 
     const deleteNoteFromEditor = (event: Event) => {
@@ -1402,6 +1431,8 @@ function App() {
     window.addEventListener('script-cue-delete', deleteCueFromEditor)
 
     return () => {
+      if (noteUpdateTimer !== undefined) window.clearTimeout(noteUpdateTimer)
+      flushNoteUpdates()
       window.removeEventListener('script-note-update', updateNoteFromEditor)
       window.removeEventListener('script-note-delete', deleteNoteFromEditor)
       window.removeEventListener('script-cue-toggle', toggleCueFromEditor)
@@ -1499,6 +1530,7 @@ function App() {
         selection: currentEditor.state.selection.from,
       })
       scheduleEditorUiSync(currentEditor, true)
+      scheduleEditorUiSync(currentEditor)
     },
     onSelectionUpdate({ editor: currentEditor }) {
       lastEditorSelectionRef.current = currentEditor.state.selection.from
@@ -1581,16 +1613,16 @@ function App() {
         const dataTransfer = event.dataTransfer
         if (!dataTransfer) return false
 
-        const dropPosition = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
-        if (dropPosition === undefined) return false
         const payload = readEditorDragPayload(dataTransfer)
         if (!payload) return false
+        const dropTarget = editorDropTargetAtPoint(view, event)
+        if (!dropTarget) return false
 
         event.preventDefault()
         const handled = handleEditorPointerDrop(
           view,
           payload,
-          dropPosition,
+          dropTarget.position,
           projectRef.current,
           activeFilePathRef.current,
           cueDropActionsRef.current,
@@ -1647,15 +1679,16 @@ function App() {
     editorNoteCollapseSummaryValue.total > 0 &&
     editorNoteCollapseSummaryValue.collapsed === editorNoteCollapseSummaryValue.total
   const toggleAllNotesLabel = allEditorNotesCollapsed ? 'Espandi tutte le note' : 'Collassa tutte le note'
+  const deferredEditorSearchQuery = useDeferredValue(editorSearchQuery)
   const editorSearchMatches = useMemo(
     () => {
       void editorMarkdown
-      return editor && editorSearchQuery.trim() ? searchEditorDocument(editor, editorSearchQuery) : []
+      return editor && deferredEditorSearchQuery.trim() ? searchEditorDocument(editor, deferredEditorSearchQuery) : []
     },
-    [editor, editorMarkdown, editorSearchQuery],
+    [deferredEditorSearchQuery, editor, editorMarkdown],
   )
   const editorSearchResults = useMemo(() => {
-    const normalizedQuery = editorSearchQuery.trim().toLocaleLowerCase('it-IT')
+    const normalizedQuery = deferredEditorSearchQuery.trim().toLocaleLowerCase('it-IT')
     if (!normalizedQuery) return []
 
     return editorSearchMatches.map((match) => {
@@ -1679,7 +1712,7 @@ function App() {
         trailing: end < text.length,
       }
     })
-  }, [editorSearchMatches, editorSearchQuery])
+  }, [deferredEditorSearchQuery, editorSearchMatches])
 
   useEffect(() => {
     setEditorSearchQuery('')
@@ -3166,12 +3199,8 @@ function App() {
     const editorDropTarget = (event: InternalDragEvent, payload: StagedeskDragPayload): PointerDropTarget | undefined => {
       if (!editor || !isEditorDragPayload(payload.type)) return undefined
       const view = editor.view
-      const pointTarget = document.elementFromPoint(event.clientX, event.clientY)
-      if (!pointTarget || !view.dom.contains(pointTarget)) return undefined
-      const position = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
-      if (position === undefined) return undefined
-      const element = editorBlockElementAtPosition(view, position)
-      return { kind: 'editor', position, element }
+      const target = editorDropTargetAtPoint(view, event)
+      return target ? { kind: 'editor', ...target } : undefined
     }
 
     const mediaDropTarget = (event: InternalDragEvent, payload: StagedeskDragPayload): PointerDropTarget | undefined => {
@@ -3207,11 +3236,16 @@ function App() {
 
       const distance = pointerDragDistance(payload, event)
       if (!payload.pointerActive && distance < 6) return
+      if (payload.nativeCandidate && !(window as StagedeskDragWindow).__STAGEDESK_NATIVE_DRAG_ACTIVE__) return
       payload.pointerActive = true
       writeGlobalDragPayload(payload.type, payload.value, payload)
       document.body.classList.add(POINTER_DRAGGING_CLASS)
       document.documentElement.classList.add(POINTER_DRAGGING_CLASS)
-      setPointerDragPreview(dragPreviewFromPayload(payload, event))
+      if ((window as StagedeskDragWindow).__STAGEDESK_NATIVE_DRAG_ACTIVE__) {
+        setPointerDragPreview(undefined)
+      } else {
+        setPointerDragPreview(dragPreviewFromPayload(payload, event))
+      }
       if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) {
         document.activeElement.blur()
       }
@@ -3262,7 +3296,11 @@ function App() {
       clearPointerDrag()
     }
 
-    const onPointerCancel = () => clearPointerDrag()
+    const onPointerCancel = () => {
+      const payload = readAnyGlobalDragPayload()
+      if (payload?.nativeCandidate && !(window as StagedeskDragWindow).__STAGEDESK_NATIVE_DRAG_ACTIVE__) return
+      clearPointerDrag()
+    }
     const onNativeDragOver = (event: DragEvent) => {
       const payload = readAnyGlobalDragPayload()
       if (!payload || !event.dataTransfer) return
@@ -3270,7 +3308,10 @@ function App() {
       event.dataTransfer.dropEffect = 'move'
       onPointerMove(event)
     }
-    const onNativeDragEnd = () => clearPointerDrag()
+    const onNativeDragEnd = () => {
+      clearNativeDragPreview()
+      clearPointerDrag()
+    }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') clearPointerDrag()
     }
@@ -5310,7 +5351,7 @@ function App() {
                 onDragEnd={clearGlobalDragPayload}
                 onClick={() => selectCueFromInspector(cue)}
               >
-                <span className="note-dot blue" />
+                <span className={`note-dot ${cue.type === 'music' ? 'green' : cue.type === 'image' ? 'yellow' : cue.type === 'video' ? 'red' : 'blue'}`} />
                 <strong>{cue.title || cue.src.split('/').pop()}</strong>
                 <span>{cue.autoplay ? 'Autoplay' : 'Manuale'} · {cue.src}</span>
               </button>
@@ -7792,6 +7833,7 @@ const pointerPayloadFromEvent = (
   startX: event.clientX,
   startY: event.clientY,
   pointerId: 'pointerId' in event ? event.pointerId : undefined,
+  nativeCandidate: !('pointerType' in event) || event.pointerType !== 'touch',
   ...metadata,
 })
 
@@ -7885,6 +7927,34 @@ const editorBlockElementAtPosition = (view: EditorView, position: number) => {
     element?.closest<HTMLElement>('[data-note-block="true"], p, h1, h2, h3, h4, h5, h6, blockquote, li, table') ??
     view.dom
   )
+}
+
+const editorDropTargetAtPoint = (view: EditorView, event: InternalDragEvent) => {
+  const pointTarget = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
+  if (!pointTarget || !view.dom.contains(pointTarget)) return undefined
+
+  const block = pointTarget.closest<HTMLElement>(
+    '[data-note-block="true"], [data-dialogue-block="true"], [data-chip], p, h1, h2, h3, h4, h5, h6, blockquote, li, table',
+  )
+  if (block && view.dom.contains(block)) {
+    try {
+      const position = view.posAtDOM(block, 0)
+      const node = view.state.doc.nodeAt(position)
+      if (node) {
+        const rect = block.getBoundingClientRect()
+        return {
+          position: event.clientY < rect.top + rect.height / 2 ? position : position + node.nodeSize,
+          element: block,
+        }
+      }
+    } catch {
+      // NodeViews can be replaced while the pointer is moving; use coordinates below.
+    }
+  }
+
+  const position = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
+  if (position === undefined) return undefined
+  return { position, element: editorBlockElementAtPosition(view, position) }
 }
 
 const handleEditorPointerDrop = (

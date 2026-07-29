@@ -20,6 +20,7 @@ type ScriptNoteWindow = Window & {
     startY?: number
     pointerId?: number
     pointerActive?: boolean
+    nativeCandidate?: boolean
     label?: string
     detail?: string
     tone?: 'cue' | 'note' | 'media'
@@ -117,6 +118,7 @@ export const ScriptNote = TiptapNode.create({
     return ({ editor, getPos, node }) => {
       let currentNode = node
       const dom = document.createElement('section')
+      const dragHandle = document.createElement('span')
       const header = document.createElement('div')
       const collapseButton = document.createElement('button')
       const collapseIcon = document.createElement('span')
@@ -146,6 +148,11 @@ export const ScriptNote = TiptapNode.create({
       dom.dataset.noteBlock = 'true'
       dom.contentEditable = 'false'
       dom.draggable = false
+      dragHandle.className = 'script-note-drag-handle'
+      dragHandle.draggable = true
+      dragHandle.setAttribute('role', 'button')
+      dragHandle.setAttribute('aria-label', 'Trascina nota')
+      dragHandle.title = 'Trascina nota'
       header.className = 'script-note-header'
       header.draggable = false
       collapseButton.type = 'button'
@@ -218,7 +225,7 @@ export const ScriptNote = TiptapNode.create({
 
       header.append(collapseButton, titleInput, typeDropdown, deleteButton)
       body.append(contentTextarea)
-      dom.append(header, body)
+      dom.append(dragHandle, header, body)
 
       const dispatchNoteEvent = (name: 'script-note-update' | 'script-note-delete', attrs = currentNode.attrs) => {
         window.dispatchEvent(new CustomEvent(name, { detail: { id: attrs.refId, attrs } }))
@@ -357,7 +364,7 @@ export const ScriptNote = TiptapNode.create({
       })
       const writePointerDragPayload = (event: PointerEvent | MouseEvent) => {
         const target = event.target as HTMLElement | null
-        if (!target?.closest('.script-note-header') || target.closest('button, input, textarea, .script-note-type-menu')) {
+        if (!target?.closest('.script-note-drag-handle')) {
           return
         }
         const refId = String(currentNode.attrs.refId ?? '')
@@ -369,6 +376,7 @@ export const ScriptNote = TiptapNode.create({
           startX: event.clientX,
           startY: event.clientY,
           pointerId: 'pointerId' in event ? event.pointerId : undefined,
+          nativeCandidate: !('pointerType' in event) || event.pointerType !== 'touch',
           label: String(currentNode.attrs.title ?? 'Nota regia'),
           detail: noteTypes.find((item) => item.id === currentNode.attrs.type)?.label ?? 'Nota regia',
           tone: 'note',
@@ -377,7 +385,7 @@ export const ScriptNote = TiptapNode.create({
       const startNativeDrag = (event: Event) => {
         const dragEvent = event as DragEvent
         const target = dragEvent.target as HTMLElement | null
-        if (target?.closest('button, input, textarea, .script-note-type-menu')) {
+        if (!target?.closest('.script-note-drag-handle')) {
           dragEvent.preventDefault()
           return
         }
@@ -399,11 +407,10 @@ export const ScriptNote = TiptapNode.create({
           delete (window as ScriptNoteWindow).__STAGEDESK_DRAG_PAYLOAD__
         }
       }
-      header.draggable = true
-      header.addEventListener('pointerdown', writePointerDragPayload)
-      header.addEventListener('mousedown', writePointerDragPayload)
-      header.addEventListener('dragstart', startNativeDrag)
-      header.addEventListener('dragend', clearNoteDragPayload)
+      dragHandle.addEventListener('pointerdown', writePointerDragPayload)
+      dragHandle.addEventListener('mousedown', writePointerDragPayload)
+      dragHandle.addEventListener('dragstart', startNativeDrag)
+      dragHandle.addEventListener('dragend', clearNoteDragPayload)
       document.addEventListener('pointerdown', closeTypeMenuOnOutsideClick)
       contentTextarea.addEventListener('input', () => {
         resizeTextarea()
@@ -440,14 +447,14 @@ export const ScriptNote = TiptapNode.create({
         },
         stopEvent(event) {
           const target = event.target as HTMLElement | null
-          return Boolean(target?.closest('button, input, textarea, .script-note-type-menu'))
+          return Boolean(target?.closest('button, input, textarea, .script-note-type-menu, .script-note-drag-handle'))
         },
         destroy() {
           document.removeEventListener('pointerdown', closeTypeMenuOnOutsideClick)
-          header.removeEventListener('pointerdown', writePointerDragPayload)
-          header.removeEventListener('mousedown', writePointerDragPayload)
-          header.removeEventListener('dragstart', startNativeDrag)
-          header.removeEventListener('dragend', clearNoteDragPayload)
+          dragHandle.removeEventListener('pointerdown', writePointerDragPayload)
+          dragHandle.removeEventListener('mousedown', writePointerDragPayload)
+          dragHandle.removeEventListener('dragstart', startNativeDrag)
+          dragHandle.removeEventListener('dragend', clearNoteDragPayload)
           contentTextarea.removeEventListener('dragstart', preventTextDrag)
         },
       }

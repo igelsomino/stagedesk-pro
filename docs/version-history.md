@@ -1,5 +1,14 @@
 # Novità
 
+## Versione 1.0.44
+
+> Rifinitura dei controlli cue e dei blocchi nota nell'editor.
+
+- Centrati verticalmente e orizzontalmente i controlli pausa e stop dei cue audio e musicali.
+- Uniformate le metriche interne dei pulsanti multimediali per evitare icone visivamente spostate tra browser, WebView e desktop.
+- Reso continuo il contorno delle note anche in corrispondenza della barra laterale colorata.
+- Aggiornata la documentazione tecnica e la procedura di release insieme alla nuova versione desktop.
+
 ## Versione 1.0.43
 
 > Condivisione più affidabile tra StageDesk Pro, browser e StageDesk Share.

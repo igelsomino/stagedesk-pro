@@ -26,6 +26,7 @@ type ScriptDialogueWindow = Window & {
     startY?: number
     pointerId?: number
     pointerActive?: boolean
+    nativeCandidate?: boolean
     label?: string
     detail?: string
     tone?: 'cue' | 'note' | 'media'
@@ -108,7 +109,9 @@ export const ScriptDialogue = TiptapNode.create({
     return ({ editor, getPos, node }) => {
       let currentNode = node
       const dom = document.createElement('section')
+      const dragHandle = document.createElement('span')
       const header = document.createElement('div')
+      const dialogueNumber = document.createElement('span')
       const characterDropdown = document.createElement('div')
       const characterButton = document.createElement('button')
       const characterLabel = document.createElement('span')
@@ -127,7 +130,14 @@ export const ScriptDialogue = TiptapNode.create({
       dom.dataset.dialogueBlock = 'true'
       dom.contentEditable = 'false'
       dom.draggable = false
+      dragHandle.className = 'script-dialogue-drag-handle'
+      dragHandle.draggable = true
+      dragHandle.setAttribute('role', 'button')
+      dragHandle.setAttribute('aria-label', 'Trascina battuta')
+      dragHandle.title = 'Trascina battuta'
       header.className = 'script-dialogue-header'
+      dialogueNumber.className = 'script-dialogue-number'
+      dialogueNumber.setAttribute('aria-hidden', 'true')
       characterDropdown.className = 'script-note-type script-dialogue-character'
       characterButton.type = 'button'
       characterButton.className = 'script-note-type-trigger'
@@ -149,12 +159,16 @@ export const ScriptDialogue = TiptapNode.create({
       body.rows = 1
       body.placeholder = 'Battuta'
       body.draggable = false
-      header.append(characterDropdown, closeButton)
-      dom.append(header, body)
+      header.append(dialogueNumber, characterDropdown, closeButton)
+      dom.append(dragHandle, header, body)
+
+      const setFocused = (focused: boolean) => {
+        dom.classList.toggle('is-focused', focused)
+      }
 
       const writePointerDragPayload = (event: PointerEvent | MouseEvent) => {
         const target = event.target as HTMLElement | null
-        if (!target?.closest('.script-dialogue-header') || target.closest('button, input, textarea, .script-note-type-menu')) return
+        if (!target?.closest('.script-dialogue-drag-handle')) return
         const id = String(currentNode.attrs.id ?? '')
         if (!id) return
         ;(window as ScriptDialogueWindow).__STAGEDESK_DRAG_PAYLOAD__ = {
@@ -164,6 +178,7 @@ export const ScriptDialogue = TiptapNode.create({
           startX: event.clientX,
           startY: event.clientY,
           pointerId: 'pointerId' in event ? event.pointerId : undefined,
+          nativeCandidate: !('pointerType' in event) || event.pointerType !== 'touch',
           label: String(currentNode.attrs.character || 'Battuta'),
           detail: 'Battuta',
           tone: 'cue',
@@ -173,7 +188,7 @@ export const ScriptDialogue = TiptapNode.create({
       const startNativeDrag = (event: Event) => {
         const dragEvent = event as DragEvent
         const target = dragEvent.target as HTMLElement | null
-        if (target?.closest('button, input, textarea, .script-note-type-menu')) {
+        if (!target?.closest('.script-dialogue-drag-handle')) {
           dragEvent.preventDefault()
           return
         }
@@ -306,11 +321,10 @@ export const ScriptDialogue = TiptapNode.create({
         editor.view.focus()
       })
 
-      header.draggable = true
-      header.addEventListener('pointerdown', writePointerDragPayload)
-      header.addEventListener('mousedown', writePointerDragPayload)
-      header.addEventListener('dragstart', startNativeDrag)
-      header.addEventListener('dragend', clearDialogueDragPayload)
+      dragHandle.addEventListener('pointerdown', writePointerDragPayload)
+      dragHandle.addEventListener('mousedown', writePointerDragPayload)
+      dragHandle.addEventListener('dragstart', startNativeDrag)
+      dragHandle.addEventListener('dragend', clearDialogueDragPayload)
 
       characterMenu.addEventListener('click', (event) => {
         event.preventDefault()
@@ -348,7 +362,14 @@ export const ScriptDialogue = TiptapNode.create({
       })
       const preventTextDrag = (event: DragEvent) => event.preventDefault()
       body.addEventListener('dragstart', preventTextDrag)
-      body.addEventListener('focus', selectDialogueNode)
+      body.addEventListener('focus', () => {
+        setFocused(true)
+        selectDialogueNode()
+      })
+      body.addEventListener('blur', (event) => {
+        const relatedTarget = (event as FocusEvent).relatedTarget as Node | null
+        if (!relatedTarget || !dom.contains(relatedTarget)) setFocused(false)
+      })
       body.addEventListener('pointerdown', selectDialogueNode)
       body.addEventListener('click', selectDialogueNode)
 
@@ -369,7 +390,7 @@ export const ScriptDialogue = TiptapNode.create({
         },
         stopEvent(event) {
           const target = event.target as HTMLElement | null
-          return Boolean(target?.closest('button, textarea, .script-note-type-menu'))
+          return Boolean(target?.closest('button, textarea, .script-note-type-menu, .script-dialogue-drag-handle'))
         },
         destroy() {
           if (resizeFrame) window.cancelAnimationFrame(resizeFrame)
@@ -377,10 +398,10 @@ export const ScriptDialogue = TiptapNode.create({
           window.removeEventListener('stagedesk-characters-updated', render)
           window.removeEventListener('pointerdown', closeCharacterMenuOnOutsideClick)
           window.removeEventListener('resize', scheduleResize)
-          header.removeEventListener('pointerdown', writePointerDragPayload)
-          header.removeEventListener('mousedown', writePointerDragPayload)
-          header.removeEventListener('dragstart', startNativeDrag)
-          header.removeEventListener('dragend', clearDialogueDragPayload)
+          dragHandle.removeEventListener('pointerdown', writePointerDragPayload)
+          dragHandle.removeEventListener('mousedown', writePointerDragPayload)
+          dragHandle.removeEventListener('dragstart', startNativeDrag)
+          dragHandle.removeEventListener('dragend', clearDialogueDragPayload)
           body.removeEventListener('dragstart', preventTextDrag)
         },
       }

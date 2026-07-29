@@ -2,7 +2,7 @@
 
 Applicazione desktop/web per scrittura, organizzazione e messa in scena di copioni teatrali con note di regia, cue multimediali, raccolta media, modalità schermo intero ed export PDF.
 
-Versione desktop corrente: **1.0.43**.
+Versione desktop corrente: **1.0.44**.
 
 ## Scopo
 
@@ -77,6 +77,8 @@ Implementato:
 44. drag nativo dei cue laterali e dei file media con destinazioni compatibili evidenziate durante il trascinamento;
 45. apertura del link di StageDesk Share in una finestra esterna dal comando **Condividi**, con supporto coerente per web e desktop;
 46. autenticazione OAuth di StageDesk Share avviata fuori dagli iframe incorporati, evitando pagine di accesso bloccate o lasciate in caricamento;
+47. controlli pausa e stop dei cue audio/musicali centrati in modo uniforme nel chip editor;
+48. contorno continuo delle note, inclusa la barra laterale colorata, senza interruzioni sui margini superiore e inferiore;
 
 ## Sviluppo
 

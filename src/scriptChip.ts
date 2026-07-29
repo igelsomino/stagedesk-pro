@@ -17,6 +17,7 @@ type CuePlaybackWindow = Window & {
     startY?: number
     pointerId?: number
     pointerActive?: boolean
+    nativeCandidate?: boolean
     label?: string
     detail?: string
     tone?: 'cue' | 'note' | 'media'
@@ -80,6 +81,7 @@ export const ScriptChip = Node.create({
       let currentNode = node
       const dom = document.createElement('span')
       const label = document.createElement('span')
+      const mediaIcon = document.createElement('span')
       const playButton = document.createElement('button')
       const equalizer = document.createElement('span')
       const stopButton = document.createElement('button')
@@ -90,6 +92,8 @@ export const ScriptChip = Node.create({
       dom.contentEditable = 'false'
       dom.draggable = currentNode.attrs.kind === 'cue' || currentNode.attrs.kind === 'note'
       label.className = 'script-chip-label'
+      mediaIcon.className = 'script-chip-media-icon'
+      mediaIcon.setAttribute('aria-hidden', 'true')
       playButton.type = 'button'
       playButton.className = 'script-chip-play'
       playButton.title = 'Esegui cue'
@@ -126,13 +130,24 @@ export const ScriptChip = Node.create({
         const isPlayableCue =
           currentNode.attrs.kind === 'cue' &&
           (currentNode.attrs.color === 'audio' || currentNode.attrs.color === 'music')
+        const isVisualCue =
+          currentNode.attrs.kind === 'cue' &&
+          (currentNode.attrs.color === 'image' || currentNode.attrs.color === 'video')
         const currentPlayback = (window as CuePlaybackWindow).__STAGEDESK_EDITOR_CUE_STATE__
         const currentId = String(currentNode.attrs.refId ?? '')
         cueState =
           currentPlayback?.id === currentId && currentPlayback.state !== 'stopped'
-            ? currentPlayback.state
-            : 'idle'
-        dom.replaceChildren(...(isPlayableCue ? [playButton, stopButton, label, equalizer] : [label]))
+              ? currentPlayback.state
+              : 'idle'
+        mediaIcon.dataset.mediaType = String(currentNode.attrs.color ?? '')
+        mediaIcon.title = currentNode.attrs.color === 'image' ? 'Immagine' : 'Video'
+        dom.replaceChildren(
+          ...(isPlayableCue
+            ? [playButton, stopButton, label, equalizer]
+            : isVisualCue
+              ? [mediaIcon, label]
+              : [label]),
+        )
         syncCueState()
       }
 
@@ -196,6 +211,7 @@ export const ScriptChip = Node.create({
             startX: event.clientX,
             startY: event.clientY,
             pointerId: 'pointerId' in event ? event.pointerId : undefined,
+            nativeCandidate: !('pointerType' in event) || event.pointerType !== 'touch',
             label: String(currentNode.attrs.label ?? 'Cue'),
             tone: 'cue',
           }
@@ -210,6 +226,7 @@ export const ScriptChip = Node.create({
             startX: event.clientX,
             startY: event.clientY,
             pointerId: 'pointerId' in event ? event.pointerId : undefined,
+            nativeCandidate: !('pointerType' in event) || event.pointerType !== 'touch',
             label: String(currentNode.attrs.label ?? 'Nota'),
             tone: 'note',
           }
