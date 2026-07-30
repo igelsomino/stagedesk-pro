@@ -44,6 +44,7 @@ import {
   ListOrdered,
   ListTree,
   Minus,
+  MessageSquare,
   MoreVertical,
   PanelLeft,
   PanelRight,
@@ -57,11 +58,13 @@ import {
   PanelTopClose,
   Rows3,
   Search,
+  Send,
   SkipBack,
   SkipForward,
   Square,
   Star,
   Table2,
+  Theater,
   Trash2,
   Type,
   Undo2,
@@ -146,6 +149,7 @@ const AUTOSAVE_IDLE_DELAY_MS = 1500
 const AUTOSAVE_MIN_INTERVAL_MS = 4000
 const STORE_TAB_PATH = 'web://stagedesk-store'
 const SHARE_TAB_PREFIX = 'web://stagedesk-share/'
+const STORE_INFO_TAB_PREFIX = 'store-info://'
 const STORE_URL = 'https://stagedesk-pro.aigconsulting.it/store/?embedded=1'
 const STORE_ORIGIN = 'https://stagedesk-pro.aigconsulting.it'
 // Public Supabase project origin used by the Store package bucket. This is not a credential.
@@ -157,8 +161,11 @@ const STORE_RATING_TARGET_KEY = 'stagedesk-store-rating-target'
 const shareUidFromTabPath = (path: string) =>
   path.startsWith(SHARE_TAB_PREFIX) ? decodeURIComponent(path.slice(SHARE_TAB_PREFIX.length)) : ''
 const isShareTabPath = (path: string) => path.startsWith(SHARE_TAB_PREFIX)
+const storeInfoScriptIdFromTabPath = (path: string) =>
+  path.startsWith(STORE_INFO_TAB_PREFIX) ? decodeURIComponent(path.slice(STORE_INFO_TAB_PREFIX.length)) : ''
+const isStoreInfoTabPath = (path: string) => path.startsWith(STORE_INFO_TAB_PREFIX)
 const isEmbeddedTabPath = (path: string) => path === STORE_TAB_PATH || isShareTabPath(path)
-const isNonMarkdownTabPath = (path: string) => isAppDocumentPath(path) || isEmbeddedTabPath(path)
+const isNonMarkdownTabPath = (path: string) => isAppDocumentPath(path) || isEmbeddedTabPath(path) || isStoreInfoTabPath(path)
 const SUPABASE_STORAGE_ORIGIN = (() => {
   try {
     return supabaseUrl ? new URL(supabaseUrl).origin : ''
@@ -269,6 +276,27 @@ type StoreRatingTarget = {
   scriptId: string
   title: string
   filePath: string
+}
+type StoreScriptInfo = {
+  scriptId: string
+  title: string
+  subtitle: string
+  description: string
+  authorName: string
+  language: string
+  genre: string
+  rightsLabel: string
+  actorCount: number
+  actCount: number
+  sceneCount: number
+  estimatedMinutes: number
+  averageRating: number
+  ratingCount: number
+  currentVersion?: number
+  publishedAt?: string
+  coverUrl?: string
+  filePath: string
+  packageUrl: string
 }
 type ShareIndicatorState = {
   status: 'disabled' | 'checking' | 'shared' | 'not-shared' | 'error'
@@ -459,6 +487,8 @@ function App() {
   const [storeLoading, setStoreLoading] = useState(false)
   const [shareTabLoading, setShareTabLoading] = useState(false)
   const [storeRating, setStoreRating] = useState<StoreRatingTarget>()
+  const [storeScriptInfo, setStoreScriptInfo] = useState<Record<string, StoreScriptInfo>>({})
+  const [storeScriptInfoLoading, setStoreScriptInfoLoading] = useState<Record<string, boolean>>({})
   const [storeRatingTarget, setStoreRatingTarget] = useState<StoreRatingTarget | undefined>(() => {
     try {
       const stored = localStorage.getItem(STORE_RATING_TARGET_KEY)
@@ -518,6 +548,8 @@ function App() {
   const activeAppDocument = useMemo(() => getAppDocument(activePath), [activePath])
   const activeStoreTab = activePath === STORE_TAB_PATH
   const activeShareTab = isShareTabPath(activePath)
+  const activeStoreInfoTab = isStoreInfoTabPath(activePath)
+  const activeStoreInfoScriptId = storeInfoScriptIdFromTabPath(activePath)
   const activeEmbeddedTab = activeStoreTab || activeShareTab
   const canRateActiveStoreScript = Boolean(
     storeRatingTarget &&
@@ -1671,7 +1703,9 @@ function App() {
     immediatelyRender: false,
   })
   const editorEditingDisabled = !editor || Boolean(activeAppDocument) || activeEmbeddedTab
-  const activeDocumentTitle = activeFile?.name ?? activeAppDocument?.title ?? (activeStoreTab ? 'Store' : activeShareTab ? 'Condividi' : undefined)
+  const activeDocumentTitle = activeFile?.name
+    ?? activeAppDocument?.title
+    ?? (activeStoreTab ? 'Store' : activeShareTab ? 'Condividi' : activeStoreInfoTab ? storeScriptInfo[activeStoreInfoScriptId]?.title ?? 'Informazioni copione' : undefined)
   const selectedTableContext = editor ? currentTableContext(editor) : undefined
   const selectedCharacterTable = Boolean(selectedTableContext?.isCharacterTable)
   const selectedCharacterTableHeaderRow = Boolean(selectedTableContext?.isCharacterTable && selectedTableContext.isHeaderRow)
@@ -2285,11 +2319,14 @@ function App() {
 
   const activateProject = (nextProject: typeof project) => {
     nextProject = normalizeProject(nextProject)
+    const switchingProject = projectRef.current.id !== nextProject.id
     const markdownPaths = flattenMarkdownFiles(nextProject.scripts).map((file) => file.path)
     const savedUiState = loadPersistedUiState(nextProject.id)
-    const validOpenTabs = savedUiState?.openTabs.filter((path) => markdownPaths.includes(path) || isNonMarkdownTabPath(path)) ?? []
+    const validOpenTabs = savedUiState?.openTabs.filter((path) =>
+      (markdownPaths.includes(path) || isNonMarkdownTabPath(path)) && !(switchingProject && isStoreInfoTabPath(path)),
+    ) ?? []
     const nextPath =
-      savedUiState?.activePath && (markdownPaths.includes(savedUiState.activePath) || isNonMarkdownTabPath(savedUiState.activePath))
+      savedUiState?.activePath && validOpenTabs.includes(savedUiState.activePath)
         ? savedUiState.activePath
         : validOpenTabs[0] ?? markdownPaths[0] ?? ''
     const scriptPath =
@@ -2343,9 +2380,94 @@ function App() {
     setSelectedCueId(nextProject.cues[0]?.id ?? '')
     setSearch('')
     setShareIndicators({})
+    if (switchingProject) setStoreScriptInfo({})
     setFullscreenIndex(0)
     setExecutedCueIds([])
   }
+
+  const openStoreInfoTab = (info: StoreScriptInfo) => {
+    const infoPath = `${STORE_INFO_TAB_PREFIX}${encodeURIComponent(info.scriptId)}`
+    setStoreScriptInfo((current) => ({ ...current, [info.scriptId]: info }))
+    const nextTabs = openTabsRef.current.includes(infoPath) ? openTabsRef.current : [...openTabsRef.current, infoPath]
+    openTabsRef.current = nextTabs
+    activePathRef.current = infoPath
+    setOpenTabs(nextTabs)
+    setActivePath(infoPath)
+    persistUiStateNow()
+  }
+
+  const loadStoreScriptInfo = async (scriptId: string) => {
+    if (!scriptId || storeScriptInfo[scriptId] || storeScriptInfoLoading[scriptId]) return
+    setStoreScriptInfoLoading((current) => ({ ...current, [scriptId]: true }))
+    try {
+      const { data, error } = await supabase
+        .from('store_scripts')
+        .select('id, title, subtitle, description, author_name, language, genre, rights_label, actor_count, act_count, scene_count, estimated_minutes, average_rating, rating_count, current_version, published_at, cover_path, package_path')
+        .eq('id', scriptId)
+        .maybeSingle()
+      if (error) throw error
+      if (!data) return
+      const row = data as unknown as Record<string, unknown>
+      const packagePath = typeof row.package_path === 'string' ? row.package_path : ''
+      const coverPath = typeof row.cover_path === 'string' ? row.cover_path : ''
+      const packageUrl = packagePath
+        ? supabase.storage.from('store-packages').getPublicUrl(packagePath).data.publicUrl
+        : ''
+      const coverUrl = coverPath
+        ? supabase.storage.from('store-covers').getPublicUrl(coverPath).data.publicUrl
+        : undefined
+      const previous = storeScriptInfo[scriptId] as StoreScriptInfo | undefined
+      setStoreScriptInfo((current) => ({
+        ...current,
+        [scriptId]: {
+          ...(previous ?? {
+            scriptId,
+            title: String(row.title ?? 'Copione Store'),
+            subtitle: '',
+            description: '',
+            authorName: '',
+            language: 'Italiano',
+            genre: 'Teatro',
+            rightsLabel: '',
+            actorCount: 0,
+            actCount: 0,
+            sceneCount: 0,
+            estimatedMinutes: 0,
+            averageRating: 0,
+            ratingCount: 0,
+            filePath: `${SCRIPT_ROOT_PATH}/${slug(String(row.title ?? 'copione')) || 'copione'}.md`,
+            packageUrl: '',
+          }),
+          title: String(row.title ?? previous?.title ?? 'Copione Store'),
+          subtitle: String(row.subtitle ?? previous?.subtitle ?? ''),
+          description: String(row.description ?? previous?.description ?? ''),
+          authorName: String(row.author_name ?? previous?.authorName ?? ''),
+          language: String(row.language ?? previous?.language ?? 'Italiano'),
+          genre: String(row.genre ?? previous?.genre ?? 'Teatro'),
+          rightsLabel: String(row.rights_label ?? previous?.rightsLabel ?? ''),
+          actorCount: Number(row.actor_count ?? previous?.actorCount ?? 0),
+          actCount: Number(row.act_count ?? previous?.actCount ?? 0),
+          sceneCount: Number(row.scene_count ?? previous?.sceneCount ?? 0),
+          estimatedMinutes: Number(row.estimated_minutes ?? previous?.estimatedMinutes ?? 0),
+          averageRating: Number(row.average_rating ?? previous?.averageRating ?? 0),
+          ratingCount: Number(row.rating_count ?? previous?.ratingCount ?? 0),
+          currentVersion: Number(row.current_version ?? previous?.currentVersion ?? 0) || undefined,
+          publishedAt: typeof row.published_at === 'string' ? row.published_at : previous?.publishedAt,
+          coverUrl: coverUrl ?? previous?.coverUrl,
+          packageUrl: packageUrl || previous?.packageUrl || '',
+        },
+      }))
+    } catch (error) {
+      showStatus(`Informazioni Store non disponibili: ${publishErrorMessage(error)}`)
+    } finally {
+      setStoreScriptInfoLoading((current) => ({ ...current, [scriptId]: false }))
+    }
+  }
+
+  useEffect(() => {
+    if (!activeStoreInfoTab || !activeStoreInfoScriptId) return
+    void loadStoreScriptInfo(activeStoreInfoScriptId)
+  }, [activeStoreInfoScriptId, activeStoreInfoTab])
 
   useEffect(() => {
     if (!desktopStorageReady || startupProjectLoadedRef.current) return
@@ -2495,6 +2617,28 @@ function App() {
       persistProject(projectInFolder)
       setStorageStatus(`Copione importato: ${compactPath(path)}`)
       if (storeScriptId) {
+        const importedCharacters = charactersFromMarkdown(content, baseProject.characters)
+        const importedInfo: StoreScriptInfo = {
+          scriptId: storeScriptId,
+          title: projectName,
+          subtitle: 'Copione importato dal catalogo StageDesk Store',
+          description: 'Versione importata nel progetto locale per lettura, prove e lavoro in scena.',
+          authorName: '',
+          language: 'Italiano',
+          genre: 'Teatro',
+          rightsLabel: '',
+          actorCount: importedCharacters.length,
+          actCount: (content.match(/^#\s+/gm) ?? []).length,
+          sceneCount: (content.match(/^##\s+/gm) ?? []).length,
+          estimatedMinutes: 0,
+          averageRating: 0,
+          ratingCount: 0,
+          currentVersion: undefined,
+          publishedAt: undefined,
+          filePath,
+          packageUrl: url.toString(),
+        }
+        setStoreScriptInfo((current) => ({ ...current, [storeScriptId]: importedInfo }))
         const target = { scriptId: storeScriptId, title: projectName, filePath }
         setStoreRatingTarget(target)
         try {
@@ -2502,6 +2646,7 @@ function App() {
         } catch {
           // The rating action remains available for the current session.
         }
+        openStoreInfoTab(importedInfo)
       } else {
         setStoreRatingTarget(undefined)
         try {
@@ -2536,6 +2681,7 @@ function App() {
       })
       if (error) throw error
 
+      setRatedStoreScriptId(storeRating.scriptId)
       setStoreRating(undefined)
       setStoreRatingTarget(undefined)
       try {
@@ -4735,7 +4881,11 @@ function App() {
                   const tabFile = findMarkdownNode(project.scripts, path)
                   const isStoreTab = path === STORE_TAB_PATH
                   const isShareTab = isShareTabPath(path)
-                  const tabTitle = tabFile?.name ?? getAppDocument(path)?.title ?? (isStoreTab ? 'Store' : isShareTab ? 'Condividi' : path.split('/').pop())
+                  const isStoreInfoTab = isStoreInfoTabPath(path)
+                  const infoScriptId = storeInfoScriptIdFromTabPath(path)
+                  const tabTitle = tabFile?.name ?? getAppDocument(path)?.title ?? (
+                    isStoreTab ? 'Store' : isShareTab ? 'Condividi' : isStoreInfoTab ? storeScriptInfo[infoScriptId]?.title ?? 'Informazioni copione' : path.split('/').pop()
+                  )
                   return (
                     <button
                       type="button"
@@ -4754,25 +4904,27 @@ function App() {
                       <span className="file-tab-name">{stripMarkdownExtension(tabTitle ?? '')}</span>
                       {tabFile ? <ShareStatusIndicator state={shareIndicators[path] ?? { status: 'disabled' }} /> : null}
                       {tabFile?.dirty ? <span className="dirty-dot" aria-label="modificato" /> : null}
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        className="file-tab-close"
-                        aria-label={`Chiudi ${tabTitle}`}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          closeMarkdownTab(path)
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault()
+                      {!isStoreInfoTab ? (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          className="file-tab-close"
+                          aria-label={`Chiudi ${tabTitle}`}
+                          onClick={(event) => {
                             event.stopPropagation()
                             closeMarkdownTab(path)
-                          }
-                        }}
-                      >
-                        <X size={13} />
-                      </span>
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              closeMarkdownTab(path)
+                            }
+                          }}
+                        >
+                          <X size={13} />
+                        </span>
+                      ) : null}
                     </button>
                   )
                 })
@@ -4792,7 +4944,21 @@ function App() {
               </button>
             ) : null}
           </div>
-          {activeStoreTab ? (
+          {activeStoreInfoTab ? (
+            <StoreInfoTab
+              info={storeScriptInfo[activeStoreInfoScriptId]}
+              loading={Boolean(storeScriptInfoLoading[activeStoreInfoScriptId])}
+              userId={user?.id ?? ''}
+              canRate={Boolean(user && storeScriptInfo[activeStoreInfoScriptId] && ratedStoreScriptId !== activeStoreInfoScriptId)}
+              onRate={() => {
+                const info = storeScriptInfo[activeStoreInfoScriptId]
+                if (!info) return
+                setStoreRatingStatus('')
+                setStoreRatingSubmitting(false)
+                setStoreRating({ scriptId: info.scriptId, title: info.title, filePath: info.filePath })
+              }}
+            />
+          ) : activeStoreTab ? (
             <div className="store-tab-view" data-loading={storeLoading}>
               {storeLoading ? (
                 <div className="store-loading" role="status">
@@ -6017,6 +6183,292 @@ function StoreRatingModal({
           </button>
         </div>
       </section>
+    </div>
+  )
+}
+
+type StoreCommunityComment = {
+  id: string
+  user_id: string
+  body: string
+  created_at: string
+}
+
+type StoreProduction = {
+  id: string
+  user_id: string
+  title: string
+  description: string
+  poster_url: string
+  video_url: string
+  created_at: string
+}
+
+function StoreInfoTab({
+  info,
+  loading,
+  userId,
+  canRate,
+  onRate,
+}: {
+  info?: StoreScriptInfo
+  loading: boolean
+  userId: string
+  canRate: boolean
+  onRate: () => void
+}) {
+  const [comments, setComments] = useState<StoreCommunityComment[]>([])
+  const [productions, setProductions] = useState<StoreProduction[]>([])
+  const [commentText, setCommentText] = useState('')
+  const [reportKind, setReportKind] = useState<'dialogue-error' | 'inaccuracy'>('dialogue-error')
+  const [report, setReport] = useState({
+    dialogueNumber: '',
+    characterName: '',
+    originalText: '',
+    correctedText: '',
+    actNumber: '',
+    sceneNumber: '',
+    details: '',
+  })
+  const [production, setProduction] = useState({ title: '', description: '', posterUrl: '', videoUrl: '' })
+  const [communityLoading, setCommunityLoading] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [status, setStatus] = useState('')
+
+  useEffect(() => {
+    setComments([])
+    setProductions([])
+    setCommentText('')
+    setStatus('')
+    if (!info?.scriptId || !userId) return
+
+    let cancelled = false
+    setCommunityLoading(true)
+    void Promise.all([
+      supabase
+        .from('store_script_comments')
+        .select('id, user_id, body, created_at')
+        .eq('script_id', info.scriptId)
+        .order('created_at', { ascending: true })
+        .limit(100),
+      supabase
+        .from('store_script_productions')
+        .select('id, user_id, title, description, poster_url, video_url, created_at')
+        .eq('script_id', info.scriptId)
+        .order('created_at', { ascending: false })
+        .limit(50),
+    ]).then(([commentsResult, productionsResult]) => {
+      if (cancelled) return
+      if (commentsResult.error || productionsResult.error) {
+        setStatus('La community del copione non è ancora disponibile.')
+        return
+      }
+      setComments((commentsResult.data ?? []) as StoreCommunityComment[])
+      setProductions((productionsResult.data ?? []) as StoreProduction[])
+    }).catch(() => {
+      if (!cancelled) setStatus('La community del copione non è ancora disponibile.')
+    }).finally(() => {
+      if (!cancelled) setCommunityLoading(false)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [info?.scriptId, userId])
+
+  const updateReport = (field: keyof typeof report, value: string) => {
+    setReport((current) => ({ ...current, [field]: value }))
+  }
+
+  const submitComment = async () => {
+    if (!info || !userId || !commentText.trim() || submitting) return
+    setSubmitting(true)
+    setStatus('')
+    const body = commentText.trim()
+    try {
+      const { data, error } = await supabase
+        .from('store_script_comments')
+        .insert({ script_id: info.scriptId, user_id: userId, body })
+        .select('id, user_id, body, created_at')
+        .single()
+      if (error) throw error
+      setComments((current) => [...current, data as StoreCommunityComment])
+      setCommentText('')
+    } catch (error) {
+      setStatus(`Commento non inviato: ${publishErrorMessage(error)}`)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const submitReport = async () => {
+    if (!info || !userId || submitting) return
+    const details = report.details.trim()
+    if (reportKind === 'dialogue-error' && !report.characterName.trim() && !report.originalText.trim()) {
+      setStatus('Indica almeno il personaggio o il testo della battuta da verificare.')
+      return
+    }
+    if (reportKind === 'inaccuracy' && !details) {
+      setStatus('Descrivi l’inesattezza da verificare.')
+      return
+    }
+    setSubmitting(true)
+    setStatus('')
+    try {
+      const { error } = await supabase.from('store_script_reports').insert({
+        script_id: info.scriptId,
+        user_id: userId,
+        category: reportKind,
+        dialogue_number: report.dialogueNumber ? Number(report.dialogueNumber) : null,
+        character_name: report.characterName.trim(),
+        original_text: report.originalText.trim(),
+        corrected_text: report.correctedText.trim(),
+        act_number: report.actNumber ? Number(report.actNumber) : null,
+        scene_number: report.sceneNumber ? Number(report.sceneNumber) : null,
+        details,
+      })
+      if (error) throw error
+      setReport({ dialogueNumber: '', characterName: '', originalText: '', correctedText: '', actNumber: '', sceneNumber: '', details: '' })
+      setStatus('Segnalazione inviata. Grazie per il contributo.')
+    } catch (error) {
+      setStatus(`Segnalazione non inviata: ${publishErrorMessage(error)}`)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const submitProduction = async () => {
+    if (!info || !userId || submitting) return
+    if (!production.description.trim() && !production.posterUrl.trim() && !production.videoUrl.trim()) {
+      setStatus('Aggiungi una descrizione o almeno un link della rappresentazione.')
+      return
+    }
+    setSubmitting(true)
+    setStatus('')
+    try {
+      const { data, error } = await supabase
+        .from('store_script_productions')
+        .insert({
+          script_id: info.scriptId,
+          user_id: userId,
+          title: production.title.trim(),
+          description: production.description.trim(),
+          poster_url: production.posterUrl.trim(),
+          video_url: production.videoUrl.trim(),
+        })
+        .select('id, user_id, title, description, poster_url, video_url, created_at')
+        .single()
+      if (error) throw error
+      setProductions((current) => [data as StoreProduction, ...current])
+      setProduction({ title: '', description: '', posterUrl: '', videoUrl: '' })
+      setStatus('Rappresentazione aggiunta al copione.')
+    } catch (error) {
+      setStatus(`Rappresentazione non salvata: ${publishErrorMessage(error)}`)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (loading || !info) {
+    return (
+      <div className="store-info-tab store-info-tab-loading" role="status">
+        <RefreshCw size={18} className="spin-icon" />
+        <span>Caricamento informazioni copione...</span>
+      </div>
+    )
+  }
+
+  const formattedDate = (value: string) => new Date(value).toLocaleDateString('it-IT', { dateStyle: 'medium' })
+  const rating = Math.max(0, Math.min(5, info.averageRating))
+
+  return (
+    <div className="store-info-tab">
+      <header className="store-info-header">
+        <div className="store-info-brand" aria-label="StageDesk Store">
+          <span className="store-info-brand-mark">SD</span>
+          <span>StageDesk <strong>Store</strong></span>
+        </div>
+        <div className="store-info-header-meta">
+          <span>Copione importato</span>
+          <span>{info.currentVersion ? `Versione ${info.currentVersion}` : 'Versione locale'}</span>
+        </div>
+      </header>
+
+      <div className="store-info-content">
+        <header className="store-info-hero">
+          <div className="store-info-cover">
+            {info.coverUrl ? <img src={info.coverUrl} alt={`Copertina di ${info.title}`} /> : <BookOpen size={34} aria-hidden="true" />}
+          </div>
+          <div className="store-info-heading">
+            <p className="eyebrow">COPIONE IMPORTATO DALLO STORE</p>
+            <h1>{info.title}</h1>
+            {info.subtitle ? <p className="store-info-subtitle">{info.subtitle}</p> : null}
+            <p className="store-info-author">{info.authorName || 'Autore non indicato'} · {info.language || 'Lingua non indicata'}</p>
+            {info.description ? <p className="store-info-description">{info.description}</p> : null}
+            <div className="store-info-facts">
+              {[`${info.actorCount} attori`, `${info.actCount} atti`, `${info.sceneCount} scene`, info.estimatedMinutes ? `${info.estimatedMinutes} min` : 'Durata non indicata', info.genre || 'Teatro'].map((fact) => <span key={fact}>{fact}</span>)}
+            </div>
+            {info.rightsLabel ? <p className="store-info-rights">{info.rightsLabel}</p> : null}
+          </div>
+        </header>
+
+        <div className="store-info-grid">
+        <section className="store-info-panel store-info-community-panel">
+          <div className="store-info-panel-heading"><MessageSquare size={17} /><h2>Commenti e valutazioni</h2></div>
+          <div className="store-info-rating-summary">
+            <div className="store-info-stars" aria-label={`${rating} stelle su 5`}>
+              {[1, 2, 3, 4, 5].map((score) => <Star key={score} size={17} fill={score <= Math.round(rating) ? 'currentColor' : 'none'} />)}
+            </div>
+            <strong>{rating ? rating.toFixed(1) : 'Nessuna'} </strong><span>· {info.ratingCount} voti</span>
+            {canRate ? <button type="button" className="store-info-small-action" onClick={onRate}><Star size={14} /> Vota</button> : null}
+          </div>
+          <div className="store-info-comment-form">
+            <textarea value={commentText} onChange={(event) => setCommentText(event.target.value)} placeholder="Scrivi un commento sul copione..." rows={3} />
+            <button type="button" className="primary" onClick={() => void submitComment()} disabled={!commentText.trim() || submitting}><Send size={14} /> Pubblica commento</button>
+          </div>
+          <div className="store-info-comment-list">
+            {comments.length === 0 ? <p className="store-info-empty">Ancora nessun commento.</p> : comments.map((item) => <article className="store-info-comment" key={item.id}><p>{item.body}</p><time>{formattedDate(item.created_at)}</time></article>)}
+          </div>
+        </section>
+
+        <section className="store-info-panel">
+          <div className="store-info-panel-heading"><AlertTriangle size={17} /><h2>Segnala un problema</h2></div>
+          <p className="store-info-panel-copy">Aiuta a migliorare il testo importato indicando il punto preciso.</p>
+          <label className="store-info-field">Tipo di segnalazione<select value={reportKind} onChange={(event) => setReportKind(event.target.value as typeof reportKind)}><option value="dialogue-error">Errore in una battuta</option><option value="inaccuracy">Inesattezza di scena o personaggio</option></select></label>
+          {reportKind === 'dialogue-error' ? (
+            <div className="store-info-field-grid">
+              <label className="store-info-field">N. battuta<input value={report.dialogueNumber} onChange={(event) => updateReport('dialogueNumber', event.target.value)} inputMode="numeric" /></label>
+              <label className="store-info-field">Personaggio<input value={report.characterName} onChange={(event) => updateReport('characterName', event.target.value)} /></label>
+              <label className="store-info-field store-info-field-wide">Battuta importata<textarea value={report.originalText} onChange={(event) => updateReport('originalText', event.target.value)} rows={2} /></label>
+              <label className="store-info-field store-info-field-wide">Battuta corretta<textarea value={report.correctedText} onChange={(event) => updateReport('correctedText', event.target.value)} rows={2} /></label>
+            </div>
+          ) : (
+            <div className="store-info-field-grid">
+              <label className="store-info-field">Atto<input value={report.actNumber} onChange={(event) => updateReport('actNumber', event.target.value)} inputMode="numeric" /></label>
+              <label className="store-info-field">Scena<input value={report.sceneNumber} onChange={(event) => updateReport('sceneNumber', event.target.value)} inputMode="numeric" /></label>
+              <label className="store-info-field store-info-field-wide">Personaggio<input value={report.characterName} onChange={(event) => updateReport('characterName', event.target.value)} /></label>
+              <label className="store-info-field store-info-field-wide">Descrizione<textarea value={report.details} onChange={(event) => updateReport('details', event.target.value)} rows={3} /></label>
+            </div>
+          )}
+          <button type="button" className="primary" onClick={() => void submitReport()} disabled={submitting}><AlertTriangle size={14} /> Invia segnalazione</button>
+        </section>
+
+        <section className="store-info-panel store-info-production-panel">
+          <div className="store-info-panel-heading"><Theater size={17} /><h2>Rappresentato in scena</h2></div>
+          <p className="store-info-panel-copy">Racconta agli altri utenti dove hai portato questo copione.</p>
+          <div className="store-info-field-grid">
+            <label className="store-info-field store-info-field-wide">Titolo della rappresentazione<input value={production.title} onChange={(event) => setProduction((current) => ({ ...current, title: event.target.value }))} /></label>
+            <label className="store-info-field store-info-field-wide">Racconto<textarea value={production.description} onChange={(event) => setProduction((current) => ({ ...current, description: event.target.value }))} rows={3} /></label>
+            <label className="store-info-field">Link locandina<input type="url" value={production.posterUrl} onChange={(event) => setProduction((current) => ({ ...current, posterUrl: event.target.value }))} placeholder="https://..." /></label>
+            <label className="store-info-field">Link video<input type="url" value={production.videoUrl} onChange={(event) => setProduction((current) => ({ ...current, videoUrl: event.target.value }))} placeholder="https://..." /></label>
+          </div>
+          <button type="button" className="primary" onClick={() => void submitProduction()} disabled={submitting}><Theater size={14} /> Aggiungi rappresentazione</button>
+          {productions.length > 0 ? <div className="store-info-production-list">{productions.map((item) => <article className="store-info-production" key={item.id}><strong>{item.title || 'Rappresentazione'}</strong><p>{item.description}</p><div>{item.poster_url ? <a href={item.poster_url} target="_blank" rel="noreferrer">Locandina</a> : null}{item.video_url ? <a href={item.video_url} target="_blank" rel="noreferrer">Video</a> : null}</div></article>)}</div> : null}
+        </section>
+        </div>
+        {status ? <p className="form-status store-info-status" role="status">{status}</p> : null}
+        {communityLoading ? <p className="store-info-loading-note">Aggiornamento community...</p> : null}
+      </div>
     </div>
   )
 }

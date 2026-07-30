@@ -1,5 +1,13 @@
 # Novità
 
+## Versione 1.0.45
+
+> Nuova pagina informativa per i copioni importati dallo StageDesk Store.
+
+- Riprogettato il tab informativo aperto dopo l'importazione di un copione dallo Store.
+- Aggiunto un header coerente con StageDesk Store e StageDesk Share, con marchio, contesto del copione e versione importata.
+- Riorganizzati copertina, metadati, commenti, segnalazioni di errori e rappresentazioni in scena in una pagina responsive più leggibile.
+
 ## Versione 1.0.44
 
 > Rifinitura dei controlli cue e dei blocchi nota nell'editor.
