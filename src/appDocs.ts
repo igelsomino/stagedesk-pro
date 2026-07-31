@@ -72,6 +72,14 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.48
+
+> Dialog di pubblicazione più compatta e filtri Store più leggibili.
+
+- Ridisegnata la dialog di pubblicazione nello Store con dimensioni, tipografia e spaziature coerenti anche su finestre ridotte o con zoom elevato.
+- Resi visibili e leggibili tutti i metadati catalogo della pubblicazione, organizzati in una griglia responsive.
+- Aggiornata la griglia dei filtri dello Store per evitare che i nuovi criteri risultino compressi o non riconoscibili.
+
 ## Versione 1.0.47
 
 > Copioni lunghi più reattivi, importazione classici più controllata e documentazione pubblica aggiornata.

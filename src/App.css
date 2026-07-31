@@ -2370,6 +2370,146 @@ html.stagedesk-native-dragging .pointer-drag-preview:not(.native-drag-image) {
   background: var(--text-accent-hover);
 }
 
+/* Keep the publication form compact and readable even when the app is zoomed. */
+.store-publication-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(640px, calc(100vw - 28px));
+  max-height: min(720px, calc(100vh - 24px));
+  min-height: 0;
+}
+
+.store-publication-modal .store-publication-header {
+  flex: 0 0 auto;
+  padding: 16px 20px 14px;
+}
+
+.store-publication-modal .publish-kicker {
+  margin-bottom: 5px;
+  font-size: 0.66rem;
+}
+
+.store-publication-modal .store-publication-header h2 {
+  margin-bottom: 5px;
+  font-size: 1.05rem;
+}
+
+.store-publication-modal .store-publication-header p {
+  max-width: 440px;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.store-publication-modal .store-publication-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 10px;
+  padding: 12px 20px 14px;
+  overflow: auto;
+}
+
+.store-publication-modal .store-publication-script,
+.store-publication-modal .store-publication-status {
+  gap: 9px;
+  padding: 10px 12px;
+}
+
+.store-publication-modal .store-publication-script strong,
+.store-publication-modal .store-publication-status strong {
+  font-size: 0.8rem;
+}
+
+.store-publication-modal .store-publication-script span,
+.store-publication-modal .store-publication-status span:not(.publish-status-dot) {
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.store-publication-modal .store-publication-notes {
+  gap: 5px;
+  font-size: 0.68rem;
+}
+
+.store-publication-modal .store-publication-notes textarea {
+  min-height: 68px;
+  padding: 8px 9px;
+  font-size: 0.75rem;
+}
+
+.store-publication-metadata {
+  display: grid;
+  gap: 8px;
+  padding: 11px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+
+.store-publication-metadata-title {
+  color: var(--text-normal);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.store-publication-metadata-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+.store-publication-metadata-grid label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.store-publication-metadata-grid input,
+.store-publication-metadata-grid select {
+  width: 100%;
+  height: 32px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font: inherit;
+  font-size: 0.72rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.store-publication-metadata-grid input:focus,
+.store-publication-metadata-grid select:focus {
+  outline: 0;
+  border-color: var(--interactive-accent);
+}
+
+.store-publication-metadata > p {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 0.66rem;
+  line-height: 1.35;
+}
+
+.store-publication-modal .store-publication-actions {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 11px 20px 14px;
+}
+
+.store-publication-modal .store-publication-actions button {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 0.76rem;
+}
+
 @media (max-width: 720px) {
   .publish-share {
     grid-template-columns: 1fr;
@@ -2435,6 +2575,20 @@ html.stagedesk-native-dragging .pointer-drag-preview:not(.native-drag-image) {
 
   .store-publication-actions button {
     width: auto;
+  }
+
+  .store-publication-modal .store-publication-body {
+    padding-inline: 14px;
+  }
+
+  .store-publication-modal .store-publication-actions {
+    padding-inline: 14px;
+  }
+}
+
+@media (max-width: 520px) {
+  .store-publication-metadata-grid {
+    grid-template-columns: 1fr;
   }
 }
 
