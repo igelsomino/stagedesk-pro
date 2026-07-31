@@ -274,3 +274,15 @@ Regole adottate:
 | Migliorare persistenza binaria dei media in tutti gli ambienti runtime | Team sviluppo | Da pianificare |
 | Raffinare il player video/immagini in fullscreen | Team sviluppo | Da pianificare |
 | Configurare firma macOS Developer ID, notarizzazione e firma Windows | Owner progetto | Da pianificare |
+
+## Diritti, archivio e borderò
+
+StageDesk tratta i metadati di diritti come informazioni esplicite del catalogo: pubblico dominio, Creative Commons, opera originale, SIAE o licenza da verificare. Titolarità, licenza, ambientazione e composizione del cast possono essere associati alla scheda del copione e usati per filtri più utili alle compagnie. Il genere e l'età degli interpreti non vengono dedotti automaticamente dal nome: devono essere dichiarati e verificati dall'autore.
+
+Prima della pubblicazione viene calcolato l'hash SHA-256 del pacchetto `.stagedesk`. L'hash registrato sulla versione pubblicata è una prova tecnica di integrità ed esistenza del file in quel flusso; non è una marcatura temporale qualificata e non sostituisce il deposito o gli adempimenti SIAE.
+
+Dal menu **Export** è disponibile **Borderò (CSV)**. Il file contiene, nell'ordine del copione, atti, scene, battute e cue audio/musicali con titolo, sorgente, durata e note disponibili. È una bozza operativa da controllare e completare prima dell'eventuale uso per il Programma Musicale o il borderò ufficiale: SIAE richiede l'elenco delle opere effettivamente eseguite e la relativa compilazione secondo le proprie procedure ([Borderò SIAE](https://www.siae.it/it/utilizzatori/bordero/), [mioBorderò SIAE](https://www.siae.it/it/webview-appmiobordero/)).
+
+Quando un utente registra una rappresentazione nella scheda Social del copione, deve confermare di avere verificato autorizzazioni e diritti di messa in scena. Il consenso è registrato insieme alla segnalazione e non costituisce un'autorizzazione: l'utente resta responsabile delle verifiche necessarie presso l'autore, l'editore o gli organismi competenti.
+
+Per applicare i nuovi campi eseguire `docs/supabase-store-rights-bordero.sql` dopo le migrazioni Store già indicate in precedenza.

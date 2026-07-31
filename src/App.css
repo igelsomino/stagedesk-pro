@@ -5742,6 +5742,22 @@ progress {
   grid-column: 1 / -1;
 }
 
+.store-info-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.store-info-consent input {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  accent-color: var(--interactive-accent);
+}
+
 .store-info-status {
   max-width: 1080px;
   margin: 14px auto 0;

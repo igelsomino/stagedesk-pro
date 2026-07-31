@@ -107,6 +107,7 @@ import { ScriptChip } from './scriptChip'
 import { sanitizeChipLabel } from './chipText'
 import { ScriptDialogue } from './scriptDialogue'
 import { ScriptNote } from './scriptNote'
+import { buildBorderoCsv, buildBorderoRows } from './bordero'
 import { decodeStageDeskPackage, encodeStageDeskPackage } from './storePackage'
 import { browserProjectStorage, readBrowserMediaAssetObjectUrl } from './storage'
 import type { ProjectEntry } from './storage'
@@ -341,6 +342,12 @@ type StorePublicationState = {
   versionNumber?: number
   publishedAt?: string
   packageName?: string
+  rightsCode?: string
+  rightsHolder?: string
+  licenseUrl?: string
+  setting?: string
+  castBreakdown?: string
+  ageBreakdown?: string
   history: StorePublicationVersion[]
   error?: string
 }
@@ -349,6 +356,14 @@ type StorePublicationVersion = {
   publishedAt: string
   packageName?: string
   releaseNotes?: string
+}
+type StorePublicationMetadata = {
+  rightsCode: string
+  rightsHolder: string
+  licenseUrl: string
+  setting: string
+  castBreakdown: string
+  ageBreakdown: string
 }
 type StoreRatingTarget = {
   scriptId: string
@@ -364,6 +379,12 @@ type StoreScriptInfo = {
   language: string
   genre: string
   rightsLabel: string
+  rightsCode?: string
+  rightsHolder?: string
+  licenseUrl?: string
+  setting?: string
+  castBreakdown?: string
+  ageBreakdown?: string
   actorCount: number
   actCount: number
   sceneCount: number
@@ -387,6 +408,7 @@ function storeScriptInfoFromImport(item: StoreImportMetadata): StoreScriptInfo {
     language: 'Italiano',
     genre: 'Teatro',
     rightsLabel: '',
+    rightsCode: 'unknown',
     actorCount: 0,
     actCount: 0,
     sceneCount: 0,
@@ -626,7 +648,7 @@ function App() {
   const [projectPickerEntries, setProjectPickerEntries] = useState<ProjectEntry[]>([])
   const [storeLoading, setStoreLoading] = useState(false)
   const [shareTabLoading, setShareTabLoading] = useState(false)
-  const [scriptTabLoading, setScriptTabLoading] = useState(false)
+  const [tabTransition, setTabTransition] = useState<{ path: string; startedAt: number }>()
   const [storeRating, setStoreRating] = useState<StoreRatingTarget>()
   const [storeScriptInfo, setStoreScriptInfo] = useState<Record<string, StoreScriptInfo>>(() =>
     initialStoreScriptInfo,
@@ -685,6 +707,18 @@ function App() {
   const editorSearchInputRef = useRef<HTMLInputElement>(null)
   const editorSearchHighlightTimerRef = useRef<number | null>(null)
   const validationHighlightTimerRef = useRef<number | null>(null)
+  const tabTransitionRef = useRef(tabTransition)
+  const tabTransitionTimerRef = useRef<number | undefined>(undefined)
+
+  useEffect(() => {
+    tabTransitionRef.current = tabTransition
+  }, [tabTransition])
+
+  useEffect(() => () => {
+    if (tabTransitionTimerRef.current !== undefined) {
+      window.clearTimeout(tabTransitionTimerRef.current)
+    }
+  }, [])
 
   const markdownFiles = useMemo(() => flattenMarkdownFiles(project.scripts), [project.scripts])
   const activeFile = useMemo(() => findMarkdownNode(project.scripts, activePath), [activePath, project.scripts])
@@ -1073,15 +1107,28 @@ function App() {
 
     setStorePublicationState({ status: 'checking', filePath: currentFile.path, history: [] })
     try {
-      const fields = 'id, author_id, title, current_version, published_at, package_name, is_published'
       const packageName = `${stripMarkdownExtension(currentFile.name)}.stagedesk`
-      const authoredScripts = await supabase
+      const extendedFields = 'id, author_id, title, current_version, published_at, package_name, is_published, rights_code, rights_holder, license_url, setting, cast_breakdown, age_breakdown'
+      const extendedResponse = await supabase
         .from('store_scripts')
-        .select(fields)
+        .select(extendedFields)
         .eq('author_id', user.id)
         .order('updated_at', { ascending: false })
         .limit(100)
-      if (authoredScripts.error) throw authoredScripts.error
+      let authoredData = (extendedResponse.data ?? []) as Array<Record<string, unknown>>
+      let authoredError = extendedResponse.error
+      if (authoredError && /column|schema cache|does not exist/i.test(authoredError.message)) {
+        diagnosticLog('store-publication-metadata-legacy-schema', { message: authoredError.message })
+        const legacyResponse = await supabase
+          .from('store_scripts')
+          .select('id, author_id, title, current_version, published_at, package_name, is_published')
+          .eq('author_id', user.id)
+          .order('updated_at', { ascending: false })
+          .limit(100)
+        authoredData = (legacyResponse.data ?? []) as Array<Record<string, unknown>>
+        authoredError = legacyResponse.error
+      }
+      if (authoredError) throw authoredError
 
       const normalisePackageName = (value: string) => value
         .toLocaleLowerCase('it-IT')
@@ -1094,13 +1141,13 @@ function App() {
       const documentTitle = normalisePackageName(
         editorMarkdownRef.current.match(/^#\s+(.+)$/m)?.[1]?.replace(/\*+/g, '').trim() ?? '',
       )
-      const matchingScripts = (authoredScripts.data ?? []).filter((script) =>
+      const matchingScripts = authoredData.filter((script) =>
         normalisePackageName(String(script.package_name ?? '')) === targetPackage,
       )
       const data = matchingScripts[0]
-        ?? (authoredScripts.data ?? []).find((script) => normalisePackageName(String(script.package_name ?? '')) === targetTitle)
-        ?? (authoredScripts.data ?? []).find((script) => normalisePackageName(String(script.title ?? '')) === documentTitle)
-        ?? ((authoredScripts.data ?? []).length === 1 ? authoredScripts.data?.[0] : undefined)
+        ?? authoredData.find((script) => normalisePackageName(String(script.package_name ?? '')) === targetTitle)
+        ?? authoredData.find((script) => normalisePackageName(String(script.title ?? '')) === documentTitle)
+        ?? (authoredData.length === 1 ? authoredData[0] : undefined)
 
       if (requestId !== storePublicationRequestRef.current) return
       if (!data || data.author_id !== user.id) {
@@ -1116,14 +1163,22 @@ function App() {
         .limit(20)
       if (versions.error) throw versions.error
       if (requestId !== storePublicationRequestRef.current) return
+      const castBreakdown = data.cast_breakdown as { summary?: unknown } | undefined
+      const ageBreakdown = data.age_breakdown as { summary?: unknown } | undefined
 
       setStorePublicationState({
         status: 'published',
         filePath: currentFile.path,
-        scriptId: data.id,
+        scriptId: String(data.id),
         versionNumber: typeof data.current_version === 'number' ? data.current_version : undefined,
         publishedAt: typeof data.published_at === 'string' ? data.published_at : undefined,
         packageName: typeof data.package_name === 'string' ? data.package_name : undefined,
+        rightsCode: typeof data.rights_code === 'string' ? data.rights_code : 'unknown',
+        rightsHolder: typeof data.rights_holder === 'string' ? data.rights_holder : '',
+        licenseUrl: typeof data.license_url === 'string' ? data.license_url : '',
+        setting: typeof data.setting === 'string' ? data.setting : '',
+        castBreakdown: typeof castBreakdown?.summary === 'string' ? castBreakdown.summary : '',
+        ageBreakdown: typeof ageBreakdown?.summary === 'string' ? ageBreakdown.summary : '',
         history: (versions.data ?? []).map((version) => ({
           versionNumber: Number(version.version_number),
           publishedAt: String(version.published_at ?? ''),
@@ -2070,8 +2125,8 @@ function App() {
 
   useEffect(() => {
     if (!editor) return
-    editor.setEditable(!activeAppDocument && !activeEmbeddedTab)
-  }, [activeAppDocument, activeEmbeddedTab, editor])
+    editor.setEditable(!activeAppDocument && !activeEmbeddedTab && !activeStoreInfoTab)
+  }, [activeAppDocument, activeEmbeddedTab, activeStoreInfoTab, editor])
 
   useEffect(() => {
     if (!editor || activeAppDocument) return
@@ -2089,6 +2144,11 @@ function App() {
 
   useEffect(() => {
     if (!editor) return
+
+    // Keep the already-rendered document mounted while the social/info tab is
+    // visible. Rebuilding a large ProseMirror tree here made tab changes feel
+    // like a reload and caused avoidable latency when returning to the script.
+    if (activeStoreInfoTab) return
 
     if (activeEmbeddedTab) {
       editorLoadedPathRef.current = ''
@@ -2140,7 +2200,11 @@ function App() {
     // A project state update is expected while typing. Do not rebuild the
     // ProseMirror document for the same file, otherwise the native selection
     // and scroll position can jump during an edit.
-    if (editorLoadedPathRef.current === activeFilePath) return
+    if (editorLoadedPathRef.current === activeFilePath) {
+      const readyPath = activeFilePath
+      const frame = window.requestAnimationFrame(() => completeTabTransition(readyPath))
+      return () => window.cancelAnimationFrame(frame)
+    }
 
     const content =
       draftsRef.current[activeFilePath] ??
@@ -2157,7 +2221,10 @@ function App() {
       editorRenderedPathRef.current = filePathToRestore
       scrollArea.scrollTop = editorScrollPositionsRef.current[filePathToRestore] ?? 0
     }
-    window.requestAnimationFrame(restoreScrollPosition)
+    const readyFrame = window.requestAnimationFrame(() => {
+      restoreScrollPosition()
+      completeTabTransition(filePathToRestore)
+    })
     const pendingSelection = pendingEditorSelectionRef.current
     if (pendingSelection !== undefined) {
       const safePosition = Math.max(1, Math.min(pendingSelection, editor.state.doc.content.size))
@@ -2172,7 +2239,8 @@ function App() {
     syncEditorCueRefsAtSelection(editor, setCurrentEditorCueRefIds)
     setEditorNoteCollapseSummaryValue(editorNoteCollapseSummary(editor))
     syncEditorSceneState(editor, setActiveEditorSceneId)
-  }, [activeAppDocument, activeAppDocumentMarkdown, activeEmbeddedTab, activeFilePath, activePath, editor, project.id])
+    return () => window.cancelAnimationFrame(readyFrame)
+  }, [activeAppDocument, activeAppDocumentMarkdown, activeEmbeddedTab, activeFilePath, activePath, activeStoreInfoTab, editor, project.id])
 
   useEffect(() => {
     if (!editor || activeAppDocument || activeEmbeddedTab || !activeFilePath) {
@@ -2570,7 +2638,7 @@ function App() {
     try {
       const { data, error } = await supabase
         .from('store_scripts')
-        .select('id, title, subtitle, description, author_name, language, genre, rights_label, actor_count, act_count, scene_count, estimated_minutes, average_rating, rating_count, current_version, published_at, cover_path, package_path')
+        .select('id, title, subtitle, description, author_name, language, genre, rights_label, rights_code, rights_holder, license_url, setting, cast_breakdown, age_breakdown, actor_count, act_count, scene_count, estimated_minutes, average_rating, rating_count, current_version, published_at, cover_path, package_path')
         .eq('id', scriptId)
         .maybeSingle()
       if (error) throw error
@@ -2597,6 +2665,7 @@ function App() {
             language: 'Italiano',
             genre: 'Teatro',
             rightsLabel: '',
+            rightsCode: 'unknown',
             actorCount: 0,
             actCount: 0,
             sceneCount: 0,
@@ -2613,6 +2682,16 @@ function App() {
           language: String(row.language ?? previous?.language ?? 'Italiano'),
           genre: String(row.genre ?? previous?.genre ?? 'Teatro'),
           rightsLabel: String(row.rights_label ?? previous?.rightsLabel ?? ''),
+          rightsCode: String(row.rights_code ?? previous?.rightsCode ?? 'unknown'),
+          rightsHolder: String(row.rights_holder ?? previous?.rightsHolder ?? ''),
+          licenseUrl: String(row.license_url ?? previous?.licenseUrl ?? ''),
+          setting: String(row.setting ?? previous?.setting ?? ''),
+          castBreakdown: typeof row.cast_breakdown === 'object' && row.cast_breakdown !== null && !Array.isArray(row.cast_breakdown) && typeof (row.cast_breakdown as { summary?: unknown }).summary === 'string'
+            ? (row.cast_breakdown as { summary: string }).summary
+            : previous?.castBreakdown ?? '',
+          ageBreakdown: typeof row.age_breakdown === 'object' && row.age_breakdown !== null && !Array.isArray(row.age_breakdown) && typeof (row.age_breakdown as { summary?: unknown }).summary === 'string'
+            ? (row.age_breakdown as { summary: string }).summary
+            : previous?.ageBreakdown ?? '',
           actorCount: Number(row.actor_count ?? previous?.actorCount ?? 0),
           actCount: Number(row.act_count ?? previous?.actCount ?? 0),
           sceneCount: Number(row.scene_count ?? previous?.sceneCount ?? 0),
@@ -2636,6 +2715,14 @@ function App() {
     if (!activeStoreInfoTab || !activeStoreInfoScriptId) return
     void loadStoreScriptInfo(activeStoreInfoScriptId)
   }, [activeStoreInfoScriptId, activeStoreInfoTab])
+
+  useEffect(() => {
+    if (!activeStoreInfoTab || !activeStoreInfoScriptId) return
+    if (storeScriptInfoLoading[activeStoreInfoScriptId]) return
+    const path = activePath
+    const frame = window.requestAnimationFrame(() => completeTabTransition(path))
+    return () => window.cancelAnimationFrame(frame)
+  }, [activePath, activeStoreInfoScriptId, activeStoreInfoTab, storeScriptInfo, storeScriptInfoLoading])
 
   useEffect(() => {
     if (!desktopStorageReady || startupProjectLoadedRef.current) return
@@ -2837,7 +2924,7 @@ function App() {
         setOpenTabs(importedTabs)
         setActivePath(filePath)
         setSelectedScriptPath(filePath)
-        setScriptTabLoading(true)
+        beginTabTransition(filePath)
         persistUiStateNow()
       } else {
         setStoreRatingTarget(undefined)
@@ -3012,6 +3099,38 @@ function App() {
     }
   }
 
+  const beginTabTransition = (path: string) => {
+    if (!path) return
+    if (tabTransitionTimerRef.current !== undefined) {
+      window.clearTimeout(tabTransitionTimerRef.current)
+      tabTransitionTimerRef.current = undefined
+    }
+    const transition = { path, startedAt: performance.now() }
+    tabTransitionRef.current = transition
+    setTabTransition(transition)
+    diagnosticLog('tab-transition-start', { path })
+  }
+
+  const completeTabTransition = (path: string) => {
+    const transition = tabTransitionRef.current
+    if (!transition || transition.path !== path) return
+    const elapsedMs = performance.now() - transition.startedAt
+    const minimumVisibleMs = 180
+    const finish = () => {
+      if (tabTransitionRef.current?.path !== path) return
+      tabTransitionTimerRef.current = undefined
+      tabTransitionRef.current = undefined
+      setTabTransition(undefined)
+      diagnosticLog('tab-transition-complete', { path, elapsedMs: Math.round(performance.now() - transition.startedAt) })
+    }
+    const remainingMs = Math.max(0, minimumVisibleMs - elapsedMs)
+    if (remainingMs === 0) {
+      finish()
+    } else {
+      tabTransitionTimerRef.current = window.setTimeout(finish, remainingMs)
+    }
+  }
+
   const openMarkdownTab = (path: string) => {
     const previousPath = activePathRef.current
     diagnosticLog('tab-open-script', { path, previousActivePath: previousPath, openTabs: openTabsRef.current })
@@ -3019,22 +3138,12 @@ function App() {
     openTabsRef.current = nextTabs
     activePathRef.current = path
     selectedScriptPathRef.current = path
-    if (path !== previousPath) setScriptTabLoading(true)
+    if (path !== previousPath) beginTabTransition(path)
     setOpenTabs(nextTabs)
     setActivePath(path)
     setSelectedScriptPath(path)
     persistUiStateNow()
   }
-
-  useEffect(() => {
-    if (!scriptTabLoading || activeStoreTab || activeShareTab || activeStoreInfoTab || activeAppDocument) return
-    const documentSize = activeFile?.content?.length ?? 0
-    const loadingDelay = documentSize > 50000 ? 1400 : documentSize > 18000 ? 850 : 250
-    const timeout = window.setTimeout(() => setScriptTabLoading(false), loadingDelay)
-    return () => {
-      window.clearTimeout(timeout)
-    }
-  }, [activeAppDocument, activeFile?.content?.length, activeShareTab, activeStoreInfoTab, activeStoreTab, activePath, scriptTabLoading])
 
   const openAppDocumentTab = (path: string) => {
     if (!isAppDocumentPath(path)) return
@@ -3149,7 +3258,7 @@ function App() {
     activePathRef.current = nextActivePath
     selectedScriptPathRef.current = nextSelectedScriptPath
     if (nextActivePath && !isNonMarkdownTabPath(nextActivePath) && nextActivePath !== path) {
-      setScriptTabLoading(true)
+      beginTabTransition(nextActivePath)
     }
     setOpenTabs(nextTabs)
     setActivePath(nextActivePath)
@@ -4406,6 +4515,20 @@ function App() {
     }
   }
 
+  const exportBordero = async () => {
+    if (!activeFile) return
+    try {
+      await persistDraftsNow()
+      const markdown = buildActiveExtendedMarkdown() ?? editorMarkdown
+      const rows = buildBorderoRows(parseScriptBlocks(markdown), fileCues)
+      const fileName = `${stripMarkdownExtension(activeFile.name)}.bordero.csv`
+      downloadCsv(fileName, buildBorderoCsv(rows))
+      showStatus(`Bozza borderò esportata: ${fileName}. Verifica i dati prima dell'uso ufficiale.`, 12000)
+    } catch (error) {
+      showStatus(`Export borderò non riuscito: ${String(error)}`)
+    }
+  }
+
   const openExportResult = async () => {
     if (!exportResult) return
     await persistDraftsNow()
@@ -4469,7 +4592,7 @@ function App() {
     void loadStorePublicationState()
   }
 
-  const publishStoreScript = async (releaseNotes: string) => {
+  const publishStoreScript = async (releaseNotes: string, metadata: StorePublicationMetadata) => {
     if (!activeFile || activeAppDocument || !user || !storePublicationState.scriptId) {
       setStorePublicationState({ status: 'error', history: [], error: 'Il file attivo non è associato a un copione pubblicabile.' })
       return
@@ -4483,13 +4606,33 @@ function App() {
 
     const packagePath = `${user.id}/${storePublicationState.scriptId}/${crypto.randomUUID()}.stagedesk`
     const packageName = `${stripMarkdownExtension(activeFile.name)}.stagedesk`
+    const packageContent = encodeStageDeskPackage(markdown, stripMarkdownExtension(activeFile.name))
+    const packageHash = await sha256Hex(packageContent).catch(() => undefined)
     setStorePublicationState((current) => ({ ...current, status: 'publishing', error: undefined }))
 
     let uploaded = false
     try {
+      let metadataWarning = ''
+      const { error: metadataError } = await supabase.rpc('update_store_script_metadata', {
+        p_script_id: storePublicationState.scriptId,
+        p_rights_code: metadata.rightsCode,
+        p_rights_holder: metadata.rightsHolder.trim(),
+        p_license_url: metadata.licenseUrl.trim(),
+        p_setting: metadata.setting.trim(),
+        p_cast_breakdown: metadata.castBreakdown.trim() ? { summary: metadata.castBreakdown.trim() } : {},
+        p_age_breakdown: metadata.ageBreakdown.trim() ? { summary: metadata.ageBreakdown.trim() } : {},
+      })
+      if (metadataError) {
+        metadataWarning = ' I metadati catalogo non sono stati aggiornati: esegui la migrazione Supabase aggiornata.'
+        diagnosticLog('store-publication-metadata-failed', {
+          message: metadataError.message,
+          scriptId: storePublicationState.scriptId,
+        })
+      }
+
       const { error: uploadError } = await supabase.storage
         .from('store-packages')
-        .upload(packagePath, encodeStageDeskPackage(markdown, stripMarkdownExtension(activeFile.name)), {
+        .upload(packagePath, packageContent, {
           contentType: 'application/octet-stream',
           cacheControl: '3600',
           upsert: false,
@@ -4507,6 +4650,19 @@ function App() {
 
       const versionNumber = typeof data?.version_number === 'number' ? data.version_number : undefined
       const publishedAt = typeof data?.published_at === 'string' ? data.published_at : new Date().toISOString()
+      let proofWarning = ''
+      if (versionNumber && packageHash) {
+        const { error: proofError } = await supabase.rpc('record_store_script_proof', {
+          p_script_id: storePublicationState.scriptId,
+          p_version_number: versionNumber,
+          p_package_sha256: packageHash,
+          p_proof_method: 'sha256',
+        })
+        if (proofError) {
+          proofWarning = ' La prova tecnica di integrità non è stata registrata: esegui la migrazione Supabase aggiornata.'
+          diagnosticLog('store-publication-proof-failed', { message: proofError.message, scriptId: storePublicationState.scriptId, versionNumber })
+        }
+      }
       setStorePublicationState({
         status: 'published',
         filePath: activeFile.path,
@@ -4524,7 +4680,9 @@ function App() {
           ...storePublicationState.history.filter((version) => version.versionNumber !== versionNumber),
         ],
       })
-      showStatus(versionNumber ? `Copione pubblicato nello Store: versione ${versionNumber}` : 'Copione pubblicato nello Store')
+      showStatus(versionNumber
+        ? `Copione pubblicato nello Store: versione ${versionNumber}.${metadataWarning}${proofWarning}`
+        : `Copione pubblicato nello Store.${metadataWarning}${proofWarning}`)
     } catch (error) {
       if (uploaded) {
         await supabase.storage.from('store-packages').remove([packagePath]).catch(() => undefined)
@@ -5125,14 +5283,14 @@ function App() {
                         const previousPath = activePathRef.current
                         activePathRef.current = path
                         if (isShareTab) setShareTabLoading(true)
-                        if (!isNonMarkdownTabPath(path) && path !== previousPath) setScriptTabLoading(true)
+                        if (path !== previousPath && (isStoreInfoTab || !isNonMarkdownTabPath(path))) beginTabTransition(path)
                         if (!isNonMarkdownTabPath(path)) selectedScriptPathRef.current = path
                         setActivePath(path)
                         if (!isNonMarkdownTabPath(path)) setSelectedScriptPath(path)
                         persistUiStateNow()
                       }}
                     >
-                      {isStoreTab && storeLoading ? <RefreshCw size={13} className="file-tab-loading spin-icon" aria-hidden="true" /> : null}
+                      {(tabTransition?.path === path || (isStoreTab && storeLoading) || (isShareTab && shareTabLoading)) ? <RefreshCw size={13} className="file-tab-loading spin-icon" aria-hidden="true" /> : null}
                       <span className="file-tab-name">{stripMarkdownExtension(tabTitle ?? '')}</span>
                       {tabFile ? <ShareStatusIndicator state={shareIndicators[path] ?? { status: 'disabled' }} /> : null}
                       {tabFile?.dirty ? <span className="dirty-dot" aria-label="modificato" /> : null}
@@ -5179,7 +5337,7 @@ function App() {
           {activeStoreInfoTab ? (
             <StoreInfoTab
               info={storeScriptInfo[activeStoreInfoScriptId]}
-              loading={Boolean(storeScriptInfoLoading[activeStoreInfoScriptId])}
+              loading={Boolean(storeScriptInfoLoading[activeStoreInfoScriptId]) || tabTransition?.path === activePath}
               userId={user?.id ?? ''}
               canRate={Boolean(user && storeScriptInfo[activeStoreInfoScriptId] && ratedStoreScriptId !== activeStoreInfoScriptId)}
               onRate={() => {
@@ -5529,6 +5687,19 @@ function App() {
                         <Eraser size={14} />
                         Pulito
                       </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={!activeFile}
+                        onClick={() => {
+                          setTheaterMenuOpen(false)
+                          setTheaterMenuPosition(undefined)
+                          void exportBordero()
+                        }}
+                      >
+                        <FileText size={14} />
+                        Borderò (CSV)
+                      </button>
                     </div>
                   </div>
                   <span className="theater-menu-separator" aria-hidden="true" />
@@ -5667,7 +5838,7 @@ function App() {
             }}
           >
             <EditorContent editor={editor} />
-            {scriptTabLoading ? (
+            {tabTransition?.path === activePath ? (
               <div className="editor-loading-overlay" role="status" aria-live="polite">
                 <RefreshCw size={18} aria-hidden="true" />
                 <span>Caricamento copione...</span>
@@ -5959,7 +6130,7 @@ function App() {
           state={storePublicationState}
           title={project.name}
           onClose={() => setStorePublicationDialogOpen(false)}
-          onPublish={(releaseNotes) => void publishStoreScript(releaseNotes)}
+          onPublish={(releaseNotes, metadata) => void publishStoreScript(releaseNotes, metadata)}
         />
       ) : null}
       {toastMessage ? (
@@ -6005,9 +6176,17 @@ function StorePublicationModal({
   state: StorePublicationState
   title: string
   onClose: () => void
-  onPublish: (releaseNotes: string) => void
+  onPublish: (releaseNotes: string, metadata: StorePublicationMetadata) => void
 }) {
   const [releaseNotes, setReleaseNotes] = useState('')
+  const [metadata, setMetadata] = useState<StorePublicationMetadata>(() => ({
+    rightsCode: state.rightsCode ?? 'unknown',
+    rightsHolder: state.rightsHolder ?? '',
+    licenseUrl: state.licenseUrl ?? '',
+    setting: state.setting ?? '',
+    castBreakdown: state.castBreakdown ?? '',
+    ageBreakdown: state.ageBreakdown ?? '',
+  }))
   const busy = state.status === 'checking' || state.status === 'publishing'
   const statusLabel =
     state.status === 'checking'
@@ -6067,12 +6246,31 @@ function StorePublicationModal({
               disabled={busy}
             />
           </label>
+          <div className="store-publication-metadata">
+            <div className="store-publication-metadata-title">Metadati catalogo</div>
+            <div className="store-publication-metadata-grid">
+              <label>Diritti<select value={metadata.rightsCode} onChange={(event) => setMetadata((current) => ({ ...current, rightsCode: event.target.value }))} disabled={busy}>
+                <option value="unknown">Da verificare</option>
+                <option value="original">Opera originale</option>
+                <option value="public-domain">Pubblico dominio</option>
+                <option value="creative-commons">Creative Commons</option>
+                <option value="siae">SIAE / diritti gestiti</option>
+                <option value="licensed">Licenza specifica</option>
+              </select></label>
+              <label>Titolare o fonte<input value={metadata.rightsHolder} onChange={(event) => setMetadata((current) => ({ ...current, rightsHolder: event.target.value }))} placeholder="Autore, editore o archivio" disabled={busy} /></label>
+              <label>Licenza o fonte URL<input type="url" value={metadata.licenseUrl} onChange={(event) => setMetadata((current) => ({ ...current, licenseUrl: event.target.value }))} placeholder="https://..." disabled={busy} /></label>
+              <label>Ambientazione<input value={metadata.setting} onChange={(event) => setMetadata((current) => ({ ...current, setting: event.target.value }))} placeholder="Es. interno domestico" disabled={busy} /></label>
+              <label>Composizione cast<input value={metadata.castBreakdown} onChange={(event) => setMetadata((current) => ({ ...current, castBreakdown: event.target.value }))} placeholder="Es. 3 donne, 2 uomini" disabled={busy} /></label>
+              <label>Fasce d'età<input value={metadata.ageBreakdown} onChange={(event) => setMetadata((current) => ({ ...current, ageBreakdown: event.target.value }))} placeholder="Es. adulti, giovani" disabled={busy} /></label>
+            </div>
+            <p>I dati sul cast sono dichiarativi: verifica le informazioni prima della pubblicazione.</p>
+          </div>
         </div>
         <footer className="store-publication-actions">
           <button
             type="button"
             className="store-publication-primary"
-            onClick={() => onPublish(releaseNotes)}
+            onClick={() => onPublish(releaseNotes, metadata)}
             disabled={busy || state.status === 'idle' || !state.scriptId}
           >
             <CloudUpload size={15} />
@@ -6499,7 +6697,7 @@ function StoreInfoTab({
     sceneNumber: '',
     details: '',
   })
-  const [production, setProduction] = useState({ title: '', description: '', posterUrl: '', videoUrl: '' })
+  const [production, setProduction] = useState({ title: '', description: '', posterUrl: '', videoUrl: '', rightsAcknowledged: false })
   const [communityLoading, setCommunityLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [status, setStatus] = useState('')
@@ -6636,6 +6834,10 @@ function StoreInfoTab({
       setStatus('Aggiungi una descrizione o almeno un link della rappresentazione.')
       return
     }
+    if (!production.rightsAcknowledged) {
+      setStatus('Conferma di avere verificato le autorizzazioni e i diritti di messa in scena prima di pubblicare la rappresentazione.')
+      return
+    }
     setSubmitting(true)
     setStatus('')
     try {
@@ -6648,12 +6850,15 @@ function StoreInfoTab({
           description: production.description.trim(),
           poster_url: production.posterUrl.trim(),
           video_url: production.videoUrl.trim(),
+          rights_acknowledged: true,
+          rights_acknowledged_at: new Date().toISOString(),
+          rights_notice: 'L’utente dichiara di avere verificato autorizzazioni e diritti necessari alla messa in scena.',
         })
         .select('id, user_id, title, description, poster_url, video_url, created_at')
         .single()
       if (error) throw error
       setProductions((current) => [data as StoreProduction, ...current])
-      setProduction({ title: '', description: '', posterUrl: '', videoUrl: '' })
+      setProduction({ title: '', description: '', posterUrl: '', videoUrl: '', rightsAcknowledged: false })
       setStatus('Rappresentazione aggiunta al copione.')
     } catch (error) {
       setStatus(`Rappresentazione non salvata: ${publishErrorMessage(error)}`)
@@ -6662,11 +6867,19 @@ function StoreInfoTab({
     }
   }
 
-  if (loading || !info) {
+  if (loading) {
     return (
       <div className="store-info-tab store-info-tab-loading" role="status">
         <RefreshCw size={18} className="spin-icon" />
         <span>Caricamento informazioni copione...</span>
+      </div>
+    )
+  }
+
+  if (!info) {
+    return (
+      <div className="store-info-tab store-info-tab-loading" role="status">
+        <span>Informazioni del copione non disponibili.</span>
       </div>
     )
   }
@@ -6825,7 +7038,11 @@ function StoreInfoTab({
                   <label className="store-info-field">Link locandina<input type="url" value={production.posterUrl} onChange={(event) => setProduction((current) => ({ ...current, posterUrl: event.target.value }))} placeholder="https://..." /></label>
                   <label className="store-info-field">Link video<input type="url" value={production.videoUrl} onChange={(event) => setProduction((current) => ({ ...current, videoUrl: event.target.value }))} placeholder="https://..." /></label>
                 </div>
-                <button type="button" className="primary" onClick={() => void submitProduction()} disabled={submitting}><Theater size={14} /> Aggiungi rappresentazione</button>
+                <label className="store-info-consent">
+                  <input type="checkbox" checked={production.rightsAcknowledged} onChange={(event) => setProduction((current) => ({ ...current, rightsAcknowledged: event.target.checked }))} />
+                  <span>Confermo di avere verificato autorizzazioni e diritti necessari alla messa in scena.</span>
+                </label>
+                <button type="button" className="primary" onClick={() => void submitProduction()} disabled={submitting || !production.rightsAcknowledged}><Theater size={14} /> Aggiungi rappresentazione</button>
               </div>
             </section>
           ) : null}
@@ -11289,6 +11506,22 @@ const formatDateTime = (value: string) =>
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value))
+
+const sha256Hex = async (value: string) => {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+const downloadCsv = (fileName: string, content: string) => {
+  const objectUrl = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = fileName
+  document.body.append(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+}
 
 type PdfBlock =
   | { type: 'heading'; level: number; text: string }

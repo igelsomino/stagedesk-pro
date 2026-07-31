@@ -1,5 +1,15 @@
 # Novità
 
+## Prossima versione
+
+> Diritti più trasparenti, prova tecnica delle pubblicazioni e prima bozza di supporto al borderò.
+
+- Aggiunta l'esportazione **Borderò (CSV)** con l'ordine del copione, le battute e i cue audio/musicali. Il file è una bozza da verificare prima dell'uso ufficiale.
+- Aggiunti nei metadati Store i campi per diritti, titolarità, licenza, ambientazione e composizione del cast per genere o fascia d'età.
+- Registrato, per le versioni pubblicate, l'hash SHA-256 del pacchetto `.stagedesk` come evidenza tecnica di integrità.
+- Aggiunta la conferma esplicita dei diritti di messa in scena quando si registra una rappresentazione nella scheda Social.
+- Documentati i limiti della prova tecnica e la distinzione tra strumenti StageDesk e adempimenti ufficiali SIAE.
+
 ## Versione 1.0.47
 
 > Copioni lunghi più reattivi, importazione classici più controllata e documentazione pubblica aggiornata.
