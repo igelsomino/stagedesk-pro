@@ -88,7 +88,7 @@ import { appDocumentContent, fetchAppDocumentContent, getAppDocument, isAppDocum
 import { supabase, supabaseUrl } from './auth'
 import { useAuth } from './authContext'
 import { SCRIPT_ROOT_PATH } from './domain'
-import type { DirectorNote, MediaAsset, MediaCue, NotePanelMode, NoteType, Project, ProjectTreeNode } from './domain'
+import type { DirectorNote, MediaAsset, MediaCue, NotePanelMode, NoteType, Project, ProjectTreeNode, StoreImportMetadata } from './domain'
 import { blankProject } from './defaultProject'
 import { clearNativeDragPreview, setNativeDragPreview } from './dragPreview'
 import {
@@ -128,11 +128,16 @@ const POINTER_DRAGGING_CLASS = 'stagedesk-pointer-dragging'
 const POINTER_EDITOR_TARGET_CLASS = 'stagedesk-pointer-editor-target'
 const UI_STATE_PERSIST_DELAY_MS = 800
 const EDITOR_DRAFT_SYNC_DELAY_MS = 750
-const EDITOR_DOCUMENT_UI_SYNC_DELAY_MS = 500
+const EDITOR_DRAFT_SYNC_LARGE_DELAY_MS = 1200
+const EDITOR_DRAFT_SYNC_HUGE_DELAY_MS = 1800
+const EDITOR_DOCUMENT_UI_SYNC_DELAY_MS = 650
+const EDITOR_DOCUMENT_UI_SYNC_LARGE_DELAY_MS = 1100
+const EDITOR_DOCUMENT_UI_SYNC_HUGE_DELAY_MS = 1800
 const POINTER_MEDIA_TARGET_CLASS = 'drop-target'
 const STOP_PREVIEW_PLAYBACK_EVENT = 'stagedesk-stop-preview-playback'
 const STOP_EDITOR_PLAYBACK_EVENT = 'stagedesk-stop-editor-playback'
 const UI_STATE_STORAGE_KEY = 'stagedesk-pro.ui-state'
+const STORE_INFO_STORAGE_KEY = 'stagedesk-pro.store-info'
 const WINDOW_STATE_STORAGE_KEY = 'stagedesk-pro.window-state'
 const PLAYBACK_LOG_STORAGE_KEY = 'stagedesk-pro.playback-log'
 const PLAYBACK_LOG_VERSION = 2
@@ -166,6 +171,78 @@ const storeInfoScriptIdFromTabPath = (path: string) =>
 const isStoreInfoTabPath = (path: string) => path.startsWith(STORE_INFO_TAB_PREFIX)
 const isEmbeddedTabPath = (path: string) => path === STORE_TAB_PATH || isShareTabPath(path)
 const isNonMarkdownTabPath = (path: string) => isAppDocumentPath(path) || isEmbeddedTabPath(path) || isStoreInfoTabPath(path)
+
+const loadPersistedStoreScriptInfo = (projectId: string, project?: Project): Record<string, StoreScriptInfo> => {
+  const embedded = Object.fromEntries(
+    (project?.storeImports ?? []).map((item) => [item.scriptId, storeScriptInfoFromImport(item)]),
+  )
+  if (typeof window === 'undefined') return embedded
+  try {
+    const raw = window.localStorage.getItem(STORE_INFO_STORAGE_KEY)
+    if (!raw) return embedded
+    const cache = JSON.parse(raw) as Record<string, unknown>
+    const projectCache = cache[projectId]
+    const direct = projectCache && typeof projectCache === 'object' && !Array.isArray(projectCache)
+      ? Object.fromEntries(
+          Object.entries(projectCache).filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value)),
+        ) as Record<string, StoreScriptInfo>
+      : {}
+    if (!project) return direct
+
+    if (Object.keys(direct).length > 0) return { ...embedded, ...direct }
+
+    // Older imported projects did not persist the Store origin in project.json.
+    // Recover their metadata by matching the imported file path across the cache.
+    const projectPaths = new Set(flattenMarkdownFiles(project.scripts).map((file) => file.path))
+    const recovered = Object.values(cache).flatMap((value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+      return Object.values(value).filter((item): item is StoreScriptInfo => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return false
+        const info = item as Partial<StoreScriptInfo>
+        return typeof info.scriptId === 'string' && typeof info.filePath === 'string' && projectPaths.has(info.filePath)
+      })
+    })
+    const legacyTarget = (() => {
+      try {
+        const rawTarget = window.localStorage.getItem(STORE_RATING_TARGET_KEY)
+        if (!rawTarget) return undefined
+        const target = JSON.parse(rawTarget) as { scriptId?: unknown; title?: unknown; filePath?: unknown }
+        if (
+          typeof target.scriptId !== 'string' ||
+          typeof target.title !== 'string' ||
+          typeof target.filePath !== 'string' ||
+          !projectPaths.has(target.filePath)
+        ) return undefined
+        return storeScriptInfoFromImport({
+          scriptId: target.scriptId,
+          title: target.title,
+          filePath: target.filePath,
+        })
+      } catch {
+        return undefined
+      }
+    })()
+    const recoveredInfo = legacyTarget ? [...recovered, legacyTarget] : recovered
+    return {
+      ...embedded,
+      ...Object.fromEntries(recoveredInfo.map((info) => [info.scriptId, info])),
+    }
+  } catch {
+    return {}
+  }
+}
+
+const savePersistedStoreScriptInfo = (projectId: string, info: Record<string, StoreScriptInfo>) => {
+  if (typeof window === 'undefined') return
+  try {
+    const raw = window.localStorage.getItem(STORE_INFO_STORAGE_KEY)
+    const cache = raw ? JSON.parse(raw) as Record<string, unknown> : {}
+    cache[projectId] = info
+    window.localStorage.setItem(STORE_INFO_STORAGE_KEY, JSON.stringify(cache))
+  } catch {
+    // The cache is best-effort and must never interrupt editing.
+  }
+}
 const SUPABASE_STORAGE_ORIGIN = (() => {
   try {
     return supabaseUrl ? new URL(supabaseUrl).origin : ''
@@ -298,6 +375,27 @@ type StoreScriptInfo = {
   filePath: string
   packageUrl: string
 }
+
+function storeScriptInfoFromImport(item: StoreImportMetadata): StoreScriptInfo {
+  return {
+    scriptId: item.scriptId,
+    title: item.title,
+    subtitle: 'Copione importato dal catalogo StageDesk Store',
+    description: 'Versione importata nel progetto locale per lettura, prove e lavoro in scena.',
+    authorName: '',
+    language: 'Italiano',
+    genre: 'Teatro',
+    rightsLabel: '',
+    actorCount: 0,
+    actCount: 0,
+    sceneCount: 0,
+    estimatedMinutes: 0,
+    averageRating: 0,
+    ratingCount: 0,
+    filePath: item.filePath,
+    packageUrl: item.packageUrl ?? '',
+  }
+}
 type ShareIndicatorState = {
   status: 'disabled' | 'checking' | 'shared' | 'not-shared' | 'error'
   url?: string
@@ -403,22 +501,62 @@ const linkExtension = Link.configure({
 
 function App() {
   const { user, signOut } = useAuth()
-  const [project, setProject] = useState(() => normalizeProject(storage.load()))
-  const initialPath = flattenMarkdownFiles(project.scripts)[0]?.path ?? ''
-  const initialNoteTypeId = defaultNoteType(project.noteTypes)?.id ?? ''
+  // Restore the tab bar before the first render. Waiting for the async
+  // storage bootstrap causes non-Markdown tabs, such as the imported-script
+  // information tab, to disappear briefly and never be persisted again after
+  // a browser refresh.
+  const initialProject = normalizeProject(storage.load())
+  const initialMarkdownPaths = flattenMarkdownFiles(initialProject.scripts).map((file) => file.path)
+  const initialSavedUiState = loadPersistedUiState(initialProject.id)
+  const initialStoreScriptInfo = loadPersistedStoreScriptInfo(initialProject.id, initialProject)
+  const initialImportedStoreInfo = Object.values(initialStoreScriptInfo)[0]
+  const initialImportedStoreInfoPath = initialImportedStoreInfo
+    ? `${STORE_INFO_TAB_PREFIX}${encodeURIComponent(initialImportedStoreInfo.scriptId)}`
+    : ''
+  const initialSavedOpenTabs = initialSavedUiState?.openTabs.filter((path) =>
+    initialMarkdownPaths.includes(path) || isNonMarkdownTabPath(path),
+  ) ?? []
+  const initialValidOpenTabs = initialImportedStoreInfoPath && !initialSavedOpenTabs.includes(initialImportedStoreInfoPath)
+    ? [...initialSavedOpenTabs, initialImportedStoreInfoPath]
+    : initialSavedOpenTabs
+  const initialPath =
+    initialImportedStoreInfoPath
+      ? initialImportedStoreInfoPath
+      : initialSavedUiState?.activePath && initialValidOpenTabs.includes(initialSavedUiState.activePath)
+      ? initialSavedUiState.activePath
+      : initialValidOpenTabs[0] ?? initialMarkdownPaths[0] ?? ''
+  const initialSelectedScriptPath =
+    initialSavedUiState?.selectedScriptPath && findTreeNode(initialProject.scripts, initialSavedUiState.selectedScriptPath)
+      ? initialSavedUiState.selectedScriptPath
+      : initialPath && !isNonMarkdownTabPath(initialPath)
+        ? initialPath
+        : initialMarkdownPaths[0] ?? SCRIPT_ROOT_PATH
+  const initialSelectedMediaPath =
+    initialSavedUiState?.selectedMediaPath &&
+    (initialSavedUiState.selectedMediaPath === '/media' || findTreeNode(initialProject.media, initialSavedUiState.selectedMediaPath))
+      ? initialSavedUiState.selectedMediaPath
+      : initialProject.media[0]?.path ?? '/media'
+  const initialExpandedPaths = uniqueValues([
+    SCRIPT_ROOT_PATH,
+    '/media',
+    ...(initialSavedUiState?.expandedPaths ?? []),
+    ...initialProject.media.map((asset) => asset.path),
+  ])
+  const [project, setProject] = useState(initialProject)
+  const initialNoteTypeId = defaultNoteType(initialProject.noteTypes)?.id ?? ''
   const [activePath, setActivePath] = useState(initialPath)
-  const [openTabs, setOpenTabs] = useState<string[]>(initialPath ? [initialPath] : [])
+  const [openTabs, setOpenTabs] = useState<string[]>(
+    initialValidOpenTabs.length > 0 ? initialValidOpenTabs : initialPath ? [initialPath] : [],
+  )
   const fileTabbarRef = useRef<HTMLDivElement>(null)
   const [fileTabOverflow, setFileTabOverflow] = useState({ left: false, right: false })
   const [drafts, setDrafts] = useState<Record<string, string>>({})
-  const [selectedScriptPath, setSelectedScriptPath] = useState(activePath)
-  const [selectedMediaPath, setSelectedMediaPath] = useState(project.media[0]?.path ?? '/media')
-  const [expandedPaths, setExpandedPaths] = useState<string[]>([
-    SCRIPT_ROOT_PATH,
-    '/media',
-    ...project.media.map((asset) => asset.path),
-  ])
-  const [leftTab, setLeftTab] = useState<'outline' | 'script' | 'media' | 'bookmarks' | 'search'>('outline')
+  const [selectedScriptPath, setSelectedScriptPath] = useState(initialSelectedScriptPath)
+  const [selectedMediaPath, setSelectedMediaPath] = useState(initialSelectedMediaPath)
+  const [expandedPaths, setExpandedPaths] = useState<string[]>(initialExpandedPaths)
+  const [leftTab, setLeftTab] = useState<'outline' | 'script' | 'media' | 'bookmarks' | 'search'>(
+    initialSavedUiState?.leftTab ?? 'outline',
+  )
   const [noteMode, setNoteMode] = useState<NotePanelMode>('context')
   const [cuePage, setCuePage] = useState(0)
   const cuePageRef = useRef(cuePage)
@@ -486,8 +624,11 @@ function App() {
   const [projectPickerEntries, setProjectPickerEntries] = useState<ProjectEntry[]>([])
   const [storeLoading, setStoreLoading] = useState(false)
   const [shareTabLoading, setShareTabLoading] = useState(false)
+  const [scriptTabLoading, setScriptTabLoading] = useState(false)
   const [storeRating, setStoreRating] = useState<StoreRatingTarget>()
-  const [storeScriptInfo, setStoreScriptInfo] = useState<Record<string, StoreScriptInfo>>({})
+  const [storeScriptInfo, setStoreScriptInfo] = useState<Record<string, StoreScriptInfo>>(() =>
+    initialStoreScriptInfo,
+  )
   const [storeScriptInfoLoading, setStoreScriptInfoLoading] = useState<Record<string, boolean>>({})
   const [storeRatingTarget, setStoreRatingTarget] = useState<StoreRatingTarget | undefined>(() => {
     try {
@@ -723,6 +864,12 @@ function App() {
       if (editorDocumentUiSyncTimerRef.current !== null) {
         window.clearTimeout(editorDocumentUiSyncTimerRef.current)
       }
+      const documentSize = currentEditor.state.doc.content.size
+      const syncDelay = documentSize > 50000
+        ? EDITOR_DOCUMENT_UI_SYNC_HUGE_DELAY_MS
+        : documentSize > 18000
+        ? EDITOR_DOCUMENT_UI_SYNC_LARGE_DELAY_MS
+        : EDITOR_DOCUMENT_UI_SYNC_DELAY_MS
       editorDocumentUiSyncTimerRef.current = window.setTimeout(() => {
         editorDocumentUiSyncTimerRef.current = null
         const nextOutline = editorOutlineItems(currentEditor.state.doc)
@@ -740,7 +887,7 @@ function App() {
         const activePosition = currentEditor.state.selection.from
         setActiveOutlineId(outlineItemIdAtPosition(nextOutline, activePosition))
         setActiveBookmarkId(bookmarkItemIdAtPosition(nextBookmarks, activePosition))
-      }, EDITOR_DOCUMENT_UI_SYNC_DELAY_MS)
+      }, syncDelay)
 
       // Text input produces document transactions for every character. The
       // delayed structural sync above is sufficient for outline, bookmarks,
@@ -1084,6 +1231,10 @@ function App() {
   useEffect(() => {
     startupProjectReadyRef.current = startupProjectReady
   }, [startupProjectReady])
+
+  useEffect(() => {
+    savePersistedStoreScriptInfo(project.id, storeScriptInfo)
+  }, [project.id, storeScriptInfo])
 
   useEffect(() => {
     if (!startupProjectReady) return
@@ -2057,10 +2208,16 @@ function App() {
       if (editorDraftSyncTimerRef.current !== null) {
         window.clearTimeout(editorDraftSyncTimerRef.current)
       }
+      const documentSize = editor.state.doc.content.size
+      const syncDelay = documentSize > 50000
+        ? EDITOR_DRAFT_SYNC_HUGE_DELAY_MS
+        : documentSize > 18000
+        ? EDITOR_DRAFT_SYNC_LARGE_DELAY_MS
+        : EDITOR_DRAFT_SYNC_DELAY_MS
       editorDraftSyncTimerRef.current = window.setTimeout(() => {
         editorDraftSyncTimerRef.current = null
         flushActiveFileDraft()
-      }, EDITOR_DRAFT_SYNC_DELAY_MS)
+      }, syncDelay)
     }
 
     editor.on('update', markActiveFileDirty)
@@ -2322,13 +2479,23 @@ function App() {
     const switchingProject = projectRef.current.id !== nextProject.id
     const markdownPaths = flattenMarkdownFiles(nextProject.scripts).map((file) => file.path)
     const savedUiState = loadPersistedUiState(nextProject.id)
-    const validOpenTabs = savedUiState?.openTabs.filter((path) =>
+    const persistedStoreInfo = loadPersistedStoreScriptInfo(nextProject.id, nextProject)
+    const importedStoreInfo = Object.values(persistedStoreInfo)[0]
+    const importedStoreInfoPath = importedStoreInfo
+      ? `${STORE_INFO_TAB_PREFIX}${encodeURIComponent(importedStoreInfo.scriptId)}`
+      : ''
+    const savedOpenTabs = savedUiState?.openTabs.filter((path) =>
       (markdownPaths.includes(path) || isNonMarkdownTabPath(path)) && !(switchingProject && isStoreInfoTabPath(path)),
     ) ?? []
+    const validOpenTabs = importedStoreInfoPath && !savedOpenTabs.includes(importedStoreInfoPath)
+      ? [...savedOpenTabs, importedStoreInfoPath]
+      : savedOpenTabs
     const nextPath =
-      savedUiState?.activePath && validOpenTabs.includes(savedUiState.activePath)
-        ? savedUiState.activePath
-        : validOpenTabs[0] ?? markdownPaths[0] ?? ''
+      importedStoreInfoPath
+        ? importedStoreInfoPath
+        : savedUiState?.activePath && validOpenTabs.includes(savedUiState.activePath)
+      ? savedUiState.activePath
+      : validOpenTabs[0] ?? markdownPaths[0] ?? ''
     const scriptPath =
       savedUiState?.selectedScriptPath && findTreeNode(nextProject.scripts, savedUiState.selectedScriptPath)
         ? savedUiState.selectedScriptPath
@@ -2358,6 +2525,7 @@ function App() {
     const savedExpandedPaths =
       savedUiState?.expandedPaths.filter((path) => path === SCRIPT_ROOT_PATH || path === '/media' || findTreeNode(nextProject.scripts, path) || findTreeNode(nextProject.media, path)) ?? []
     pendingEditorSelectionRef.current = savedUiState?.activePath === nextPath ? savedUiState.editorSelection : undefined
+    projectRef.current = nextProject
     setProject(nextProject)
     setDrafts({})
     const resolvedOpenTabs = validOpenTabs.length > 0 ? validOpenTabs : nextPath ? [nextPath] : []
@@ -2380,7 +2548,7 @@ function App() {
     setSelectedCueId(nextProject.cues[0]?.id ?? '')
     setSearch('')
     setShareIndicators({})
-    if (switchingProject) setStoreScriptInfo({})
+    setStoreScriptInfo(switchingProject ? persistedStoreInfo : (current) => ({ ...persistedStoreInfo, ...current }))
     setFullscreenIndex(0)
     setExecutedCueIds([])
   }
@@ -2495,6 +2663,14 @@ function App() {
           setStorageStatus(`Ultimo progetto aperto: ${compactPath(opened.path)}`)
           return
         }
+        // Browser storage has no "open last folder" result. Restore the UI
+        // state against the locally recovered project so informational tabs
+        // survive a normal page reload as they do in the desktop runtime.
+        if (loadPersistedUiState(projectRef.current.id)) {
+          activateProject(projectRef.current)
+          setStorageStatus('Ultimo progetto e scheda informativa ripristinati')
+          return
+        }
         setStorageStatus('Nessuna cartella progetto aperta')
       })
       .catch((error) => {
@@ -2588,6 +2764,9 @@ function App() {
       const baseProject = blankProject(projectName)
       const importedProject: Project = {
         ...baseProject,
+        storeImports: storeScriptId
+          ? [{ scriptId: storeScriptId, title: projectName, filePath, packageUrl: url.toString() }]
+          : undefined,
         scripts: [{
           id: crypto.randomUUID(),
           name: 'copioni',
@@ -2638,6 +2817,10 @@ function App() {
           filePath,
           packageUrl: url.toString(),
         }
+        savePersistedStoreScriptInfo(projectInFolder.id, {
+          ...loadPersistedStoreScriptInfo(projectInFolder.id, projectInFolder),
+          [storeScriptId]: importedInfo,
+        })
         setStoreScriptInfo((current) => ({ ...current, [storeScriptId]: importedInfo }))
         const target = { scriptId: storeScriptId, title: projectName, filePath }
         setStoreRatingTarget(target)
@@ -2821,16 +3004,28 @@ function App() {
   }
 
   const openMarkdownTab = (path: string) => {
-    diagnosticLog('tab-open-script', { path, previousActivePath: activePathRef.current, openTabs: openTabsRef.current })
+    const previousPath = activePathRef.current
+    diagnosticLog('tab-open-script', { path, previousActivePath: previousPath, openTabs: openTabsRef.current })
     const nextTabs = openTabsRef.current.includes(path) ? openTabsRef.current : [...openTabsRef.current, path]
     openTabsRef.current = nextTabs
     activePathRef.current = path
     selectedScriptPathRef.current = path
+    if (path !== previousPath) setScriptTabLoading(true)
     setOpenTabs(nextTabs)
     setActivePath(path)
     setSelectedScriptPath(path)
     persistUiStateNow()
   }
+
+  useEffect(() => {
+    if (!scriptTabLoading || activeStoreTab || activeShareTab || activeStoreInfoTab || activeAppDocument) return
+    const documentSize = activeFile?.content?.length ?? 0
+    const loadingDelay = documentSize > 50000 ? 1400 : documentSize > 18000 ? 850 : 250
+    const timeout = window.setTimeout(() => setScriptTabLoading(false), loadingDelay)
+    return () => {
+      window.clearTimeout(timeout)
+    }
+  }, [activeAppDocument, activeFile?.content?.length, activeShareTab, activeStoreInfoTab, activeStoreTab, activePath, scriptTabLoading])
 
   const openAppDocumentTab = (path: string) => {
     if (!isAppDocumentPath(path)) return
@@ -3370,7 +3565,7 @@ function App() {
       return undefined
     }
 
-    const onPointerMove = (event: InternalDragEvent) => {
+      const onPointerMove = (event: InternalDragEvent) => {
       const payload = readAnyGlobalDragPayload()
       if (!payload) {
         clearPointerTarget()
@@ -3380,14 +3575,14 @@ function App() {
         return
       }
 
-      const distance = pointerDragDistance(payload, event)
-      if (!payload.pointerActive && distance < 6) return
-      if (payload.nativeCandidate && !(window as StagedeskDragWindow).__STAGEDESK_NATIVE_DRAG_ACTIVE__) return
-      payload.pointerActive = true
+        const distance = pointerDragDistance(payload, event)
+        if (!payload.pointerActive && distance < 6) return
+        const nativeDragActive = Boolean((window as StagedeskDragWindow).__STAGEDESK_NATIVE_DRAG_ACTIVE__)
+        payload.pointerActive = true
       writeGlobalDragPayload(payload.type, payload.value, payload)
       document.body.classList.add(POINTER_DRAGGING_CLASS)
       document.documentElement.classList.add(POINTER_DRAGGING_CLASS)
-      if ((window as StagedeskDragWindow).__STAGEDESK_NATIVE_DRAG_ACTIVE__) {
+      if (nativeDragActive) {
         setPointerDragPreview(undefined)
       } else {
         setPointerDragPreview(dragPreviewFromPayload(payload, event))
@@ -3443,9 +3638,14 @@ function App() {
     }
 
     const onPointerCancel = () => {
-      const payload = readAnyGlobalDragPayload()
-      if (payload?.nativeCandidate && !(window as StagedeskDragWindow).__STAGEDESK_NATIVE_DRAG_ACTIVE__) return
       clearPointerDrag()
+    }
+    const onNativeDragEnter = (event: DragEvent) => {
+      const payload = readAnyGlobalDragPayload()
+      if (!payload || !event.dataTransfer) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'move'
+      onPointerMove(event)
     }
     const onNativeDragOver = (event: DragEvent) => {
       const payload = readAnyGlobalDragPayload()
@@ -3453,6 +3653,10 @@ function App() {
       event.preventDefault()
       event.dataTransfer.dropEffect = 'move'
       onPointerMove(event)
+    }
+    const onNativeDrop = () => {
+      clearNativeDragPreview()
+      clearPointerDrag()
     }
     const onNativeDragEnd = () => {
       clearNativeDragPreview()
@@ -3469,7 +3673,9 @@ function App() {
     window.addEventListener('mouseup', onPointerUp, { passive: false })
     window.addEventListener('blur', onPointerCancel)
     window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('dragenter', onNativeDragEnter, { passive: false })
     window.addEventListener('dragover', onNativeDragOver, { passive: false })
+    window.addEventListener('drop', onNativeDrop)
     window.addEventListener('dragend', onNativeDragEnd)
     return () => {
       window.removeEventListener('pointermove', onPointerMove)
@@ -3479,7 +3685,9 @@ function App() {
       window.removeEventListener('mouseup', onPointerUp)
       window.removeEventListener('blur', onPointerCancel)
       window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('dragenter', onNativeDragEnter)
       window.removeEventListener('dragover', onNativeDragOver)
+      window.removeEventListener('drop', onNativeDrop)
       window.removeEventListener('dragend', onNativeDragEnd)
       clearPointerDrag()
     }
@@ -5435,6 +5643,12 @@ function App() {
             }}
           >
             <EditorContent editor={editor} />
+            {scriptTabLoading ? (
+              <div className="editor-loading-overlay" role="status" aria-live="polite">
+                <RefreshCw size={18} aria-hidden="true" />
+                <span>Caricamento copione...</span>
+              </div>
+            ) : null}
           </div>
           {scriptValidationIssues.length > 0 ? (
             <section className="script-debugger" aria-label="Controllo copione">
@@ -6087,23 +6301,33 @@ function ScriptActionModal({
         aria-labelledby="script-action-title"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <h2 id="script-action-title">{dialog.title}</h2>
-        {dialog.message ? <p>{dialog.message}</p> : null}
-        {hasInput ? (
-          <label>
-            {dialog.label}
-            <input
-              autoFocus
-              value={dialog.value ?? ''}
-              onChange={(event) => onChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') onConfirm()
-                if (event.key === 'Escape') onCancel()
-              }}
-            />
-          </label>
-        ) : null}
-        <div className="modal-actions">
+        <header className="action-modal-header">
+          <div>
+            <p className="action-modal-eyebrow">STAGEDESK PRO</p>
+            <h2 id="script-action-title">{dialog.title}</h2>
+          </div>
+          <button type="button" className="action-modal-close" onClick={onCancel} aria-label="Chiudi">
+            <X size={17} aria-hidden="true" />
+          </button>
+        </header>
+        <div className="action-modal-body">
+          {dialog.message ? <p>{dialog.message}</p> : null}
+          {hasInput ? (
+            <label>
+              {dialog.label}
+              <input
+                autoFocus
+                value={dialog.value ?? ''}
+                onChange={(event) => onChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') onConfirm()
+                  if (event.key === 'Escape') onCancel()
+                }}
+              />
+            </label>
+          ) : null}
+        </div>
+        <div className="modal-actions action-modal-actions">
           <button type="button" onClick={onCancel}>Annulla</button>
           <button type="button" className={dialog.danger ? 'danger' : 'primary'} onClick={onConfirm}>
             {dialog.confirmLabel}
@@ -6192,6 +6416,8 @@ type StoreCommunityComment = {
   user_id: string
   body: string
   created_at: string
+  parent_id?: string | null
+  demo?: boolean
 }
 
 type StoreProduction = {
@@ -6203,6 +6429,23 @@ type StoreProduction = {
   video_url: string
   created_at: string
 }
+
+type StoreCommunityReport = {
+  id: string
+  user_id: string
+  category: 'dialogue-error' | 'inaccuracy'
+  dialogue_number: number | null
+  character_name: string
+  original_text: string
+  corrected_text: string
+  act_number: number | null
+  scene_number: number | null
+  details: string
+  created_at: string
+  demo?: boolean
+}
+
+type StoreInfoSection = 'comments' | 'ratings' | 'productions' | 'reports'
 
 function StoreInfoTab({
   info,
@@ -6219,6 +6462,8 @@ function StoreInfoTab({
 }) {
   const [comments, setComments] = useState<StoreCommunityComment[]>([])
   const [productions, setProductions] = useState<StoreProduction[]>([])
+  const [reports, setReports] = useState<StoreCommunityReport[]>([])
+  const [activeSection, setActiveSection] = useState<StoreInfoSection>('comments')
   const [commentText, setCommentText] = useState('')
   const [reportKind, setReportKind] = useState<'dialogue-error' | 'inaccuracy'>('dialogue-error')
   const [report, setReport] = useState({
@@ -6238,6 +6483,8 @@ function StoreInfoTab({
   useEffect(() => {
     setComments([])
     setProductions([])
+    setReports([])
+    setActiveSection('comments')
     setCommentText('')
     setStatus('')
     if (!info?.scriptId || !userId) return
@@ -6257,14 +6504,20 @@ function StoreInfoTab({
         .eq('script_id', info.scriptId)
         .order('created_at', { ascending: false })
         .limit(50),
-    ]).then(([commentsResult, productionsResult]) => {
+      supabase
+        .from('store_script_reports')
+        .select('id, user_id, category, dialogue_number, character_name, original_text, corrected_text, act_number, scene_number, details, created_at')
+        .eq('script_id', info.scriptId)
+        .order('created_at', { ascending: false })
+        .limit(50),
+    ]).then(([commentsResult, productionsResult, reportsResult]) => {
       if (cancelled) return
       if (commentsResult.error || productionsResult.error) {
         setStatus('La community del copione non è ancora disponibile.')
-        return
       }
-      setComments((commentsResult.data ?? []) as StoreCommunityComment[])
-      setProductions((productionsResult.data ?? []) as StoreProduction[])
+      if (!commentsResult.error) setComments((commentsResult.data ?? []) as StoreCommunityComment[])
+      if (!productionsResult.error) setProductions((productionsResult.data ?? []) as StoreProduction[])
+      if (!reportsResult.error) setReports((reportsResult.data ?? []) as StoreCommunityReport[])
     }).catch(() => {
       if (!cancelled) setStatus('La community del copione non è ancora disponibile.')
     }).finally(() => {
@@ -6329,6 +6582,22 @@ function StoreInfoTab({
       })
       if (error) throw error
       setReport({ dialogueNumber: '', characterName: '', originalText: '', correctedText: '', actNumber: '', sceneNumber: '', details: '' })
+      setReports((current) => [
+        {
+          id: `local-report-${Date.now()}`,
+          user_id: userId,
+          category: reportKind,
+          dialogue_number: report.dialogueNumber ? Number(report.dialogueNumber) : null,
+          character_name: report.characterName.trim(),
+          original_text: report.originalText.trim(),
+          corrected_text: report.correctedText.trim(),
+          act_number: report.actNumber ? Number(report.actNumber) : null,
+          scene_number: report.sceneNumber ? Number(report.sceneNumber) : null,
+          details,
+          created_at: new Date().toISOString(),
+        },
+        ...current,
+      ])
       setStatus('Segnalazione inviata. Grazie per il contributo.')
     } catch (error) {
       setStatus(`Segnalazione non inviata: ${publishErrorMessage(error)}`)
@@ -6380,13 +6649,69 @@ function StoreInfoTab({
 
   const formattedDate = (value: string) => new Date(value).toLocaleDateString('it-IT', { dateStyle: 'medium' })
   const rating = Math.max(0, Math.min(5, info.averageRating))
+  const demoProductions: StoreProduction[] = [
+    {
+      id: `demo-production-${info.scriptId}`,
+      user_id: 'demo',
+      title: 'Laboratorio di prova',
+      description: 'Esempio di scheda per una rappresentazione del copione.',
+      poster_url: '',
+      video_url: '',
+      created_at: '2026-06-15T00:00:00.000Z',
+    },
+  ]
+  const demoReports: StoreCommunityReport[] = [
+    {
+      id: `demo-report-${info.scriptId}`,
+      user_id: 'demo',
+      category: 'inaccuracy',
+      dialogue_number: null,
+      character_name: '',
+      original_text: '',
+      corrected_text: '',
+      act_number: 1,
+      scene_number: 1,
+      details: 'Esempio di segnalazione: controllare ambientazione e indicazioni della scena.',
+      created_at: '2026-06-20T00:00:00.000Z',
+      demo: true,
+    },
+  ]
+  const demoComments: StoreCommunityComment[] = info.title.toLowerCase().includes('otello')
+    ? [
+      {
+        id: `demo-comment-otello-1-${info.scriptId}`,
+        user_id: 'Marta',
+        body: 'Un copione molto intenso: il rapporto tra Otello e Iago funziona bene anche in una prova essenziale.',
+        created_at: '2026-06-12T00:00:00.000Z',
+        demo: true,
+      },
+      {
+        id: `demo-comment-otello-2-${info.scriptId}`,
+        user_id: 'Luca',
+        body: 'Concordo. Abbiamo lavorato soprattutto sulle pause prima delle accuse e il conflitto è diventato più leggibile.',
+        created_at: '2026-06-14T00:00:00.000Z',
+        parent_id: `demo-comment-otello-1-${info.scriptId}`,
+        demo: true,
+      },
+      {
+        id: `demo-comment-otello-3-${info.scriptId}`,
+        user_id: 'Sara',
+        body: 'La scena del fazzoletto richiede attenzione ai tempi: utile preparare il cue prima dell’ingresso di Emilia.',
+        created_at: '2026-06-18T00:00:00.000Z',
+        demo: true,
+      },
+    ]
+    : []
+  const visibleComments = comments.length > 0 ? comments : demoComments
+  const visibleProductions = productions.length > 0 ? productions : demoProductions
+  const visibleReports = reports.length > 0 ? reports : demoReports
 
   return (
     <div className="store-info-tab">
       <header className="store-info-header">
-        <div className="store-info-brand" aria-label="StageDesk Store">
+        <div className="store-info-brand" aria-label="StageDesk Social">
           <span className="store-info-brand-mark">SD</span>
-          <span>StageDesk <strong>Store</strong></span>
+          <span>StageDesk <strong>Social</strong></span>
         </div>
         <div className="store-info-header-meta">
           <span>Copione importato</span>
@@ -6404,7 +6729,6 @@ function StoreInfoTab({
             <h1>{info.title}</h1>
             {info.subtitle ? <p className="store-info-subtitle">{info.subtitle}</p> : null}
             <p className="store-info-author">{info.authorName || 'Autore non indicato'} · {info.language || 'Lingua non indicata'}</p>
-            {info.description ? <p className="store-info-description">{info.description}</p> : null}
             <div className="store-info-facts">
               {[`${info.actorCount} attori`, `${info.actCount} atti`, `${info.sceneCount} scene`, info.estimatedMinutes ? `${info.estimatedMinutes} min` : 'Durata non indicata', info.genre || 'Teatro'].map((fact) => <span key={fact}>{fact}</span>)}
             </div>
@@ -6412,59 +6736,102 @@ function StoreInfoTab({
           </div>
         </header>
 
-        <div className="store-info-grid">
-        <section className="store-info-panel store-info-community-panel">
-          <div className="store-info-panel-heading"><MessageSquare size={17} /><h2>Commenti e valutazioni</h2></div>
-          <div className="store-info-rating-summary">
-            <div className="store-info-stars" aria-label={`${rating} stelle su 5`}>
-              {[1, 2, 3, 4, 5].map((score) => <Star key={score} size={17} fill={score <= Math.round(rating) ? 'currentColor' : 'none'} />)}
-            </div>
-            <strong>{rating ? rating.toFixed(1) : 'Nessuna'} </strong><span>· {info.ratingCount} voti</span>
-            {canRate ? <button type="button" className="store-info-small-action" onClick={onRate}><Star size={14} /> Vota</button> : null}
-          </div>
-          <div className="store-info-comment-form">
-            <textarea value={commentText} onChange={(event) => setCommentText(event.target.value)} placeholder="Scrivi un commento sul copione..." rows={3} />
-            <button type="button" className="primary" onClick={() => void submitComment()} disabled={!commentText.trim() || submitting}><Send size={14} /> Pubblica commento</button>
-          </div>
-          <div className="store-info-comment-list">
-            {comments.length === 0 ? <p className="store-info-empty">Ancora nessun commento.</p> : comments.map((item) => <article className="store-info-comment" key={item.id}><p>{item.body}</p><time>{formattedDate(item.created_at)}</time></article>)}
-          </div>
-        </section>
+        {info.description ? (
+          <section className="store-info-description-band" aria-label="Descrizione del copione">
+            <p className="eyebrow">DESCRIZIONE DEL COPIONE</p>
+            <p>{info.description}</p>
+          </section>
+        ) : null}
 
-        <section className="store-info-panel">
-          <div className="store-info-panel-heading"><AlertTriangle size={17} /><h2>Segnala un problema</h2></div>
-          <p className="store-info-panel-copy">Aiuta a migliorare il testo importato indicando il punto preciso.</p>
-          <label className="store-info-field">Tipo di segnalazione<select value={reportKind} onChange={(event) => setReportKind(event.target.value as typeof reportKind)}><option value="dialogue-error">Errore in una battuta</option><option value="inaccuracy">Inesattezza di scena o personaggio</option></select></label>
-          {reportKind === 'dialogue-error' ? (
-            <div className="store-info-field-grid">
-              <label className="store-info-field">N. battuta<input value={report.dialogueNumber} onChange={(event) => updateReport('dialogueNumber', event.target.value)} inputMode="numeric" /></label>
-              <label className="store-info-field">Personaggio<input value={report.characterName} onChange={(event) => updateReport('characterName', event.target.value)} /></label>
-              <label className="store-info-field store-info-field-wide">Battuta importata<textarea value={report.originalText} onChange={(event) => updateReport('originalText', event.target.value)} rows={2} /></label>
-              <label className="store-info-field store-info-field-wide">Battuta corretta<textarea value={report.correctedText} onChange={(event) => updateReport('correctedText', event.target.value)} rows={2} /></label>
-            </div>
-          ) : (
-            <div className="store-info-field-grid">
-              <label className="store-info-field">Atto<input value={report.actNumber} onChange={(event) => updateReport('actNumber', event.target.value)} inputMode="numeric" /></label>
-              <label className="store-info-field">Scena<input value={report.sceneNumber} onChange={(event) => updateReport('sceneNumber', event.target.value)} inputMode="numeric" /></label>
-              <label className="store-info-field store-info-field-wide">Personaggio<input value={report.characterName} onChange={(event) => updateReport('characterName', event.target.value)} /></label>
-              <label className="store-info-field store-info-field-wide">Descrizione<textarea value={report.details} onChange={(event) => updateReport('details', event.target.value)} rows={3} /></label>
-            </div>
-          )}
-          <button type="button" className="primary" onClick={() => void submitReport()} disabled={submitting}><AlertTriangle size={14} /> Invia segnalazione</button>
-        </section>
+        <nav className="store-info-tabs" aria-label="Community del copione">
+          {([
+            ['comments', <MessageSquare key="comments-icon" size={15} />, 'Commenti'],
+            ['ratings', <Star key="ratings-icon" size={15} />, 'Valutazione'],
+            ['productions', <Theater key="productions-icon" size={15} />, 'Rappresentazioni'],
+            ['reports', <AlertTriangle key="reports-icon" size={15} />, 'Segnala un problema'],
+          ] as const).map(([key, icon, label]) => (
+            <button key={key} type="button" className={activeSection === key ? 'is-active' : ''} onClick={() => setActiveSection(key)} aria-current={activeSection === key ? 'page' : undefined}>
+              {icon}<span>{label}</span>
+            </button>
+          ))}
+        </nav>
 
-        <section className="store-info-panel store-info-production-panel">
-          <div className="store-info-panel-heading"><Theater size={17} /><h2>Rappresentato in scena</h2></div>
-          <p className="store-info-panel-copy">Racconta agli altri utenti dove hai portato questo copione.</p>
-          <div className="store-info-field-grid">
-            <label className="store-info-field store-info-field-wide">Titolo della rappresentazione<input value={production.title} onChange={(event) => setProduction((current) => ({ ...current, title: event.target.value }))} /></label>
-            <label className="store-info-field store-info-field-wide">Racconto<textarea value={production.description} onChange={(event) => setProduction((current) => ({ ...current, description: event.target.value }))} rows={3} /></label>
-            <label className="store-info-field">Link locandina<input type="url" value={production.posterUrl} onChange={(event) => setProduction((current) => ({ ...current, posterUrl: event.target.value }))} placeholder="https://..." /></label>
-            <label className="store-info-field">Link video<input type="url" value={production.videoUrl} onChange={(event) => setProduction((current) => ({ ...current, videoUrl: event.target.value }))} placeholder="https://..." /></label>
-          </div>
-          <button type="button" className="primary" onClick={() => void submitProduction()} disabled={submitting}><Theater size={14} /> Aggiungi rappresentazione</button>
-          {productions.length > 0 ? <div className="store-info-production-list">{productions.map((item) => <article className="store-info-production" key={item.id}><strong>{item.title || 'Rappresentazione'}</strong><p>{item.description}</p><div>{item.poster_url ? <a href={item.poster_url} target="_blank" rel="noreferrer">Locandina</a> : null}{item.video_url ? <a href={item.video_url} target="_blank" rel="noreferrer">Video</a> : null}</div></article>)}</div> : null}
-        </section>
+        <div className="store-info-tab-panel">
+          {activeSection === 'comments' ? (
+            <section className="store-info-panel store-info-community-panel">
+              <div className="store-info-panel-heading"><MessageSquare size={17} /><h2>Commenti</h2></div>
+              <p className="store-info-panel-copy">Condividi impressioni, appunti e idee con chi sta leggendo lo stesso copione.</p>
+              <div className="store-info-comment-list">
+                {visibleComments.length === 0 ? <p className="store-info-empty">Ancora nessun commento.</p> : visibleComments.map((item) => <article className={`store-info-comment${item.parent_id ? ' is-reply' : ''}`} key={item.id}><div className="store-info-comment-avatar">{item.user_id.slice(0, 2).toUpperCase()}</div><div><div className="store-info-comment-meta"><strong>{item.user_id === 'demo' ? 'Utente' : item.user_id}</strong>{item.demo ? <span className="store-info-demo-label">Esempio</span> : null}<time>{formattedDate(item.created_at)}</time></div><p>{item.body}</p></div></article>)}
+              </div>
+              <div className="store-info-comment-form">
+                <textarea value={commentText} onChange={(event) => setCommentText(event.target.value)} placeholder="Scrivi un commento sul copione..." rows={3} />
+                <button type="button" className="primary" onClick={() => void submitComment()} disabled={!commentText.trim() || submitting}><Send size={14} /> Pubblica commento</button>
+              </div>
+            </section>
+          ) : null}
+
+          {activeSection === 'ratings' ? (
+            <section className="store-info-panel">
+              <div className="store-info-panel-heading"><Star size={17} /><h2>Valutazione</h2></div>
+              <p className="store-info-panel-copy">Le valutazioni aiutano registi e compagnie a scegliere il prossimo copione.</p>
+              <div className="store-info-rating-card">
+                <div className="store-info-stars" aria-label={`${rating} stelle su 5`}>
+                  {[1, 2, 3, 4, 5].map((score) => <Star key={score} size={22} fill={score <= Math.round(rating) ? 'currentColor' : 'none'} />)}
+                </div>
+                <strong>{rating ? rating.toFixed(1) : 'Nessuna'}</strong>
+                <span>{info.ratingCount} voti raccolti</span>
+              </div>
+              <div className="store-info-rating-samples">
+                {[{ score: 5, label: 'Consigliato per la prova' }, { score: 4, label: 'Testo interessante e ben strutturato' }, { score: 3, label: 'Buona base per un laboratorio' }].map((item) => <div key={item.score}><span>{item.score} stelle</span><span>{item.label}</span></div>)}
+              </div>
+              {canRate ? <button type="button" className="primary store-info-form-action" onClick={onRate}><Star size={14} /> Valuta il copione</button> : <p className="store-info-empty store-info-form-action">Hai già valutato questo copione.</p>}
+            </section>
+          ) : null}
+
+          {activeSection === 'productions' ? (
+            <section className="store-info-panel store-info-production-panel">
+              <div className="store-info-panel-heading"><Theater size={17} /><h2>Rappresentazioni</h2></div>
+              <p className="store-info-panel-copy">Racconta agli altri utenti dove hai portato questo copione.</p>
+              <div className="store-info-production-list">{visibleProductions.map((item) => <article className="store-info-production" key={item.id}><div className="store-info-social-row"><strong>{item.title || 'Rappresentazione'}</strong>{item.id.startsWith('demo-') ? <span className="store-info-demo-label">Esempio</span> : null}</div><p>{item.description}</p><div>{item.poster_url ? <a href={item.poster_url} target="_blank" rel="noreferrer">Locandina</a> : null}{item.video_url ? <a href={item.video_url} target="_blank" rel="noreferrer">Video</a> : null}</div></article>)}</div>
+              <div className="store-info-form-block">
+                <div className="store-info-field-grid">
+                  <label className="store-info-field store-info-field-wide">Titolo della rappresentazione<input value={production.title} onChange={(event) => setProduction((current) => ({ ...current, title: event.target.value }))} /></label>
+                  <label className="store-info-field store-info-field-wide">Racconto<textarea value={production.description} onChange={(event) => setProduction((current) => ({ ...current, description: event.target.value }))} rows={3} /></label>
+                  <label className="store-info-field">Link locandina<input type="url" value={production.posterUrl} onChange={(event) => setProduction((current) => ({ ...current, posterUrl: event.target.value }))} placeholder="https://..." /></label>
+                  <label className="store-info-field">Link video<input type="url" value={production.videoUrl} onChange={(event) => setProduction((current) => ({ ...current, videoUrl: event.target.value }))} placeholder="https://..." /></label>
+                </div>
+                <button type="button" className="primary" onClick={() => void submitProduction()} disabled={submitting}><Theater size={14} /> Aggiungi rappresentazione</button>
+              </div>
+            </section>
+          ) : null}
+
+          {activeSection === 'reports' ? (
+            <section className="store-info-panel">
+              <div className="store-info-panel-heading"><AlertTriangle size={17} /><h2>Segnala un problema</h2></div>
+              <p className="store-info-panel-copy">Aiuta a migliorare il testo importato indicando il punto preciso.</p>
+              <div className="store-info-report-list">{visibleReports.map((item) => <article className="store-info-report" key={item.id}><div className="store-info-social-row"><strong>{item.category === 'dialogue-error' ? 'Errore in una battuta' : 'Inesattezza di scena o personaggio'}</strong>{item.demo ? <span className="store-info-demo-label">Esempio</span> : null}</div><p>{item.details || item.original_text || 'Segnalazione ricevuta.'}</p>{item.dialogue_number || item.character_name ? <small>{item.dialogue_number ? `Battuta ${item.dialogue_number}` : ''}{item.dialogue_number && item.character_name ? ' · ' : ''}{item.character_name}</small> : null}</article>)}</div>
+              <div className="store-info-form-block">
+                <label className="store-info-field">Tipo di segnalazione<select value={reportKind} onChange={(event) => setReportKind(event.target.value as typeof reportKind)}><option value="dialogue-error">Errore in una battuta</option><option value="inaccuracy">Inesattezza di scena o personaggio</option></select></label>
+                {reportKind === 'dialogue-error' ? (
+                  <div className="store-info-field-grid">
+                    <label className="store-info-field">N. battuta<input value={report.dialogueNumber} onChange={(event) => updateReport('dialogueNumber', event.target.value)} inputMode="numeric" /></label>
+                    <label className="store-info-field">Personaggio<input value={report.characterName} onChange={(event) => updateReport('characterName', event.target.value)} /></label>
+                    <label className="store-info-field store-info-field-wide">Battuta importata<textarea value={report.originalText} onChange={(event) => updateReport('originalText', event.target.value)} rows={2} /></label>
+                    <label className="store-info-field store-info-field-wide">Battuta corretta<textarea value={report.correctedText} onChange={(event) => updateReport('correctedText', event.target.value)} rows={2} /></label>
+                  </div>
+                ) : (
+                  <div className="store-info-field-grid">
+                    <label className="store-info-field">Atto<input value={report.actNumber} onChange={(event) => updateReport('actNumber', event.target.value)} inputMode="numeric" /></label>
+                    <label className="store-info-field">Scena<input value={report.sceneNumber} onChange={(event) => updateReport('sceneNumber', event.target.value)} inputMode="numeric" /></label>
+                    <label className="store-info-field store-info-field-wide">Personaggio<input value={report.characterName} onChange={(event) => updateReport('characterName', event.target.value)} /></label>
+                    <label className="store-info-field store-info-field-wide">Descrizione<textarea value={report.details} onChange={(event) => updateReport('details', event.target.value)} rows={3} /></label>
+                  </div>
+                )}
+                <button type="button" className="primary" onClick={() => void submitReport()} disabled={submitting}><AlertTriangle size={14} /> Invia segnalazione</button>
+              </div>
+            </section>
+          ) : null}
         </div>
         {status ? <p className="form-status store-info-status" role="status">{status}</p> : null}
         {communityLoading ? <p className="store-info-loading-note">Aggiornamento community...</p> : null}
@@ -11297,7 +11664,7 @@ const drawPdfNoteBox = (
   y = ensurePdfSpace(doc, y, pageBottom, marginTop, boxHeight)
   doc.setDrawColor(148, 163, 184)
   doc.setFillColor(248, 250, 252)
-  doc.roundedRect(x, y, width, boxHeight, 4, 4, 'FD')
+  doc.rect(x, y, width, boxHeight, 'FD')
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(10)
   doc.setTextColor('#334155')
@@ -11338,9 +11705,9 @@ const drawPdfQuoteBox = (
 
   doc.setDrawColor(209, 213, 219)
   doc.setFillColor(249, 250, 251)
-  doc.roundedRect(x, y, width, boxHeight, 4, 4, 'FD')
+  doc.rect(x, y, width, boxHeight, 'FD')
   doc.setFillColor(233, 84, 32)
-  doc.rect(x, y, 4, boxHeight, 'F')
+  doc.rect(x, y, 7, boxHeight, 'F')
   doc.setTextColor('#374151')
 
   let textY = y + paddingY + 10
@@ -11369,9 +11736,9 @@ const drawPdfCueBox = (
   y = ensurePdfSpace(doc, y, pageBottom, marginTop, boxHeight)
   doc.setDrawColor(96, 165, 250)
   doc.setFillColor(239, 246, 255)
-  doc.roundedRect(x, y, width, boxHeight, 4, 4, 'FD')
+  doc.rect(x, y, width, boxHeight, 'FD')
   doc.setFillColor(59, 130, 246)
-  doc.rect(x, y, 4, boxHeight, 'F')
+  doc.rect(x, y, 7, boxHeight, 'F')
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(10)
   doc.setTextColor('#1e3a8a')
@@ -11410,7 +11777,7 @@ const drawPdfDialogueBlock = (
   y = ensurePdfSpace(doc, y, pageBottom, marginTop, blockHeight)
 
   doc.setDrawColor(233, 84, 32)
-  doc.setLineWidth(1.4)
+  doc.setLineWidth(2.8)
   doc.line(x, y - 2, x, y + blockHeight - 3)
 
   doc.setFont('helvetica', 'bold')

@@ -26,6 +26,13 @@ export type MediaAsset = {
   children?: MediaAsset[]
 }
 
+export type StoreImportMetadata = {
+  scriptId: string
+  title: string
+  filePath: string
+  packageUrl?: string
+}
+
 export type Project = {
   id: string
   name: string
@@ -43,6 +50,7 @@ export type Project = {
   notes: DirectorNote[]
   cues: MediaCue[]
   lastFullscreenBlockId?: string
+  storeImports?: StoreImportMetadata[]
 }
 
 export type Character = {

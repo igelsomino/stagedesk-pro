@@ -72,6 +72,16 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.46
+
+> Stabilità dell’editor, importazione dei copioni e qualità dell’export.
+
+- Aggiunto uno stato di caricamento durante il passaggio tra copioni e dopo l’importazione, con tempi adattivi per documenti grandi.
+- Resa più reattiva la sincronizzazione dell’editor: serializzazione, indice strutturale e autosalvataggio vengono accodati senza bloccare la digitazione.
+- Uniformata l’anteprima del drag&drop nativo e mantenuta fino al termine del trascinamento, evitando ghost duplicati e drop intermittenti su WebKit/Linux.
+- Nell’export PDF le note, le citazioni e i cue non usano più angoli arrotondati; aumentata la larghezza della barra laterale arancione delle battute.
+- Rigenerato il pacchetto di **Le nozze di Figaro** con parser a personaggi controllati e alias espliciti.
+
 ## Versione 1.0.42
 
 > Stabilità dell’editor e navigazione più affidabile in StageDesk Share.
