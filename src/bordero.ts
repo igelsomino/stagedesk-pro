@@ -1,30 +1,38 @@
 import type { MediaCue, ScriptBlock } from './domain'
 
+/**
+ * Riga di supporto alla compilazione della setlist in mioBordero.
+ * Il CSV non e' un tracciato ufficiale SIAE e non sostituisce l'invio
+ * dal portale: conserva soltanto i brani musicali effettivamente richiamati.
+ */
 export type BorderoRow = {
   sequence: number
-  kind: 'Battuta' | 'Audio' | 'Musica' | 'Immagine' | 'Video'
   act: string
   scene: string
-  character: string
-  title: string
+  cueTitle: string
   source: string
   durationSeconds: string
+  autoplay: string
+  author: string
+  composer: string
+  publisher: string
+  workCode: string
   notes: string
 }
 
 const cleanText = (value: string | undefined) => (value ?? '')
-  .replace(/^\*\*(.*?)\*\*:?\s*/, '')
+  .replace(/^\*\*(.*?)\*\*: ?\s*/, '')
   .replace(/^\[[^\]]+\]\s*/, '')
   .replace(/\s+/g, ' ')
   .trim()
 
-const characterFromDialogue = (text: string | undefined) => {
-  const match = (text ?? '').match(/^\*\*([^*]+)\*\*:/)
-  return match?.[1]?.trim() ?? ''
-}
-
 const csvCell = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`
 
+/**
+ * Returns only music cues, in the order in which they occur in the script.
+ * Dialogue, stage directions and non-musical media deliberately never reach
+ * the export: they are not entries of a SIAE music programme.
+ */
 export const buildBorderoRows = (blocks: ScriptBlock[], cues: MediaCue[] = []): BorderoRow[] => {
   const cuesById = new Map(cues.map((cue) => [cue.id, cue]))
   let act = ''
@@ -42,56 +50,59 @@ export const buildBorderoRows = (blocks: ScriptBlock[], cues: MediaCue[] = []): 
       scene = cleanText(block.text)
       continue
     }
+    if (block.type !== 'media' || !block.cueId) continue
 
-    if (block.type === 'dialogue') {
-      sequence += 1
-      rows.push({
-        sequence,
-        kind: 'Battuta',
-        act,
-        scene,
-        character: characterFromDialogue(block.text) || block.characterId || '',
-        title: cleanText(block.text),
-        source: '',
-        durationSeconds: '',
-        notes: '',
-      })
-      continue
-    }
+    const cue = cuesById.get(block.cueId)
+    if (!cue || cue.type !== 'music') continue
 
-    if (block.type === 'media' && block.cueId) {
-      const cue = cuesById.get(block.cueId)
-      if (!cue) continue
-      sequence += 1
-      const kind = cue.type === 'music' ? 'Musica' : cue.type === 'audio' ? 'Audio' : cue.type === 'image' ? 'Immagine' : 'Video'
-      rows.push({
-        sequence,
-        kind,
-        act,
-        scene,
-        character: '',
-        title: cue.title?.trim() || cue.src,
-        source: cue.src,
-        durationSeconds: cue.options.duration == null ? '' : String(cue.options.duration),
-        notes: cue.description?.trim() ?? '',
-      })
-    }
+    sequence += 1
+    rows.push({
+      sequence,
+      act,
+      scene,
+      cueTitle: cue.title?.trim() || cue.src,
+      source: cue.src,
+      durationSeconds: cue.options.duration == null ? '' : String(cue.options.duration),
+      autoplay: cue.autoplay ? 'Si' : 'No',
+      // These data cannot be inferred reliably from an audio filename.
+      author: '',
+      composer: '',
+      publisher: '',
+      workCode: '',
+      notes: cue.description?.trim() ?? '',
+    })
   }
 
   return rows
 }
 
 export const buildBorderoCsv = (rows: BorderoRow[]) => {
-  const header = ['N.', 'Tipo', 'Atto', 'Scena', 'Personaggio', 'Titolo/Testo', 'Sorgente', 'Durata (s)', 'Note']
+  const header = [
+    'N.',
+    'Titolo brano/opera',
+    'Autore testo',
+    'Compositore',
+    'Editore',
+    'Codice opera (facoltativo)',
+    'Durata (s)',
+    'Esecuzione automatica',
+    'Atto',
+    'Scena',
+    'Sorgente StageDesk',
+    'Note',
+  ]
   const lines = [header, ...rows.map((row) => [
     row.sequence,
-    row.kind,
+    row.cueTitle,
+    row.author,
+    row.composer,
+    row.publisher,
+    row.workCode,
+    row.durationSeconds,
+    row.autoplay,
     row.act,
     row.scene,
-    row.character,
-    row.title,
     row.source,
-    row.durationSeconds,
     row.notes,
   ])]
   return `\uFEFF${lines.map((line) => line.map(csvCell).join(';')).join('\r\n')}\r\n`

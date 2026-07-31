@@ -2400,6 +2400,63 @@ html.stagedesk-native-dragging .pointer-drag-preview:not(.native-drag-image) {
   line-height: 1.35;
 }
 
+.store-publication-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 8px 20px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.store-publication-global-status {
+  flex: 0 0 auto;
+  margin: 0 20px 8px;
+}
+
+.store-publication-tabs button {
+  min-height: 30px;
+  padding: 0 11px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-s) var(--radius-s) 0 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.store-publication-tabs button:hover:not(:disabled),
+.store-publication-tabs button.is-active {
+  color: var(--text-normal);
+}
+
+.store-publication-tabs button.is-active {
+  border-bottom-color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+}
+
+.store-publication-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.store-publication-panel[hidden] {
+  display: none;
+}
+
+.store-publication-notes-panel {
+  min-height: 180px;
+  align-content: start;
+}
+
+.store-publication-notes-help {
+  margin: -2px 0 0;
+  color: var(--text-faint);
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
 .store-publication-modal .store-publication-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -2454,7 +2511,7 @@ html.stagedesk-native-dragging .pointer-drag-preview:not(.native-drag-image) {
 .store-publication-metadata-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 10px;
+  gap: 9px;
 }
 
 .store-publication-metadata-grid label {
@@ -2467,6 +2524,10 @@ html.stagedesk-native-dragging .pointer-drag-preview:not(.native-drag-image) {
   letter-spacing: 0.02em;
   line-height: 1.2;
   text-transform: uppercase;
+}
+
+.store-publication-metadata-grid label:not(.store-publication-field-half) {
+  grid-column: 1 / -1;
 }
 
 .store-publication-metadata-grid input,
@@ -2546,6 +2607,18 @@ html.stagedesk-native-dragging .pointer-drag-preview:not(.native-drag-image) {
     right: 0;
   }
 
+  .store-publication-tabs {
+    padding-inline: 16px;
+  }
+
+  .store-publication-global-status {
+    margin-inline: 16px;
+  }
+
+  .store-publication-tabs button {
+    flex: 1 1 0;
+  }
+
   .share-modal-header {
     padding-inline: 0;
   }
@@ -2589,6 +2662,10 @@ html.stagedesk-native-dragging .pointer-drag-preview:not(.native-drag-image) {
 @media (max-width: 520px) {
   .store-publication-metadata-grid {
     grid-template-columns: 1fr;
+  }
+
+  .store-publication-metadata-grid .store-publication-field-half {
+    grid-column: 1 / -1;
   }
 }
 
@@ -5597,6 +5674,74 @@ progress {
   border-top: 1px solid var(--background-modifier-border);
 }
 
+.store-info-report-form {
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid var(--interactive-accent);
+  background: var(--background-secondary);
+}
+
+.store-info-report-kind {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(260px, 1.4fr);
+  align-items: end;
+  column-gap: 12px;
+  row-gap: 5px;
+}
+
+.store-info-report-kind > .store-info-field {
+  grid-column: 1 / -1;
+}
+
+.store-info-report-kind p {
+  grid-column: 1;
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.store-info-select-control {
+  position: relative;
+  grid-column: 2;
+  min-width: 0;
+}
+
+.store-info-select-control select {
+  width: 100%;
+  min-height: 36px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 55%, var(--background-modifier-border));
+  border-radius: var(--radius-s);
+  padding: 8px 35px 8px 10px;
+  background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-tertiary));
+  color: var(--text-normal);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.store-info-select-control select:hover {
+  border-color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 13%, var(--background-tertiary));
+}
+
+.store-info-select-control select:focus-visible {
+  outline: 1px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.store-info-select-control svg {
+  position: absolute;
+  top: 50%;
+  right: 11px;
+  pointer-events: none;
+  color: var(--text-accent-hover);
+  transform: translateY(-50%);
+}
+
 .store-info-rating-card {
   display: grid;
   justify-items: start;
@@ -5729,6 +5874,10 @@ progress {
   gap: 8px;
 }
 
+.store-info-comment-form {
+  margin-top: 20px;
+}
+
 .store-info-comment-form textarea,
 .store-info-field textarea,
 .store-info-field input,
@@ -5756,6 +5905,12 @@ progress {
   font-weight: 700;
 }
 
+.store-info-panel > .store-info-form-action {
+  display: inline-flex;
+  width: fit-content;
+  margin: 14px 0 0 auto;
+}
+
 .store-info-comment-list,
 .store-info-production-list {
   display: grid;
@@ -5777,6 +5932,13 @@ progress {
   color: var(--text-normal);
   font-size: 0.8rem;
   line-height: 1.4;
+}
+
+.store-info-production .store-info-production-meta {
+  margin: 5px 0 7px;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
 }
 
 .store-info-comment time {
@@ -5918,6 +6080,15 @@ progress {
 }
 
 @media (max-width: 760px) {
+  .store-info-report-kind {
+    grid-template-columns: 1fr;
+  }
+
+  .store-info-report-kind p,
+  .store-info-select-control {
+    grid-column: 1;
+  }
+
   .store-info-header {
     min-height: 56px;
     width: auto;

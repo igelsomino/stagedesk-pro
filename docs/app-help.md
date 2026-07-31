@@ -23,7 +23,7 @@ Usa Apri progetto per rientrare in un progetto già creato. La dialog permette d
 
 Il pulsante Importa nella stessa dialog apre lo Store in un tab dello spazio editor. Dallo Store puoi consultare le schede dei copioni e importare direttamente i pacchetti StageDesk disponibili.
 
-Se il file attivo è stato pubblicato nel catalogo dal tuo account, nel menu teatrale compare anche **Pubblica nello Store**. Il comando è riferito al singolo file e non compare per il copione dimostrativo. La pubblicazione è distinta da Condividi: crea una nuova versione del copione nel catalogo e mostra il numero e la data dell'ultima versione pubblicata. Puoi aggiungere facoltativamente una nota di versione prima di confermare.
+Se il file attivo è stato pubblicato nel catalogo dal tuo account, nel menu teatrale compare anche **Pubblica nello Store**. Il comando è riferito al singolo file e non compare per il copione dimostrativo. La pubblicazione è distinta da Condividi: crea una nuova versione del copione nel catalogo e mostra il numero e la data dell'ultima versione pubblicata. La dialog separa i metadati editoriali dalle note di versione, così puoi aggiornare diritti, fonte, ambientazione e composizione del cast senza confondere le informazioni della release.
 
 I pacchetti `.stagedesk` possono essere importati sia nel formato Markdown esteso usato dalle versioni precedenti sia nel nuovo contenitore versionato. L'importazione normalizza automaticamente BOM e ritorni a capo, verifica che il contenuto abbia una struttura StageDesk riconoscibile e segnala esplicitamente eventuali risposte HTML o pacchetti non validi.
 
@@ -151,6 +151,12 @@ Il menu Export genera un PDF del file attivo:
 - pulito, senza marcatori visuali ma con le note operative di movimento, posizione, personaggi in scena e tono.
 
 Alla fine dell'export l'app mostra dove è stato salvato il file e, quando possibile, un comando per aprirlo.
+
+L'export **Registro musicale SIAE (CSV)** crea una bozza della setlist usando soltanto i cue di tipo Musica e mantenendo atto, scena, durata e stato di autoplay. Autore, compositore, editore e codice opera vanno completati e verificati prima dell'uso nel Programma Musicale ufficiale.
+
+## Store e scheda Social
+
+Dopo l'importazione di un copione dallo Store viene aperta la relativa scheda informativa. Qui puoi leggere sinossi e metadati, consultare commenti e valutazioni, registrare una rappresentazione con data e teatro, oppure inviare una segnalazione puntuale sul testo. La registrazione di una rappresentazione richiede la conferma di aver verificato autorizzazioni e diritti di messa in scena: StageDesk registra tale dichiarazione, ma non rilascia autorizzazioni per conto di autori, editori o organismi di gestione.
 
 ## Condivisione copione
 

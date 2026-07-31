@@ -1,4 +1,4 @@
-import type { Editor } from '@tiptap/core'
+import type { Editor, JSONContent } from '@tiptap/core'
 import { DOMParser as ProseMirrorDOMParser, type Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { NodeSelection, Selection } from '@tiptap/pm/state'
 import { insertPoint } from '@tiptap/pm/transform'
@@ -403,7 +403,8 @@ function storeScriptInfoFromImport(item: StoreImportMetadata): StoreScriptInfo {
     scriptId: item.scriptId,
     title: item.title,
     subtitle: 'Copione importato dal catalogo StageDesk Store',
-    description: 'Versione importata nel progetto locale per lettura, prove e lavoro in scena.',
+    // I metadati editoriali vengono caricati dallo Store per evitare descrizioni locali non aggiornate.
+    description: '',
     authorName: '',
     language: 'Italiano',
     genre: 'Teatro',
@@ -617,6 +618,9 @@ function App() {
   const editorDocumentUiSyncTimerRef = useRef<number | null>(null)
   const editorScrollAreaRef = useRef<HTMLDivElement>(null)
   const editorScrollPositionsRef = useRef<Record<string, number>>({})
+  const editorSelectionsByPathRef = useRef<Record<string, number>>({})
+  const editorFocusTargetsByPathRef = useRef<Record<string, { kind: 'dialogue' | 'note'; id: string; field: 'body' | 'title'; start?: number; end?: number }>>({})
+  const editorDocumentCacheRef = useRef<Record<string, JSONContent>>({})
   const editorRenderedPathRef = useRef('')
   const editorLoadedPathRef = useRef('')
   const saveQueueRef = useRef<Promise<string | undefined>>(Promise.resolve(undefined))
@@ -654,6 +658,7 @@ function App() {
     initialStoreScriptInfo,
   )
   const [storeScriptInfoLoading, setStoreScriptInfoLoading] = useState<Record<string, boolean>>({})
+  const loadedStoreScriptInfoRef = useRef<Set<string>>(new Set())
   const [storeRatingTarget, setStoreRatingTarget] = useState<StoreRatingTarget | undefined>(() => {
     try {
       const stored = localStorage.getItem(STORE_RATING_TARGET_KEY)
@@ -1773,7 +1778,10 @@ function App() {
       scheduleEditorUiSync(currentEditor)
     },
     onSelectionUpdate({ editor: currentEditor }) {
-      lastEditorSelectionRef.current = currentEditor.state.selection.from
+      const selection = currentEditor.state.selection.from
+      lastEditorSelectionRef.current = selection
+      const filePath = editorLoadedPathRef.current
+      if (filePath) editorSelectionsByPathRef.current[filePath] = selection
       scheduleUiStatePersist()
       scheduleEditorUiSync(currentEditor)
     },
@@ -1910,6 +1918,53 @@ function App() {
     },
     immediatelyRender: false,
   })
+
+  const captureActiveEditorTabState = useCallback(() => {
+    if (!editor) return
+    const filePath = editorLoadedPathRef.current
+    if (!filePath) return
+
+    // The single editor instance is reused by every script tab. Capture the
+    // exact document and the active field before another tab replaces it.
+    editorDocumentCacheRef.current[filePath] = editor.getJSON()
+    editorSelectionsByPathRef.current[filePath] = editor.state.selection.from
+
+    const scrollArea = editorScrollAreaRef.current
+    if (scrollArea) editorScrollPositionsRef.current[filePath] = scrollArea.scrollTop
+
+    const activeElement = document.activeElement
+    const field = activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement
+      ? activeElement
+      : undefined
+    const root = field?.closest<HTMLElement>('[data-dialogue-id], [data-note-block]')
+    if (root?.dataset.dialogueId && field?.classList.contains('script-dialogue-text')) {
+      editorFocusTargetsByPathRef.current[filePath] = {
+        kind: 'dialogue',
+        id: root.dataset.dialogueId,
+        field: 'body',
+        start: field.selectionStart ?? undefined,
+        end: field.selectionEnd ?? undefined,
+      }
+    } else if (root?.dataset.refId) {
+      editorFocusTargetsByPathRef.current[filePath] = {
+        kind: 'note',
+        id: root.dataset.refId,
+        field: field?.classList.contains('script-note-title') ? 'title' : 'body',
+        start: field?.selectionStart ?? undefined,
+        end: field?.selectionEnd ?? undefined,
+      }
+    } else {
+      delete editorFocusTargetsByPathRef.current[filePath]
+    }
+
+    diagnosticLog('editor-tab-state-captured', {
+      filePath,
+      selection: editor.state.selection.from,
+      scrollTop: editorScrollPositionsRef.current[filePath] ?? 0,
+      cached: true,
+    })
+  }, [editor])
+
   const editorEditingDisabled = !editor || Boolean(activeAppDocument) || activeEmbeddedTab
   const activeDocumentTitle = activeFile?.name
     ?? activeAppDocument?.title
@@ -2211,7 +2266,8 @@ function App() {
       findMarkdownNode(projectScriptsRef.current, activeFilePath)?.content ??
       ''
     const filePathToRestore = activeFilePath
-    editor.commands.setContent(markdownToHtml(content), { emitUpdate: false })
+    const cachedDocument = editorDocumentCacheRef.current[filePathToRestore]
+    editor.commands.setContent(cachedDocument ?? markdownToHtml(content), { emitUpdate: false })
     editorLoadedPathRef.current = filePathToRestore
     setEditorMarkdown(content)
     const restoreScrollPosition = () => {
@@ -2221,17 +2277,42 @@ function App() {
       editorRenderedPathRef.current = filePathToRestore
       scrollArea.scrollTop = editorScrollPositionsRef.current[filePathToRestore] ?? 0
     }
-    const readyFrame = window.requestAnimationFrame(() => {
-      restoreScrollPosition()
-      completeTabTransition(filePathToRestore)
-    })
     const pendingSelection = pendingEditorSelectionRef.current
-    if (pendingSelection !== undefined) {
-      const safePosition = Math.max(1, Math.min(pendingSelection, editor.state.doc.content.size))
+    const savedSelection = pendingSelection ?? editorSelectionsByPathRef.current[filePathToRestore]
+    if (savedSelection !== undefined) {
+      const safePosition = Math.max(1, Math.min(savedSelection, editor.state.doc.content.size))
       editor.commands.setTextSelection(safePosition)
       lastEditorSelectionRef.current = safePosition
-      pendingEditorSelectionRef.current = undefined
+      editorSelectionsByPathRef.current[filePathToRestore] = safePosition
     }
+    pendingEditorSelectionRef.current = undefined
+
+    const restoreFocusedField = () => {
+      const target = editorFocusTargetsByPathRef.current[filePathToRestore]
+      if (!target || activePathRef.current !== filePathToRestore) return
+      const root = Array.from(editor.view.dom.querySelectorAll<HTMLElement>('[data-dialogue-id], [data-note-block]')).find((element) =>
+        target.kind === 'dialogue'
+          ? element.dataset.dialogueId === target.id
+          : element.dataset.refId === target.id,
+      )
+      const selector = target.kind === 'dialogue'
+        ? '.script-dialogue-text'
+        : target.field === 'title'
+          ? '.script-note-title'
+          : '.script-note-content'
+      const field = root?.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)
+      if (!field) return
+      field.focus({ preventScroll: true })
+      const start = Math.min(target.start ?? field.value.length, field.value.length)
+      const end = Math.min(target.end ?? start, field.value.length)
+      field.setSelectionRange(start, end)
+    }
+
+    const readyFrame = window.requestAnimationFrame(() => {
+      restoreScrollPosition()
+      window.requestAnimationFrame(restoreFocusedField)
+      completeTabTransition(filePathToRestore)
+    })
     syncToolbarState(editor, setToolbarState)
     syncOutlineState(editor, setActiveOutline, setActiveOutlineId)
     syncBookmarkState(editor, setActiveBookmarks, setActiveBookmarkId)
@@ -2255,14 +2336,30 @@ function App() {
 
     // Keep typing responsive by coalescing the expensive document serialization
     // and project index updates until the user pauses briefly.
-    const flushActiveFileDraft = () => {
-      const draft = editorJsonToMarkdown(editor.getJSON())
+    const flushActiveFileDraft = (cachedDocument?: JSONContent, lightweight = false) => {
+      const document = cachedDocument ?? editor.getJSON()
+      const draft = editorJsonToMarkdown(document as TiptapJsonNode)
+      draftsRef.current = { ...draftsRef.current, [activeFilePath]: draft }
+      editorDocumentCacheRef.current[activeFilePath] = document
+      setEditorMarkdown((current) => (current === draft ? current : draft))
+      setDrafts((current) => (current[activeFilePath] === draft ? current : { ...current, [activeFilePath]: draft }))
+
+      // On a tab hand-off, cue and note indexes have already been updated by
+      // their own commands. Avoid scanning a large document a second time
+      // while the target tab is being rendered.
+      if (lightweight) {
+        setProject((current) => {
+          const activeNode = findMarkdownNode(current.scripts, activeFilePath)
+          if (!activeNode || activeNode.dirty) return current
+          return { ...current, scripts: updateTreeNode(current.scripts, activeFilePath, (node) => ({ ...node, dirty: true })) }
+        })
+        return
+      }
+
       const cueIds = markerRefIdsFromMarkdown(draft, 'cue')
       const noteIds = markerRefIdsFromMarkdown(draft, 'note')
       const cueIdSet = new Set(cueIds)
       const noteIdSet = new Set(noteIds)
-      setEditorMarkdown((current) => (current === draft ? current : draft))
-      setDrafts((current) => (current[activeFilePath] === draft ? current : { ...current, [activeFilePath]: draft }))
       setProject((current) => {
         const currentFileCues = current.cues.filter((cue) => cue.filePath === activeFilePath)
         const currentFileNotes = current.notes.filter((note) => note.filePath === activeFilePath)
@@ -2305,7 +2402,7 @@ function App() {
       if (editorDraftSyncTimerRef.current !== null) {
         window.clearTimeout(editorDraftSyncTimerRef.current)
         editorDraftSyncTimerRef.current = null
-        flushActiveFileDraft()
+        flushActiveFileDraft(editorDocumentCacheRef.current[activeFilePath], true)
       }
     }
   }, [activeFilePath, editor, startupProjectReady])
@@ -2604,6 +2701,10 @@ function App() {
     const savedExpandedPaths =
       savedUiState?.expandedPaths.filter((path) => path === SCRIPT_ROOT_PATH || path === '/media' || findTreeNode(nextProject.scripts, path) || findTreeNode(nextProject.media, path)) ?? []
     pendingEditorSelectionRef.current = savedUiState?.activePath === nextPath ? savedUiState.editorSelection : undefined
+    editorDocumentCacheRef.current = {}
+    editorSelectionsByPathRef.current = {}
+    editorFocusTargetsByPathRef.current = {}
+    editorScrollPositionsRef.current = {}
     projectRef.current = nextProject
     setProject(nextProject)
     setDrafts({})
@@ -2633,7 +2734,8 @@ function App() {
   }
 
   const loadStoreScriptInfo = async (scriptId: string) => {
-    if (!scriptId || storeScriptInfo[scriptId] || storeScriptInfoLoading[scriptId]) return
+    if (!scriptId || storeScriptInfoLoading[scriptId] || loadedStoreScriptInfoRef.current.has(scriptId)) return
+    loadedStoreScriptInfoRef.current.add(scriptId)
     setStoreScriptInfoLoading((current) => ({ ...current, [scriptId]: true }))
     try {
       const { data, error } = await supabase
@@ -2705,6 +2807,7 @@ function App() {
         },
       }))
     } catch (error) {
+      loadedStoreScriptInfoRef.current.delete(scriptId)
       showStatus(`Informazioni Store non disponibili: ${publishErrorMessage(error)}`)
     } finally {
       setStoreScriptInfoLoading((current) => ({ ...current, [scriptId]: false }))
@@ -2888,7 +2991,7 @@ function App() {
           scriptId: storeScriptId,
           title: projectName,
           subtitle: 'Copione importato dal catalogo StageDesk Store',
-          description: 'Versione importata nel progetto locale per lettura, prove e lavoro in scena.',
+          description: '',
           authorName: '',
           language: 'Italiano',
           genre: 'Teatro',
@@ -2909,6 +3012,7 @@ function App() {
           [storeScriptId]: importedInfo,
         })
         setStoreScriptInfo((current) => ({ ...current, [storeScriptId]: importedInfo }))
+        void loadStoreScriptInfo(storeScriptId)
         const target = { scriptId: storeScriptId, title: projectName, filePath }
         setStoreRatingTarget(target)
         try {
@@ -3133,6 +3237,7 @@ function App() {
 
   const openMarkdownTab = (path: string) => {
     const previousPath = activePathRef.current
+    if (path !== previousPath) captureActiveEditorTabState()
     diagnosticLog('tab-open-script', { path, previousActivePath: previousPath, openTabs: openTabsRef.current })
     const nextTabs = openTabsRef.current.includes(path) ? openTabsRef.current : [...openTabsRef.current, path]
     openTabsRef.current = nextTabs
@@ -3147,6 +3252,7 @@ function App() {
 
   const openAppDocumentTab = (path: string) => {
     if (!isAppDocumentPath(path)) return
+    if (path !== activePathRef.current) captureActiveEditorTabState()
     diagnosticLog('tab-open-document', { path, previousActivePath: activePathRef.current, openTabs: openTabsRef.current })
     const nextTabs = openTabsRef.current.includes(path) ? openTabsRef.current : [...openTabsRef.current, path]
     openTabsRef.current = nextTabs
@@ -3157,6 +3263,7 @@ function App() {
   }
 
   const openStoreTab = () => {
+    if (activePathRef.current !== STORE_TAB_PATH) captureActiveEditorTabState()
     diagnosticLog('tab-open-store', { previousActivePath: activePathRef.current, openTabs: openTabsRef.current })
     setProjectPickerOpen(false)
     setProjectPickerEntries([])
@@ -3243,8 +3350,14 @@ function App() {
 
     if (scriptPathHasUnsavedChanges(path)) discardUnsavedPath(path)
 
+    if (activePathRef.current === path) captureActiveEditorTabState()
+
     const currentTabs = openTabsRef.current
     const nextTabs = currentTabs.filter((item) => item !== path)
+    delete editorDocumentCacheRef.current[path]
+    delete editorSelectionsByPathRef.current[path]
+    delete editorFocusTargetsByPathRef.current[path]
+    delete editorScrollPositionsRef.current[path]
     let nextActivePath = activePathRef.current
     let nextSelectedScriptPath = selectedScriptPathRef.current
     if (nextActivePath === path) {
@@ -4521,9 +4634,12 @@ function App() {
       await persistDraftsNow()
       const markdown = buildActiveExtendedMarkdown() ?? editorMarkdown
       const rows = buildBorderoRows(parseScriptBlocks(markdown), fileCues)
-      const fileName = `${stripMarkdownExtension(activeFile.name)}.bordero.csv`
+      const fileName = `${stripMarkdownExtension(activeFile.name)}.programma-musicale.csv`
       downloadCsv(fileName, buildBorderoCsv(rows))
-      showStatus(`Bozza borderò esportata: ${fileName}. Verifica i dati prima dell'uso ufficiale.`, 12000)
+      const suffix = rows.length === 0
+        ? ' Nessun cue Musica nel file: il CSV contiene soltanto l’intestazione.'
+        : ` ${rows.length} brano/i musicale/i esportato/i.`
+      showStatus(`Registro musicale esportato: ${fileName}.${suffix} Completa e invia il borderò da mioBorderò.`, 12000)
     } catch (error) {
       showStatus(`Export borderò non riuscito: ${String(error)}`)
     }
@@ -5281,6 +5397,7 @@ function App() {
                       className={path === activePath ? fileTabClass(tabFile, true, isNonMarkdownTabPath(path)) : fileTabClass(tabFile, false, isNonMarkdownTabPath(path))}
                       onClick={() => {
                         const previousPath = activePathRef.current
+                        if (path !== previousPath) captureActiveEditorTabState()
                         activePathRef.current = path
                         if (isShareTab) setShareTabLoading(true)
                         if (path !== previousPath && (isStoreInfoTab || !isNonMarkdownTabPath(path))) beginTabTransition(path)
@@ -5698,7 +5815,7 @@ function App() {
                         }}
                       >
                         <FileText size={14} />
-                        Borderò (CSV)
+                        Registro musicale SIAE (CSV)
                       </button>
                     </div>
                   </div>
@@ -6179,6 +6296,7 @@ function StorePublicationModal({
   onPublish: (releaseNotes: string, metadata: StorePublicationMetadata) => void
 }) {
   const [releaseNotes, setReleaseNotes] = useState('')
+  const [activeTab, setActiveTab] = useState<'metadata' | 'notes'>('metadata')
   const [metadata, setMetadata] = useState<StorePublicationMetadata>(() => ({
     rightsCode: state.rightsCode ?? 'unknown',
     rightsHolder: state.rightsHolder ?? '',
@@ -6218,53 +6336,92 @@ function StorePublicationModal({
             <X size={16} />
           </button>
         </header>
-        <div className="store-publication-body">
-          <div className="store-publication-script">
-            <FileText size={17} />
-            <div>
-              <strong>{title}</strong>
-              <span>Il file attivo verrà pubblicato come pacchetto StageDesk.</span>
-            </div>
+        <div className="store-publication-status store-publication-global-status" data-state={state.status}>
+          <span className="publish-status-dot" />
+          <div>
+            <strong>{statusLabel}</strong>
+            {state.versionNumber && state.publishedAt ? (
+              <span>Versione {state.versionNumber} · {formatDateTime(state.publishedAt)}</span>
+            ) : null}
+            {state.error ? <span>{state.error}</span> : null}
           </div>
-          <div className="store-publication-status" data-state={state.status}>
-            <span className="publish-status-dot" />
-            <div>
-              <strong>{statusLabel}</strong>
-              {state.versionNumber && state.publishedAt ? (
-                <span>Versione {state.versionNumber} · {formatDateTime(state.publishedAt)}</span>
-              ) : null}
-              {state.error ? <span>{state.error}</span> : null}
-            </div>
-          </div>
-          <label className="store-publication-notes">
+        </div>
+        <div className="store-publication-tabs" role="tablist" aria-label="Contenuti della pubblicazione">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'metadata'}
+            className={activeTab === 'metadata' ? 'is-active' : ''}
+            onClick={() => setActiveTab('metadata')}
+            disabled={busy}
+          >
+            Metadati
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'notes'}
+            className={activeTab === 'notes' ? 'is-active' : ''}
+            onClick={() => setActiveTab('notes')}
+            disabled={busy}
+          >
             Note di versione
-            <textarea
-              value={releaseNotes}
-              onChange={(event) => setReleaseNotes(event.target.value)}
-              placeholder="Descrivi brevemente le modifiche di questa versione (facoltativo)."
-              rows={3}
-              disabled={busy}
-            />
-          </label>
-          <div className="store-publication-metadata">
-            <div className="store-publication-metadata-title">Metadati catalogo</div>
-            <div className="store-publication-metadata-grid">
-              <label>Diritti<select value={metadata.rightsCode} onChange={(event) => setMetadata((current) => ({ ...current, rightsCode: event.target.value }))} disabled={busy}>
-                <option value="unknown">Da verificare</option>
-                <option value="original">Opera originale</option>
-                <option value="public-domain">Pubblico dominio</option>
-                <option value="creative-commons">Creative Commons</option>
-                <option value="siae">SIAE / diritti gestiti</option>
-                <option value="licensed">Licenza specifica</option>
-              </select></label>
-              <label>Titolare o fonte<input value={metadata.rightsHolder} onChange={(event) => setMetadata((current) => ({ ...current, rightsHolder: event.target.value }))} placeholder="Autore, editore o archivio" disabled={busy} /></label>
-              <label>Licenza o fonte URL<input type="url" value={metadata.licenseUrl} onChange={(event) => setMetadata((current) => ({ ...current, licenseUrl: event.target.value }))} placeholder="https://..." disabled={busy} /></label>
-              <label>Ambientazione<input value={metadata.setting} onChange={(event) => setMetadata((current) => ({ ...current, setting: event.target.value }))} placeholder="Es. interno domestico" disabled={busy} /></label>
-              <label>Composizione cast<input value={metadata.castBreakdown} onChange={(event) => setMetadata((current) => ({ ...current, castBreakdown: event.target.value }))} placeholder="Es. 3 donne, 2 uomini" disabled={busy} /></label>
-              <label>Fasce d'età<input value={metadata.ageBreakdown} onChange={(event) => setMetadata((current) => ({ ...current, ageBreakdown: event.target.value }))} placeholder="Es. adulti, giovani" disabled={busy} /></label>
+          </button>
+        </div>
+        <div className="store-publication-body">
+          <section
+            id="store-publication-metadata-panel"
+            className="store-publication-panel"
+            role="tabpanel"
+            aria-label="Metadati"
+            hidden={activeTab !== 'metadata'}
+          >
+            <div className="store-publication-script">
+              <FileText size={17} />
+              <div>
+                <strong>{title}</strong>
+                <span>Il file attivo verrà pubblicato come pacchetto StageDesk.</span>
+              </div>
             </div>
-            <p>I dati sul cast sono dichiarativi: verifica le informazioni prima della pubblicazione.</p>
-          </div>
+            <div className="store-publication-metadata">
+              <div className="store-publication-metadata-title">Metadati catalogo</div>
+              <div className="store-publication-metadata-grid">
+                <label>Diritti<select value={metadata.rightsCode} onChange={(event) => setMetadata((current) => ({ ...current, rightsCode: event.target.value }))} disabled={busy}>
+                  <option value="unknown">Da verificare</option>
+                  <option value="original">Opera originale</option>
+                  <option value="public-domain">Pubblico dominio</option>
+                  <option value="creative-commons">Creative Commons</option>
+                  <option value="siae">SIAE / diritti gestiti</option>
+                  <option value="licensed">Licenza specifica</option>
+                </select></label>
+                <label>Titolare o fonte<input value={metadata.rightsHolder} onChange={(event) => setMetadata((current) => ({ ...current, rightsHolder: event.target.value }))} placeholder="Autore, editore o archivio" disabled={busy} /></label>
+                <label>Licenza o fonte URL<input type="url" value={metadata.licenseUrl} onChange={(event) => setMetadata((current) => ({ ...current, licenseUrl: event.target.value }))} placeholder="https://..." disabled={busy} /></label>
+                <label className="store-publication-field-half">Ambientazione<input value={metadata.setting} onChange={(event) => setMetadata((current) => ({ ...current, setting: event.target.value }))} placeholder="Es. interno domestico" disabled={busy} /></label>
+                <label className="store-publication-field-half">Composizione cast<input value={metadata.castBreakdown} onChange={(event) => setMetadata((current) => ({ ...current, castBreakdown: event.target.value }))} placeholder="Es. 3 donne, 2 uomini" disabled={busy} /></label>
+                <label>Fasce d'età<input value={metadata.ageBreakdown} onChange={(event) => setMetadata((current) => ({ ...current, ageBreakdown: event.target.value }))} placeholder="Es. adulti, giovani" disabled={busy} /></label>
+              </div>
+              <p>I dati sul cast sono dichiarativi: verifica le informazioni prima della pubblicazione.</p>
+            </div>
+          </section>
+          <section
+            id="store-publication-notes-panel"
+            className="store-publication-panel store-publication-notes-panel"
+            role="tabpanel"
+            aria-label="Note di versione"
+            hidden={activeTab !== 'notes'}
+          >
+            <label className="store-publication-notes">
+              Note di versione
+              <textarea
+                value={releaseNotes}
+                onChange={(event) => setReleaseNotes(event.target.value)}
+                placeholder="Descrivi brevemente le modifiche di questa versione (facoltativo)."
+                rows={7}
+                disabled={busy}
+              />
+            </label>
+            <p className="store-publication-notes-help">Le note saranno associate alla versione pubblicata e visibili nella scheda del copione.</p>
+          </section>
         </div>
         <footer className="store-publication-actions">
           <button
@@ -6647,6 +6804,8 @@ type StoreProduction = {
   user_id: string
   title: string
   description: string
+  performance_date?: string | null
+  venue?: string | null
   poster_url: string
   video_url: string
   created_at: string
@@ -6697,7 +6856,7 @@ function StoreInfoTab({
     sceneNumber: '',
     details: '',
   })
-  const [production, setProduction] = useState({ title: '', description: '', posterUrl: '', videoUrl: '', rightsAcknowledged: false })
+  const [production, setProduction] = useState({ title: '', description: '', performanceDate: '', venue: '', posterUrl: '', videoUrl: '', rightsAcknowledged: false })
   const [communityLoading, setCommunityLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [status, setStatus] = useState('')
@@ -6722,7 +6881,7 @@ function StoreInfoTab({
         .limit(100),
       supabase
         .from('store_script_productions')
-        .select('id, user_id, title, description, poster_url, video_url, created_at')
+        .select('id, user_id, title, description, performance_date, venue, poster_url, video_url, created_at')
         .eq('script_id', info.scriptId)
         .order('created_at', { ascending: false })
         .limit(50),
@@ -6848,17 +7007,19 @@ function StoreInfoTab({
           user_id: userId,
           title: production.title.trim(),
           description: production.description.trim(),
+          performance_date: production.performanceDate || null,
+          venue: production.venue.trim(),
           poster_url: production.posterUrl.trim(),
           video_url: production.videoUrl.trim(),
           rights_acknowledged: true,
           rights_acknowledged_at: new Date().toISOString(),
           rights_notice: 'L’utente dichiara di avere verificato autorizzazioni e diritti necessari alla messa in scena.',
         })
-        .select('id, user_id, title, description, poster_url, video_url, created_at')
+        .select('id, user_id, title, description, performance_date, venue, poster_url, video_url, created_at')
         .single()
       if (error) throw error
       setProductions((current) => [data as StoreProduction, ...current])
-      setProduction({ title: '', description: '', posterUrl: '', videoUrl: '', rightsAcknowledged: false })
+      setProduction({ title: '', description: '', performanceDate: '', venue: '', posterUrl: '', videoUrl: '', rightsAcknowledged: false })
       setStatus('Rappresentazione aggiunta al copione.')
     } catch (error) {
       setStatus(`Rappresentazione non salvata: ${publishErrorMessage(error)}`)
@@ -6892,6 +7053,8 @@ function StoreInfoTab({
       user_id: 'demo',
       title: 'Laboratorio di prova',
       description: 'Esempio di scheda per una rappresentazione del copione.',
+      performance_date: '2026-06-15',
+      venue: 'Teatro Comunale, Bologna',
       poster_url: '',
       video_url: '',
       created_at: '2026-06-15T00:00:00.000Z',
@@ -6985,7 +7148,7 @@ function StoreInfoTab({
             ['comments', <MessageSquare key="comments-icon" size={15} />, 'Commenti'],
             ['ratings', <Star key="ratings-icon" size={15} />, 'Valutazione'],
             ['productions', <Theater key="productions-icon" size={15} />, 'Rappresentazioni'],
-            ['reports', <AlertTriangle key="reports-icon" size={15} />, 'Segnala un problema'],
+            ['reports', <AlertTriangle key="reports-icon" size={15} />, 'Segnalazioni'],
           ] as const).map(([key, icon, label]) => (
             <button key={key} type="button" className={activeSection === key ? 'is-active' : ''} onClick={() => setActiveSection(key)} aria-current={activeSection === key ? 'page' : undefined}>
               {icon}<span>{label}</span>
@@ -7030,11 +7193,13 @@ function StoreInfoTab({
             <section className="store-info-panel store-info-production-panel">
               <div className="store-info-panel-heading"><Theater size={17} /><h2>Rappresentazioni</h2></div>
               <p className="store-info-panel-copy">Racconta agli altri utenti dove hai portato questo copione.</p>
-              <div className="store-info-production-list">{visibleProductions.map((item) => <article className="store-info-production" key={item.id}><div className="store-info-social-row"><strong>{item.title || 'Rappresentazione'}</strong>{item.id.startsWith('demo-') ? <span className="store-info-demo-label">Esempio</span> : null}</div><p>{item.description}</p><div>{item.poster_url ? <a href={item.poster_url} target="_blank" rel="noreferrer">Locandina</a> : null}{item.video_url ? <a href={item.video_url} target="_blank" rel="noreferrer">Video</a> : null}</div></article>)}</div>
+              <div className="store-info-production-list">{visibleProductions.map((item) => <article className="store-info-production" key={item.id}><div className="store-info-social-row"><strong>{item.title || 'Rappresentazione'}</strong>{item.id.startsWith('demo-') ? <span className="store-info-demo-label">Esempio</span> : null}</div>{item.performance_date || item.venue ? <p className="store-info-production-meta">{item.performance_date ? formattedDate(item.performance_date) : null}{item.performance_date && item.venue ? <span aria-hidden="true"> · </span> : null}{item.venue || null}</p> : null}<p>{item.description}</p><div>{item.poster_url ? <a href={item.poster_url} target="_blank" rel="noreferrer">Locandina</a> : null}{item.video_url ? <a href={item.video_url} target="_blank" rel="noreferrer">Video</a> : null}</div></article>)}</div>
               <div className="store-info-form-block">
                 <div className="store-info-field-grid">
                   <label className="store-info-field store-info-field-wide">Titolo della rappresentazione<input value={production.title} onChange={(event) => setProduction((current) => ({ ...current, title: event.target.value }))} /></label>
                   <label className="store-info-field store-info-field-wide">Racconto<textarea value={production.description} onChange={(event) => setProduction((current) => ({ ...current, description: event.target.value }))} rows={3} /></label>
+                  <label className="store-info-field">Data della rappresentazione<input type="date" value={production.performanceDate} onChange={(event) => setProduction((current) => ({ ...current, performanceDate: event.target.value }))} /></label>
+                  <label className="store-info-field">Teatro o spazio<input value={production.venue} onChange={(event) => setProduction((current) => ({ ...current, venue: event.target.value }))} placeholder="Es. Teatro Comunale, Bologna" /></label>
                   <label className="store-info-field">Link locandina<input type="url" value={production.posterUrl} onChange={(event) => setProduction((current) => ({ ...current, posterUrl: event.target.value }))} placeholder="https://..." /></label>
                   <label className="store-info-field">Link video<input type="url" value={production.videoUrl} onChange={(event) => setProduction((current) => ({ ...current, videoUrl: event.target.value }))} placeholder="https://..." /></label>
                 </div>
@@ -7052,8 +7217,18 @@ function StoreInfoTab({
               <div className="store-info-panel-heading"><AlertTriangle size={17} /><h2>Segnala un problema</h2></div>
               <p className="store-info-panel-copy">Aiuta a migliorare il testo importato indicando il punto preciso.</p>
               <div className="store-info-report-list">{visibleReports.map((item) => <article className="store-info-report" key={item.id}><div className="store-info-social-row"><strong>{item.category === 'dialogue-error' ? 'Errore in una battuta' : 'Inesattezza di scena o personaggio'}</strong>{item.demo ? <span className="store-info-demo-label">Esempio</span> : null}</div><p>{item.details || item.original_text || 'Segnalazione ricevuta.'}</p>{item.dialogue_number || item.character_name ? <small>{item.dialogue_number ? `Battuta ${item.dialogue_number}` : ''}{item.dialogue_number && item.character_name ? ' · ' : ''}{item.character_name}</small> : null}</article>)}</div>
-              <div className="store-info-form-block">
-                <label className="store-info-field">Tipo di segnalazione<select value={reportKind} onChange={(event) => setReportKind(event.target.value as typeof reportKind)}><option value="dialogue-error">Errore in una battuta</option><option value="inaccuracy">Inesattezza di scena o personaggio</option></select></label>
+              <div className="store-info-form-block store-info-report-form">
+                <div className="store-info-report-kind">
+                  <label className="store-info-field" htmlFor="store-report-kind">Tipo di segnalazione</label>
+                  <div className="store-info-select-control">
+                    <select id="store-report-kind" value={reportKind} onChange={(event) => setReportKind(event.target.value as typeof reportKind)}>
+                      <option value="dialogue-error">Errore in una battuta</option>
+                      <option value="inaccuracy">Inesattezza di scena o personaggio</option>
+                    </select>
+                    <ChevronDown aria-hidden="true" size={16} />
+                  </div>
+                  <p>{reportKind === 'dialogue-error' ? 'Indica il testo importato e la correzione proposta.' : 'Indica il punto del copione e descrivi l’inesattezza rilevata.'}</p>
+                </div>
                 {reportKind === 'dialogue-error' ? (
                   <div className="store-info-field-grid">
                     <label className="store-info-field">N. battuta<input value={report.dialogueNumber} onChange={(event) => updateReport('dialogueNumber', event.target.value)} inputMode="numeric" /></label>

@@ -33,6 +33,8 @@ create table if not exists public.store_script_productions (
   user_id uuid not null references auth.users(id) on delete cascade,
   title text not null default '',
   description text not null default '',
+  performance_date date,
+  venue text not null default '',
   poster_url text not null default '',
   video_url text not null default '',
   created_at timestamptz not null default now(),

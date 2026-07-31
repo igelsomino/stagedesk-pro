@@ -2,7 +2,7 @@
 
 Applicazione desktop/web per scrittura, organizzazione e messa in scena di copioni teatrali con note di regia, cue multimediali, raccolta media, modalità schermo intero ed export PDF.
 
-Versione desktop corrente: **1.0.47**.
+Versione desktop corrente: **1.0.48**.
 
 ## Scopo
 
@@ -281,8 +281,8 @@ StageDesk tratta i metadati di diritti come informazioni esplicite del catalogo:
 
 Prima della pubblicazione viene calcolato l'hash SHA-256 del pacchetto `.stagedesk`. L'hash registrato sulla versione pubblicata è una prova tecnica di integrità ed esistenza del file in quel flusso; non è una marcatura temporale qualificata e non sostituisce il deposito o gli adempimenti SIAE.
 
-Dal menu **Export** è disponibile **Borderò (CSV)**. Il file contiene, nell'ordine del copione, atti, scene, battute e cue audio/musicali con titolo, sorgente, durata e note disponibili. È una bozza operativa da controllare e completare prima dell'eventuale uso per il Programma Musicale o il borderò ufficiale: SIAE richiede l'elenco delle opere effettivamente eseguite e la relativa compilazione secondo le proprie procedure ([Borderò SIAE](https://www.siae.it/it/utilizzatori/bordero/), [mioBorderò SIAE](https://www.siae.it/it/webview-appmiobordero/)).
+Dal menu **Export** è disponibile **Borderò (CSV)**. Il file esporta esclusivamente i cue di tipo **Musica**, nell'ordine del copione, con atto, scena, titolo, sorgente, durata e stato di autoplay. Le battute, le note, gli effetti sonori e gli altri media non fanno parte del registro. Le colonne per autore, compositore, editore e codice opera restano intenzionalmente da completare: questi dati non possono essere dedotti con affidabilità dal nome del file audio. Il CSV è una bozza operativa per preparare la setlist; il Programma Musicale ufficiale va completato e inviato tramite mioBorderò secondo le procedure SIAE ([Borderò SIAE](https://www.siae.it/it/utilizzatori/bordero/), [mioBorderò SIAE](https://www.siae.it/it/webview-appmiobordero/)).
 
 Quando un utente registra una rappresentazione nella scheda Social del copione, deve confermare di avere verificato autorizzazioni e diritti di messa in scena. Il consenso è registrato insieme alla segnalazione e non costituisce un'autorizzazione: l'utente resta responsabile delle verifiche necessarie presso l'autore, l'editore o gli organismi competenti.
 
-Per applicare i nuovi campi eseguire `docs/supabase-store-rights-bordero.sql` dopo le migrazioni Store già indicate in precedenza.
+Per applicare i nuovi campi eseguire `docs/supabase-store-rights-bordero.sql` e `docs/supabase-store-production-details.sql` dopo le migrazioni Store già indicate in precedenza.

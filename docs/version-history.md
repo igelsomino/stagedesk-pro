@@ -2,22 +2,21 @@
 
 ## Prossima versione
 
-> Diritti più trasparenti, prova tecnica delle pubblicazioni e prima bozza di supporto al borderò.
-
-- Aggiunta l'esportazione **Borderò (CSV)** con l'ordine del copione, le battute e i cue audio/musicali. Il file è una bozza da verificare prima dell'uso ufficiale.
-- Aggiunti nei metadati Store i campi per diritti, titolarità, licenza, ambientazione e composizione del cast per genere o fascia d'età.
-- Registrato, per le versioni pubblicate, l'hash SHA-256 del pacchetto `.stagedesk` come evidenza tecnica di integrità.
-- Aggiunta la conferma esplicita dei diritti di messa in scena quando si registra una rappresentazione nella scheda Social.
-- Documentati i limiti della prova tecnica e la distinzione tra strumenti StageDesk e adempimenti ufficiali SIAE.
+> Nessuna modifica pianificata oltre la manutenzione ordinaria.
 
 ## Versione 1.0.48
 
-> Dialog di pubblicazione più compatta e filtri Store più leggibili.
+> Store, scheda Social e borderò più coerenti con il lavoro di compagnia.
 
 - Ridisegnata la dialog di pubblicazione nello Store con dimensioni, tipografia e spaziature coerenti anche su finestre ridotte o con zoom elevato.
 - Resi visibili e leggibili tutti i metadati catalogo della pubblicazione, organizzati in una griglia responsive.
 - Aggiornata la griglia dei filtri dello Store per evitare che i nuovi criteri risultino compressi o non riconoscibili.
 - Aggiornato il versionamento delle risorse web per evitare il caricamento di CSS e JavaScript obsoleti dalla cache.
+- Aggiunta l'esportazione **Borderò (CSV)** orientata ai soli cue musicali: conserva il contesto di atto e scena e lascia espliciti i campi editoriali da completare prima del flusso ufficiale SIAE.
+- Aggiunti nei metadati Store i campi per diritti, titolarità, licenza, ambientazione, composizione del cast e fasce d'età; per ogni pacchetto pubblicato viene registrato l'hash SHA-256 come evidenza tecnica di integrità.
+- Estesa la scheda Social con data e luogo della rappresentazione, commenti, valutazioni e segnalazioni; le relative form sono state rese più compatte e leggibili.
+- La scheda informativa del copione importato recupera dal catalogo copertina, autore, sinossi e metadati aggiornati, senza restare bloccata sui valori locali provvisori.
+- Salvati per ogni tab del copione documento, selezione, posizione e campo attivo, per rendere più affidabile il passaggio tra file aperti.
 
 ## Versione 1.0.47
 
