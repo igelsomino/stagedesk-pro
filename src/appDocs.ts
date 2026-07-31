@@ -72,6 +72,17 @@ const readmeFallback = compactAppDocumentMarkdown(`# Aiuto
 
 const versionHistoryFallback = compactAppDocumentMarkdown(`# Novità
 
+## Versione 1.0.47
+
+> Copioni lunghi più reattivi, importazione classici più controllata e documentazione pubblica aggiornata.
+
+- La ricerca nel file carica progressivamente le occorrenze, così l'elenco resta utilizzabile anche nei copioni grandi.
+- Il rendering differito dei blocchi fuori viewport riduce il lavoro del browser senza rimuovere contenuti dal documento.
+- Importazione e passaggio tra tab mostrano uno stato di caricamento durante l'elaborazione dei file lunghi.
+- L'importatore riconosce meglio alias, gruppi di personaggi, titoli di scena con punteggiatura e didascalie.
+- L'export PDF usa spessori coerenti per note, citazioni, cue e tabelle.
+- La documentazione pubblica include il [Manifesto del copione aperto](https://github.com/igelsomino/stagedesk-pro/wiki/Manifesto-del-copione-aperto).
+
 ## Versione 1.0.46
 
 > Stabilità dell’editor, importazione dei copioni e qualità dell’export.

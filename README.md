@@ -2,7 +2,7 @@
 
 Applicazione desktop/web per scrittura, organizzazione e messa in scena di copioni teatrali con note di regia, cue multimediali, raccolta media, modalità schermo intero ed export PDF.
 
-Versione desktop corrente: **1.0.46**.
+Versione desktop corrente: **1.0.47**.
 
 ## Scopo
 
@@ -79,6 +79,11 @@ Implementato:
 46. autenticazione OAuth di StageDesk Share avviata fuori dagli iframe incorporati, evitando pagine di accesso bloccate o lasciate in caricamento;
 47. controlli pausa e stop dei cue audio/musicali centrati in modo uniforme nel chip editor;
 48. contorno continuo delle note, inclusa la barra laterale colorata, senza interruzioni sui margini superiore e inferiore;
+49. indice di ricerca dell'editor caricato progressivamente, con risultati a pagine per contenere memoria e lavoro di layout;
+50. rendering differito dei blocchi fuori viewport nei copioni lunghi, mantenendo il documento completo e modificabile;
+51. stato di caricamento durante l'importazione e il passaggio tra tab, con importatore più rigoroso per copioni classici e scene con titoli puntati;
+52. importazione dei personaggi con alias e gruppi controllati, evitando che didascalie, intestazioni o numeri editoriali diventino battute;
+53. controlli PDF uniformi per note, citazioni, cue e tabelle, con bordi e spessori coerenti tra prima pagina e pagine successive;
 
 ## Sviluppo
 
@@ -132,6 +137,8 @@ Artefatti attesi:
 La workflow `.github/workflows/release.yml` genera release e metadata updater quando viene pubblicato un tag `v*`.
 
 Procedura operativa completa: `docs/RELEASE.md`.
+
+La documentazione pubblica comprende anche il [Manifesto del copione aperto](https://github.com/igelsomino/stagedesk-pro/wiki/Manifesto-del-copione-aperto), dedicato a interoperabilità, accessibilità, feedback della community e tutela del diritto d'autore.
 
 ## Aggiornamenti
 

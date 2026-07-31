@@ -133,6 +133,7 @@ const EDITOR_DRAFT_SYNC_HUGE_DELAY_MS = 1800
 const EDITOR_DOCUMENT_UI_SYNC_DELAY_MS = 650
 const EDITOR_DOCUMENT_UI_SYNC_LARGE_DELAY_MS = 1100
 const EDITOR_DOCUMENT_UI_SYNC_HUGE_DELAY_MS = 1800
+const EDITOR_SEARCH_PAGE_SIZE = 32
 const POINTER_MEDIA_TARGET_CLASS = 'drop-target'
 const STOP_PREVIEW_PLAYBACK_EVENT = 'stagedesk-stop-preview-playback'
 const STOP_EDITOR_PLAYBACK_EVENT = 'stagedesk-stop-editor-playback'
@@ -567,6 +568,7 @@ function App() {
   const [search, setSearch] = useState('')
   const [editorSearchQuery, setEditorSearchQuery] = useState('')
   const [editorSearchMatchIndex, setEditorSearchMatchIndex] = useState(0)
+  const [editorSearchPage, setEditorSearchPage] = useState(1)
   const [isFullscreen, setFullscreen] = useState(false)
   const [fullscreenIndex, setFullscreenIndex] = useState(0)
   const [fullscreenBlocks, setFullscreenBlocks] = useState<PerformanceBlock[]>([])
@@ -1898,11 +1900,20 @@ function App() {
       }
     })
   }, [deferredEditorSearchQuery, editorSearchMatches])
+  const visibleEditorSearchResults = useMemo(
+    () => editorSearchResults.slice(0, editorSearchPage * EDITOR_SEARCH_PAGE_SIZE),
+    [editorSearchPage, editorSearchResults],
+  )
 
   useEffect(() => {
     setEditorSearchQuery('')
     setEditorSearchMatchIndex(0)
+    setEditorSearchPage(1)
   }, [activePath])
+
+  useEffect(() => {
+    setEditorSearchPage(1)
+  }, [editorSearchQuery])
 
   useEffect(() => {
     if (leftTab !== 'search') return undefined
@@ -2553,17 +2564,6 @@ function App() {
     setExecutedCueIds([])
   }
 
-  const openStoreInfoTab = (info: StoreScriptInfo) => {
-    const infoPath = `${STORE_INFO_TAB_PREFIX}${encodeURIComponent(info.scriptId)}`
-    setStoreScriptInfo((current) => ({ ...current, [info.scriptId]: info }))
-    const nextTabs = openTabsRef.current.includes(infoPath) ? openTabsRef.current : [...openTabsRef.current, infoPath]
-    openTabsRef.current = nextTabs
-    activePathRef.current = infoPath
-    setOpenTabs(nextTabs)
-    setActivePath(infoPath)
-    persistUiStateNow()
-  }
-
   const loadStoreScriptInfo = async (scriptId: string) => {
     if (!scriptId || storeScriptInfo[scriptId] || storeScriptInfoLoading[scriptId]) return
     setStoreScriptInfoLoading((current) => ({ ...current, [scriptId]: true }))
@@ -2829,7 +2829,16 @@ function App() {
         } catch {
           // The rating action remains available for the current session.
         }
-        openStoreInfoTab(importedInfo)
+        const infoPath = `${STORE_INFO_TAB_PREFIX}${encodeURIComponent(importedInfo.scriptId)}`
+        const importedTabs = [filePath, infoPath]
+        openTabsRef.current = importedTabs
+        activePathRef.current = filePath
+        selectedScriptPathRef.current = filePath
+        setOpenTabs(importedTabs)
+        setActivePath(filePath)
+        setSelectedScriptPath(filePath)
+        setScriptTabLoading(true)
+        persistUiStateNow()
       } else {
         setStoreRatingTarget(undefined)
         try {
@@ -3139,6 +3148,9 @@ function App() {
     openTabsRef.current = nextTabs
     activePathRef.current = nextActivePath
     selectedScriptPathRef.current = nextSelectedScriptPath
+    if (nextActivePath && !isNonMarkdownTabPath(nextActivePath) && nextActivePath !== path) {
+      setScriptTabLoading(true)
+    }
     setOpenTabs(nextTabs)
     setActivePath(nextActivePath)
     setSelectedScriptPath(nextSelectedScriptPath)
@@ -4037,6 +4049,7 @@ function App() {
     const match = editorSearchMatches[index]
     if (!match) return
     setEditorSearchMatchIndex(index)
+    setEditorSearchPage((current) => Math.max(current, Math.ceil((index + 1) / EDITOR_SEARCH_PAGE_SIZE)))
 
     const highlightMatchInDom = () => {
       if (!editor || !match.target) return
@@ -5041,9 +5054,9 @@ function App() {
                   <span className="structure-search-empty">Nessun risultato</span>
                 ) : null}
               </div>
-              {editorSearchResults.length > 0 ? (
+              {visibleEditorSearchResults.length > 0 ? (
                 <div className="structure-search-results" aria-label="Occorrenze trovate">
-                  {editorSearchResults.map((result, index) => (
+                  {visibleEditorSearchResults.map((result, index) => (
                     <button
                       key={`${result.match.from}-${result.match.to}-${index}`}
                       type="button"
@@ -5061,6 +5074,15 @@ function App() {
                       </span>
                     </button>
                   ))}
+                  {visibleEditorSearchResults.length < editorSearchResults.length ? (
+                    <button
+                      type="button"
+                      className="structure-search-load-more"
+                      onClick={() => setEditorSearchPage((current) => current + 1)}
+                    >
+                      Carica altri risultati ({editorSearchResults.length - visibleEditorSearchResults.length})
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
               {!editorSearchQuery.trim() ? (
@@ -5100,8 +5122,10 @@ function App() {
                       key={path}
                       className={path === activePath ? fileTabClass(tabFile, true, isNonMarkdownTabPath(path)) : fileTabClass(tabFile, false, isNonMarkdownTabPath(path))}
                       onClick={() => {
+                        const previousPath = activePathRef.current
                         activePathRef.current = path
                         if (isShareTab) setShareTabLoading(true)
+                        if (!isNonMarkdownTabPath(path) && path !== previousPath) setScriptTabLoading(true)
                         if (!isNonMarkdownTabPath(path)) selectedScriptPathRef.current = path
                         setActivePath(path)
                         if (!isNonMarkdownTabPath(path)) setSelectedScriptPath(path)
@@ -11663,6 +11687,7 @@ const drawPdfNoteBox = (
   const boxHeight = (padding * 2) + (titleLines.length * titleLineHeight) + contentGap + (contentLines.length * contentLineHeight)
   y = ensurePdfSpace(doc, y, pageBottom, marginTop, boxHeight)
   doc.setDrawColor(148, 163, 184)
+  doc.setLineWidth(0.8)
   doc.setFillColor(248, 250, 252)
   doc.rect(x, y, width, boxHeight, 'FD')
   doc.setFont('helvetica', 'bold')
@@ -11704,6 +11729,7 @@ const drawPdfQuoteBox = (
   y = ensurePdfSpace(doc, y, pageBottom, marginTop, boxHeight)
 
   doc.setDrawColor(209, 213, 219)
+  doc.setLineWidth(0.8)
   doc.setFillColor(249, 250, 251)
   doc.rect(x, y, width, boxHeight, 'FD')
   doc.setFillColor(233, 84, 32)
@@ -11734,6 +11760,7 @@ const drawPdfCueBox = (
   const lines = doc.splitTextToSize(block.content || 'Cue multimediale', width - (padding * 2)) as string[]
   const boxHeight = padding + titleHeight + Math.max(lines.length, 1) * 14 + padding
   y = ensurePdfSpace(doc, y, pageBottom, marginTop, boxHeight)
+  doc.setLineWidth(0.8)
   doc.setDrawColor(96, 165, 250)
   doc.setFillColor(239, 246, 255)
   doc.rect(x, y, width, boxHeight, 'FD')
@@ -11822,6 +11849,7 @@ const drawPdfTable = (
     for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
       const cellX = x + (columnIndex * columnWidth)
       doc.setDrawColor(203, 213, 225)
+      doc.setLineWidth(0.8)
       doc.setFillColor(rowIndex === 0 ? 241 : 255, rowIndex === 0 ? 245 : 255, rowIndex === 0 ? 249 : 255)
       doc.rect(cellX, y, columnWidth, rowHeight, 'FD')
       doc.setFont('helvetica', rowIndex === 0 ? 'bold' : 'normal')

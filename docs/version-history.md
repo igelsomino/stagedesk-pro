@@ -1,5 +1,17 @@
 # Novità
 
+## Versione 1.0.47
+
+> Copioni lunghi più reattivi, importazione classici più controllata e documentazione pubblica aggiornata.
+
+- Aggiunta la paginazione progressiva dei risultati di **Cerca nel file**, evitando di montare l'intero elenco quando una ricerca produce molte occorrenze.
+- Introdotto il rendering differito dei blocchi editor fuori viewport per ridurre il lavoro di layout e il consumo di memoria nei documenti grandi.
+- Aggiunto uno stato di caricamento durante importazione e passaggio tra tab, così l'elaborazione di un copione lungo non appare come un blocco dell'interfaccia.
+- Rafforzato l'importatore dei copioni classici: titoli di scena con punteggiatura, alias dei personaggi, gruppi vocali e didascalie vengono normalizzati senza trasformare intestazioni o numeri editoriali in battute.
+- Uniformati gli spessori dei bordi nell'export PDF di note, citazioni, cue e tabelle per evitare differenze tra la prima pagina e le successive.
+- Allineati i controlli grafici dei caroselli del sito e il selettore della struttura di StageDesk Share.
+- Aggiornata la documentazione del repository e collegata la wiki al [Manifesto del copione aperto](https://github.com/igelsomino/stagedesk-pro/wiki/Manifesto-del-copione-aperto), che descrive lo standard digitale e l'archivio pubblico della drammaturgia.
+
 ## Versione 1.0.46
 
 > Stabilità dell’editor, importazione dei copioni e qualità dell’export.

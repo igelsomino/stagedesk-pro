@@ -1539,6 +1539,22 @@ html.stagedesk-native-dragging .pointer-drag-preview:not(.native-drag-image) {
   color: var(--text-normal);
 }
 
+.structure-search-load-more {
+  width: 100%;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: 7px 8px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.structure-search-load-more:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
 .structure-search-hint {
   margin: 0;
   color: var(--text-muted);
@@ -2591,6 +2607,16 @@ html.stagedesk-native-dragging .pointer-drag-preview:not(.native-drag-image) {
   font-size: 1rem;
   line-height: 1.72;
   counter-reset: stagedesk-dialogue;
+}
+
+/* Keep the complete ProseMirror document available for editing and autosave,
+   but let the browser defer layout and paint for blocks outside the viewport. */
+.script-editor > .script-dialogue-block,
+.script-editor > .script-note-block,
+.script-editor > blockquote,
+.script-editor > table {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 96px;
 }
 
 .script-editor > * {
